@@ -67,18 +67,22 @@ const element = (document: Document, id: string): HTMLElement => {
 export const makeWorldMap = (document: Document) => {
   const root = element(document, "hud-map"), here = element(document, "hud-map-here")
   const window = document.defaultView!
-  const canvas = document.createElement("canvas")
-  root.prepend(canvas)
-  const ctx = canvas.getContext("2d")
+  // The player marker has its own canvas over the map, so CSS can blink it (hud.css) without repainting.
+  const canvas = document.createElement("canvas"), marker = document.createElement("canvas")
+  marker.className = "marker"
+  root.prepend(canvas, marker)
+  const ctx = canvas.getContext("2d"), mark = marker.getContext("2d")
   let player = { x: Number.NaN, y: Number.NaN, angle: 0 }
 
   const paint = () => {
-    if (ctx === null) return
+    if (ctx === null || mark === null) return
     const width = window.innerWidth, height = window.innerHeight, dpr = window.devicePixelRatio
-    canvas.width = Math.round(width * dpr)
-    canvas.height = Math.round(height * dpr)
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
-    ctx.clearRect(0, 0, width, height)
+    for (const [c, g] of [[canvas, ctx], [marker, mark]] as const) {
+      c.width = Math.round(width * dpr)
+      c.height = Math.round(height * dpr)
+      g.setTransform(dpr, 0, 0, dpr, 0, 0)
+      g.clearRect(0, 0, width, height)
+    }
     const { bounds } = MAP
     const fit = fitMap(bounds, width, height)
     const px = (x: number) => fit.ox + (x - bounds.minX) * fit.scale, py = (y: number) => fit.oy + (bounds.maxY - y) * fit.scale
@@ -137,21 +141,19 @@ export const makeWorldMap = (document: Document) => {
     ctx.textAlign = "left"
     ctx.fillText("1 km", bx + bar + 8, by - 5)
 
-    // The player, last so nothing covers it, in red: no label is red, so it never melts into a village name.
+    // The player, on the blinking canvas above everything, in red: no label is red, so it never melts into a village name.
     if (Number.isFinite(player.x)) {
-      ctx.save()
-      ctx.translate(Math.round(px(player.x)), Math.round(py(player.y)))
-      ctx.beginPath()
-      ctx.arc(0, 0, 13, 0, 2 * Math.PI)
-      ctx.lineWidth = 5
-      ctx.strokeStyle = css(PALETTE.outline)
-      ctx.stroke()
-      ctx.lineWidth = 2
-      ctx.strokeStyle = css(PALETTE.signalRed)
-      ctx.stroke()
-      ctx.rotate(-player.angle)
-      paintArrow(ctx, 18, PALETTE.signalRed)
-      ctx.restore()
+      mark.translate(Math.round(px(player.x)), Math.round(py(player.y)))
+      mark.beginPath()
+      mark.arc(0, 0, 13, 0, 2 * Math.PI)
+      mark.lineWidth = 5
+      mark.strokeStyle = css(PALETTE.outline)
+      mark.stroke()
+      mark.lineWidth = 2
+      mark.strokeStyle = css(PALETTE.signalRed)
+      mark.stroke()
+      mark.rotate(-player.angle)
+      paintArrow(mark, 18, PALETTE.signalRed)
     }
   }
   const onResize = () => paint()

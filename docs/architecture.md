@@ -200,7 +200,8 @@ the `PlayerView` inspector (`src/sim/views.ts`) and the map:
   light and at least 1.5–2 px wide so the network reads. It names the OSM villages (big, placed
   first) and hamlets (`place=*` POIs, localities left out); a label that would overlap another or
   the north arrow is dropped with its dot. The player is a red arrow in a red ring (no label is
-  red), with a 1 km bar and the player's district in the header. It is repainted on open, on
+  red), drawn on its own canvas over the map so CSS blinks it (steady under
+  `prefers-reduced-motion`), with a 1 km bar and the player's district in the header. It is repainted on open, on
   resize, and when the pixel ratio changes. The dialog takes focus when it opens, so screen
   readers announce its title and the district.
 - While the full map is open the host pauses the game: the FixedLoop keeps running, but
