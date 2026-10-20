@@ -31,9 +31,8 @@ export interface HeardVehicle {
   readonly angle: number
   readonly vx: number
   readonly vy: number
-  /** This step's controls: throttle in [-1, 1], handbrake. */
+  /** This step's throttle, in [-1, 1]. */
   readonly throttle: number
-  readonly handbrake: boolean
   /** Someone is at the wheel (AI traffic or the player), so the engine runs. */
   readonly running: boolean
   /** The player is at the wheel. */
@@ -79,7 +78,7 @@ export type Happening =
   }
 
 /** The ears: the player, on foot or in `car`. */
-export interface HeardListener {
+interface HeardListener {
   readonly x: number
   readonly y: number
   readonly vx: number
@@ -184,6 +183,9 @@ export interface VoiceIo {
   readonly kit: Kit
 }
 
+/** What a one-shot plays through: a voice's io without the Doppler signal (a shot's emitter is placed once). */
+export type ShotIo = Omit<VoiceIo, "cents">
+
 /** Builds a voice's nodes (once per held key); the first `update` follows immediately. */
 export type VoiceFactory<P> = (io: VoiceIo) => Voice<P>
 
@@ -192,7 +194,7 @@ export interface Shot<P> {
   /** Renders buffers ahead (OfflineAudioContext), once per context; a play before it resolves may be silent. */
   readonly prepare?: (ctx: BaseAudioContext, kit: Kit) => Promise<void>
   /** Schedules the sound at context time `when` into `io.out`; returns the context time it ends. */
-  readonly play: (io: Omit<VoiceIo, "cents">, params: P, when: number) => number
+  readonly play: (io: ShotIo, params: P, when: number) => number
 }
 
 /** A synth for every continuous kind. */

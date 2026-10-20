@@ -8,8 +8,8 @@
  * @module audio/synth/nature
  */
 import { bufferOf, loop, smoothstep } from "../buffers.ts"
-import type { Continuous, Kit, OneShot, Shot, VoiceFactory } from "../types.ts"
-import { bake, burst, jitter, jitterDb, normalise, outlet, perContext, ping, playBuffer, retire, type ShotIo, unit } from "./graph.ts"
+import type { Continuous, Kit, OneShot, Shot, ShotIo, VoiceFactory } from "../types.ts"
+import { bake, burst, fadeOut, jitter, jitterDb, normalise, outlet, perContext, ping, playBuffer, trimmed, unit } from "./graph.ts"
 import { type Vocal, vocalise } from "./voices.ts"
 
 /** Smoothing of wind changes, s: altitude and exposure change slowly, and the gusts carry the motion. */
@@ -50,7 +50,7 @@ export const wind: VoiceFactory<Extract<Continuous, { readonly kind: "wind" }>> 
       // The first update lands at once (the outlet fades the voice in); later ones glide.
       tau = WIND_TAU
     },
-    stop: (now) => retire(level, [gust, brown, white, crackle], now)
+    stop: (now) => fadeOut(level, [gust, brown, white, crackle], now)
   }
 }
 
@@ -100,7 +100,7 @@ export const crickets: VoiceFactory<Extract<Continuous, { readonly kind: "cricke
         }
       }
     },
-    stop: (now) => retire(level, singers.flatMap((singer) => [singer.carrier, singer.syllables]), now)
+    stop: (now) => fadeOut(level, singers.flatMap((singer) => [singer.carrier, singer.syllables]), now)
   }
 }
 
@@ -213,7 +213,7 @@ const strike = (oc: OfflineAudioContext, kit: Kit, prime: number): void => {
 }
 
 const bells = perContext(async (ctx, kit) => {
-  const sounds = await Promise.all(PRIMES.map((prime) => bake(ctx, RING, (oc) => strike(oc, kit, prime))))
+  const sounds = await Promise.all(PRIMES.map((prime) => bake(ctx.sampleRate, RING, (oc) => strike(oc, kit, prime)).then(trimmed)))
   normalise(sounds, 0.5)
   return sounds.map((samples) => bufferOf(ctx, samples))
 })

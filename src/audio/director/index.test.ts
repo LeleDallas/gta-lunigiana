@@ -65,7 +65,7 @@ const rig = (clock: () => WallClock = () => ({ hour: 10, minute: 10, second: 0 }
 }
 
 const car = (id: number, model: VehicleModel, at: { readonly x: number; readonly y: number }, more: Partial<HeardVehicle> = {}): HeardVehicle => ({
-  id, model, x: at.x, y: at.y, angle: 0, vx: 0, vy: 0, throttle: 0, handbrake: false, running: true, mine: false, ...more
+  id, model, x: at.x, y: at.y, angle: 0, vx: 0, vy: 0, throttle: 0, running: true, mine: false, ...more
 })
 const person = (id: number, at: { readonly x: number; readonly y: number }, more: Partial<HeardPerson> = {}): HeardPerson => ({
   id, x: at.x, y: at.y, vx: 0, vy: 0, player: false, fleeing: false, down: false, ...more

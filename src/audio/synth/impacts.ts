@@ -15,10 +15,10 @@
  * @module audio/synth/impacts
  */
 import { VEHICLE_MODELS, type VehicleModel } from "../../sim/vehicles.ts"
-import { loop } from "../buffers.ts"
+import { bufferOf, loop } from "../buffers.ts"
 import type { Continuous, Kit, OneShot, Shot, VoiceFactory } from "../types.ts"
 import { engine, ENGINES } from "./engine.ts"
-import { fadeOut, glide, normalise, pick, playBuffer, renderOffline, rendered, strike } from "./patch.ts"
+import { bake, fadeOut, glide, jitter, normalise, perContext, pick, playBuffer, strike } from "./graph.ts"
 
 /** Free-free bar mode ratios: the panels' inharmonic ring. */
 const BAR = [1, 2.756, 5.404, 8.933] as const
@@ -34,6 +34,12 @@ export const crashLaw = (speed: number, mass: number): { readonly tier: number; 
   rate: Math.min(1.15, Math.max(0.8, Math.max(0.05, mass) ** -0.12))
 })
 
+/** A baked sound for `ctx`, scaled to peak at `peak`. */
+const peaking = (ctx: BaseAudioContext, peak: number) => (samples: Float32Array<ArrayBuffer>): AudioBuffer => {
+  normalise([samples], peak)
+  return bufferOf(ctx, samples)
+}
+
 /** A noise source (fresh offset per render) through a filter, ready to strike. */
 const filtered = (ctx: BaseAudioContext, buffer: AudioBuffer, options: BiquadFilterOptions): AudioNode => loop(ctx, buffer).connect(new BiquadFilterNode(ctx, options))
 
@@ -46,7 +52,7 @@ const sweep = (ctx: BaseAudioContext, from: number, to: number, seconds: number)
   return osc
 }
 
-const renderCrash = (rate: number, kit: Kit, heavy: number) => renderOffline(rate, 0.6 + heavy * 1.2, (ctx) => {
+const renderCrash = (rate: number, kit: Kit, heavy: number) => bake(rate, 0.6 + heavy * 1.2, (ctx) => {
   const out = ctx.destination
   strike(ctx, sweep(ctx, 90, 38, 0.12), out, 0, 0.9, 0.06)
   strike(ctx, filtered(ctx, kit.brown, { type: "lowpass", frequency: 250 }), out, 0, 0.8, 0.05)
@@ -57,7 +63,7 @@ const renderCrash = (rate: number, kit: Kit, heavy: number) => renderOffline(rat
     strike(ctx, filtered(ctx, kit.white, { type: "bandpass", frequency: 1400 + 1200 * heavy, Q: 0.9 }), out, 0.005, 0.6 * heavy, 0.04 + 0.09 * heavy)
     const f0 = 140 + Math.random() * 160
     BAR.forEach((ratio, i) => {
-      const panel = new OscillatorNode(ctx, { frequency: f0 * ratio * (0.98 + 0.04 * Math.random()) })
+      const panel = new OscillatorNode(ctx, { frequency: f0 * ratio * jitter(0.02) })
       panel.start()
       strike(ctx, panel, out, 0.004, [0.3, 0.2, 0.12, 0.07][i]! * heavy, [0.22, 0.15, 0.1, 0.06][i]! * (0.5 + heavy))
     })
@@ -69,8 +75,8 @@ const renderCrash = (rate: number, kit: Kit, heavy: number) => renderOffline(rat
   }
 })
 
-const crashes = rendered((ctx, kit) => Promise.all(TIERS.map((heavy) => Promise.all(
-  Array.from({ length: VARIANTS }, () => renderCrash(ctx.sampleRate, kit, heavy).then((b) => normalise(b, 0.5)))
+const crashes = perContext((ctx, kit) => Promise.all(TIERS.map((heavy) => Promise.all(
+  Array.from({ length: VARIANTS }, () => renderCrash(ctx.sampleRate, kit, heavy).then(peaking(ctx, 0.5)))
 ))))
 
 /** A vehicle hitting a wall, another vehicle or a parked car. */
@@ -80,25 +86,25 @@ export const crash: Shot<Extract<OneShot, { readonly kind: "crash" }>> = {
     const tiers = crashes.get(io.ctx)
     if (!tiers) return when
     const law = crashLaw(sound.speed, sound.mass)
-    return playBuffer(io, pick(tiers[law.tier]!), law.gain, law.rate * (0.94 + 0.12 * Math.random()), when)
+    return playBuffer(io, pick(tiers[law.tier]!), when, law.rate * jitter(0.06), law.gain)
   }
 }
 
-const renderThud = (rate: number, kit: Kit) => renderOffline(rate, 0.4, (ctx) => {
+const renderThud = (rate: number, kit: Kit) => bake(rate, 0.4, (ctx) => {
   const out = ctx.destination
   strike(ctx, sweep(ctx, 120, 60, 0.08), out, 0, 0.9, 0.04)
   strike(ctx, filtered(ctx, kit.brown, { type: "lowpass", frequency: 400 }), out, 0, 0.7, 0.025)
   strike(ctx, filtered(ctx, kit.white, { type: "bandpass", frequency: 2000, Q: 1.5 }), out, 0.004, 0.15, 0.008)
 })
 
-const thuds = rendered((ctx, kit) => Promise.all(Array.from({ length: VARIANTS }, () => renderThud(ctx.sampleRate, kit).then((b) => normalise(b, 0.5)))))
+const thuds = perContext((ctx, kit) => Promise.all(Array.from({ length: VARIANTS }, () => renderThud(ctx.sampleRate, kit).then(peaking(ctx, 0.5)))))
 
 /** A body hit by a vehicle: full level from 12 m/s. */
 export const thud: Shot<Extract<OneShot, { readonly kind: "thud" }>> = {
   prepare: thuds.prepare,
   play: (io, sound, when) => {
     const variants = thuds.get(io.ctx)
-    return variants ? playBuffer(io, pick(variants), Math.max(0.15, Math.min(1, sound.speed / 12)), 0.9 + 0.2 * Math.random(), when) : when
+    return variants ? playBuffer(io, pick(variants), when, jitter(0.1), Math.max(0.15, Math.min(1, sound.speed / 12))) : when
   }
 }
 
@@ -120,7 +126,7 @@ const DOORS = {
   carabinieri: { thump: 70, rings: [], rattle: 0 }
 } as const satisfies Record<VehicleModel, DoorSpec>
 
-const renderDoor = (rate: number, kit: Kit, spec: DoorSpec, open: boolean) => renderOffline(rate, open ? 0.25 : 0.45, (ctx) => {
+const renderDoor = (rate: number, kit: Kit, spec: DoorSpec, open: boolean) => bake(rate, open ? 0.25 : 0.45, (ctx) => {
   const out = ctx.destination
   const click = (t: number, frequency: number, peak: number) => strike(ctx, filtered(ctx, kit.white, { type: "bandpass", frequency, Q: 2 }), out, t, peak, 0.0015)
   if (open) {
@@ -143,8 +149,8 @@ const renderDoor = (rate: number, kit: Kit, spec: DoorSpec, open: boolean) => re
   if (spec.rattle > 0) strike(ctx, filtered(ctx, kit.white, { type: "bandpass", frequency: 1500, Q: 5 }), out, 0.005, spec.rattle, 0.02)
 })
 
-const doors = rendered(async (ctx, kit) => {
-  const variants = (model: VehicleModel, open: boolean) => Promise.all([0, 1].map(() => renderDoor(ctx.sampleRate, kit, DOORS[model], open).then((b) => normalise(b, open ? 0.3 : 0.5))))
+const doors = perContext(async (ctx, kit) => {
+  const variants = (model: VehicleModel, open: boolean) => Promise.all([0, 1].map(() => renderDoor(ctx.sampleRate, kit, DOORS[model], open).then(peaking(ctx, open ? 0.3 : 0.5))))
   const sets = await Promise.all(VEHICLE_MODELS.map(async (model) => [model, { open: await variants(model, true), close: await variants(model, false) }] as const))
   return new Map(sets)
 })
@@ -154,7 +160,7 @@ export const door: Shot<Extract<OneShot, { readonly kind: "door" }>> = {
   prepare: doors.prepare,
   play: (io, sound, when) => {
     const set = doors.get(io.ctx)?.get(sound.model)
-    return set ? playBuffer(io, pick(sound.open ? set.open : set.close), 1, 0.96 + 0.08 * Math.random(), when) : when
+    return set ? playBuffer(io, pick(sound.open ? set.open : set.close), when, jitter(0.04)) : when
   }
 }
 
@@ -174,7 +180,7 @@ const STARTER = 0.15
 /** How long the catch is heard before the running engine voice carries on, s. */
 const CATCH = 0.9
 
-const renderIgnition = (rate: number, kit: Kit, model: VehicleModel) => renderOffline(rate, CRANK[model].seconds + CATCH, (ctx) => {
+const renderIgnition = (rate: number, kit: Kit, model: VehicleModel) => bake(rate, CRANK[model].seconds + CATCH, (ctx) => {
   const out = ctx.destination, crank = CRANK[model], spec = ENGINES[model]
   const starter = new GainNode(ctx, { gain: 0 })
   starter.gain.setValueAtTime(0, 0)
@@ -205,8 +211,8 @@ const renderIgnition = (rate: number, kit: Kit, model: VehicleModel) => renderOf
   }
 })
 
-const ignitions = rendered(async (ctx, kit) => new Map(await Promise.all(
-  VEHICLE_MODELS.map(async (model) => [model, normalise(await renderIgnition(ctx.sampleRate, kit, model), 0.4)] as const)
+const ignitions = perContext(async (ctx, kit) => new Map(await Promise.all(
+  VEHICLE_MODELS.map(async (model) => [model, peaking(ctx, 0.4)(await renderIgnition(ctx.sampleRate, kit, model))] as const)
 )))
 
 /** The starter until the engine catches (`CRANK` seconds), then the catch fading under the running engine. */
@@ -214,7 +220,7 @@ export const ignition: Shot<Extract<OneShot, { readonly kind: "ignition" }>> = {
   prepare: ignitions.prepare,
   play: (io, sound, when) => {
     const buffer = ignitions.get(io.ctx)?.get(sound.model)
-    return buffer ? playBuffer(io, buffer, 1, 1, when) : when
+    return buffer ? playBuffer(io, buffer, when) : when
   }
 }
 

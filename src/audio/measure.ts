@@ -7,7 +7,7 @@
 import { SILENCE_DB } from "./mixer.ts"
 
 /** What a render measures. */
-export interface Measure {
+interface Measure {
   /** The largest finite |sample|. */
   readonly peak: number
   /** RMS over every channel, dBFS (`SILENCE_DB` when silent). */

@@ -7,7 +7,7 @@
  */
 import type { Kit } from "./types.ts"
 
-export type Colour = "white" | "pink" | "brown"
+type Colour = "white" | "pink" | "brown"
 
 /** `n` samples of `colour` noise, about ±1 peak, looping without a click. */
 export const noiseSamples = (colour: Colour, n: number, sampleRate: number, random: () => number = Math.random): Float32Array<ArrayBuffer> => {

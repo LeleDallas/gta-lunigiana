@@ -11,8 +11,7 @@ import { EAR_HEIGHT } from "../acoustics.ts"
 import { surfaceAt } from "../places.ts"
 import { stepRate } from "../synth/steps.ts"
 import type { HeardPerson } from "../types.ts"
-import type { Frame } from "./frame.ts"
-import { groundAt } from "./hearing.ts"
+import { type Frame, groundAt } from "./frame.ts"
 import { HEIGHT, LEVELS, WALK_DB } from "./levels.ts"
 
 /** A frame's move longer than this (m) is a jump, not walking. */

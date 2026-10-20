@@ -8,7 +8,7 @@
  */
 import { bufferOf } from "../buffers.ts"
 import type { Kit, OneShot, Shot, Surface } from "../types.ts"
-import { bake, burst, jitter, jitterDb, normalise, perContext, pick, playBuffer, ping } from "./graph.ts"
+import { bake, burst, jitter, jitterDb, normalise, perContext, pick, ping, playBuffer, trimmed } from "./graph.ts"
 
 /** How a surface sounds underfoot (synthesis.md §7 starting points, levels TUNED by rendering). */
 interface Tread {
@@ -67,7 +67,7 @@ const keyOf = (surface: Surface, run: boolean): string => `${surface} ${run ? "r
 const baked = perContext(async (ctx, kit) => {
   const sets = SURFACES.flatMap((surface) => [false, true].map((run) => ({ surface, run })))
   const sounds = await Promise.all(sets.map(({ surface, run }) =>
-    Promise.all(Array.from({ length: VARIANTS }, () => bake(ctx, SLOT, (oc) => footfall(oc, kit, TREADS[surface], run))))))
+    Promise.all(Array.from({ length: VARIANTS }, () => bake(ctx.sampleRate, SLOT, (oc) => footfall(oc, kit, TREADS[surface], run)).then(trimmed)))))
   // One factor for all, so the surfaces keep their relative levels: a running step on stone peaks at 0.5.
   normalise(sounds.flat(), 0.5, sounds[sets.findIndex((set) => set.surface === "stone" && set.run)])
   return new Map(sets.map(({ surface, run }, i) => [keyOf(surface, run), sounds[i]!.map((samples) => bufferOf(ctx, samples))]))

@@ -13,7 +13,7 @@ import { makeMixer, SILENCE_DB, type Mixer } from "./mixer.ts"
 import type { Continuous, Kit, OneShot, Placement, Shot, Shots, Speaker, Voice, VoiceFactory, Voices } from "./types.ts"
 
 /** At most this many one-shots play (or wait to) at once. */
-export const MAX_SHOTS = 32
+const MAX_SHOTS = 32
 
 /**
  * The one-shot cap: below `cap` playing, a new sound of `gain` just plays (undefined); at the cap

@@ -61,7 +61,7 @@ const Hear = Game.System("Lunigiana/Hear", {
     if (!running && v.vx * v.vx + v.vy * v.vy <= STILL * STILL && v.spin === 0) return []
     return [{
       id: entity.id, model: data.vehicle.get().model, x: at.x, y: at.y, angle: at.angle, vx: v.vx, vy: v.vy,
-      throttle: input.throttle, handbrake: input.handbrake, running, mine
+      throttle: input.throttle, running, mine
     }]
   })
   const people = queries.people.each().map(({ entity, data }): HeardPerson => {

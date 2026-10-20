@@ -3,12 +3,11 @@
  * Spreading, the ground effect, foliage, the worst edge in the way and the listener's cabin set the
  * level at the ears; the masking rule fades and culls it against the ambient floor; air, the edge
  * and the cabin set the lowpass; the motion of both ends sets the Doppler shift; the street around
- * the listener and the distance set the reverb send.
+ * the listener and the distance set the reverb send. No map lookups here (the caller measures the
+ * ground and the obstacles), so the audition page hears through the same chain.
  *
  * @module audio/director/hearing
  */
-import { yOf, groundY } from "../../render/ground.ts"
-import { heightAt } from "../../sim/map/index.ts"
 import {
   airCutoff, audibility, type Cabin, dbToGain, delayOf, diffraction, doppler, foliageLoss, groundLoss, mixGain, panOf, spreading
 } from "../acoustics.ts"
@@ -28,6 +27,8 @@ export interface Path {
   /** dB(A) at 1 m at the synth's nominal peak, and the source's size, m. */
   readonly db: number
   readonly rMin: number
+  /** The path's mean height over the ground under it, m (ISO 9613-2's ground effect). */
+  readonly height: number
   /** How many dB the synth itself plays under its nominal peak with these params: counts for masking, not for the gain. */
   readonly quiet?: number
   /** Maekawa path difference over the worst edge in the way, m, and metres of forest on the way. */
@@ -57,17 +58,12 @@ export interface Hearing {
 /** Nothing reaches the listener. */
 export const SILENT: Hearing = { placement: { gain: 0, pan: 0, cutoff: 20000, cents: 0, wet: 0 }, level: -Infinity, audible: false, r: 0, delay: 0 }
 
-/** Elevation a.s.l. of what stands at (x, y): the terrain, a road, or the bridge deck nearest `near` (a previous elevation). */
-export const groundAt = (x: number, y: number, near?: number): number => groundY(x, y, near === undefined ? undefined : yOf(near)) - yOf(0)
-
 /** The acoustic chain of `path`. */
 export const hear = (path: Path): Hearing => {
   const { ears, source, cabin } = path
   const dx = source.x - ears.x, dy = source.y - ears.y, r = Math.hypot(dx, dy, source.z - ears.z)
-  // ISO 9613-2's mean path height: both ends over the terrain under them (a bridge deck lifts the path).
-  const height = Math.max(0, (ears.z - heightAt(ears.x, ears.y) + source.z - heightAt(source.x, source.y)) / 2)
   const edge = diffraction(path.delta)
-  const loss = spreading(r, path.rMin) + groundLoss(r, height) + foliageLoss(path.forest) + edge.loss + (cabin?.loss ?? 0)
+  const loss = spreading(r, path.rMin) + groundLoss(r, path.height) + foliageLoss(path.forest) + edge.loss + (cabin?.loss ?? 0)
   const level = path.db - (path.quiet ?? 0) - loss
   const fade = audibility(level, path.ambient)
   const wet = dbToGain(REVERB.open + REVERB.street * path.street) * Math.min(REVERB.far, Math.max(1, r / REVERB.near)) * (cabin === undefined ? 1 : REVERB.cabin)

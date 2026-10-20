@@ -141,7 +141,7 @@ const L_REF = 120, K = 0.6
  * The compressed level, dB, that plays at gain 1, a voice's nominal peak (0.5, about −6 dBFS):
  * a 116 dB(A) horn heard from 2 m (≈ 111.6). Louder sounds rely on the master limiter.
  */
-export const FULL_SCALE = L_REF + K * (116 - L_REF) - spreading(2, 1)
+const FULL_SCALE = L_REF + K * (116 - L_REF) - spreading(2, 1)
 
 /** Linear gain of a source of `sourceDb` dB(A) at 1 m after `lossDb` of propagation losses. */
 export const mixGain = (sourceDb: number, lossDb: number): number => 10 ** ((L_REF + K * (sourceDb - L_REF) - lossDb - FULL_SCALE) / 20)

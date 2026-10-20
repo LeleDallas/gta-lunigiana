@@ -13,7 +13,7 @@
 import { bufferOf, loop } from "../buffers.ts"
 import type { Continuous, VoiceFactory } from "../types.ts"
 import { type Bubbles, bubbleTexture } from "./bubbles.ts"
-import { normalise, outlet, retire, unit } from "./graph.ts"
+import { fadeOut, normalise, outlet, unit } from "./graph.ts"
 
 type Water = Extract<Continuous, { readonly kind: "water" }>
 type Body = Water["body"]
@@ -119,6 +119,6 @@ export const water: VoiceFactory<Water> = ({ ctx, out, cents, kit }) => {
       rumble.gain.setTargetAtTime(layers.rumble, now, tau)
       surgeDepth.gain.setTargetAtTime(mix.surge(flow), now, tau)
     },
-    stop: (now) => retire(level, [swell, pink, brown, ...(bubbles === undefined ? [] : [bubbles])], now)
+    stop: (now) => fadeOut(level, [swell, pink, brown, ...(bubbles === undefined ? [] : [bubbles])], now)
   }
 }

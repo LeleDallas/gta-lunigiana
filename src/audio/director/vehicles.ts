@@ -13,8 +13,8 @@ import { mixGain } from "../acoustics.ts"
 import { surfaceAt } from "../places.ts"
 import { CRANK } from "../synth/impacts.ts"
 import type { HeardVehicle } from "../types.ts"
-import type { Frame } from "./frame.ts"
-import { groundAt, type Hearing, type Source } from "./hearing.ts"
+import { type Frame, groundAt } from "./frame.ts"
+import type { Hearing, Source } from "./hearing.ts"
 import { ENGINE, HEIGHT, LEVELS, OWN_ENGINE_DB } from "./levels.ts"
 
 /** Tyres roll audibly above this speed, m/s; the beeper sounds below this forward speed. */

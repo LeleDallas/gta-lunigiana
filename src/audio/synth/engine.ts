@@ -16,12 +16,12 @@ import type { VehicleModel } from "../../sim/vehicles.ts"
 import { loop, tanhCurve } from "../buffers.ts"
 import { GEARBOXES, type GearOutput, type GearState, stepGearbox } from "../gearbox.ts"
 import type { Continuous, Voice, VoiceIo } from "../types.ts"
-import { builtOnFirst, fadeOut, glide } from "./patch.ts"
+import { builtOnFirst, fadeOut, glide } from "./graph.ts"
 
 type EngineSound = Extract<Continuous, { readonly kind: "engine" }>
 
 /** One engine's timbre (TUNED starting points from synthesis.md §2.2). */
-export interface EngineSpec {
+interface EngineSpec {
   /** Firing pulses per crank revolution: cylinders / 2 for a four-stroke, cylinders for a two-stroke. */
   readonly pulses: number
   /** The firing waveform: a sawtooth, or a pulse with this duty cycle. */
@@ -72,7 +72,7 @@ export const ENGINES = {
 export const CABIN = { lowpass: 2500, shelf: 4 } as const
 
 /** Where every param of an engine graph heads for one gearbox step. */
-export interface EngineTargets {
+interface EngineTargets {
   /** Firing frequency, Hz. */
   readonly hz: number
   readonly drive: number

@@ -9,7 +9,7 @@
  */
 import { loop, smoothstep } from "../buffers.ts"
 import type { Continuous, Surface, VoiceFactory } from "../types.ts"
-import { fadeOut, glide } from "./patch.ts"
+import { fadeOut, glide } from "./graph.ts"
 
 type TyreSound = Extract<Continuous, { readonly kind: "tyres" }>
 
@@ -48,7 +48,7 @@ const ROLL = 0.37, SQUEAL_GAIN = 6.75, CRUNCH = 1.15
 const LIGHT = 0.5
 
 /** Where every param of a tyre graph heads. */
-export interface TyreTargets {
+interface TyreTargets {
   readonly roll: number
   readonly rollHz: number
   /** Sett rumble rate, Hz, and depth (gain units). */

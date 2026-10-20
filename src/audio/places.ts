@@ -77,7 +77,7 @@ export const surfaceAt = (x: number, y: number): Surface => {
 }
 
 /** Shares 0…1 of the ground around a point: woods, open grass, scrub and fields, village (river beds and bare stone count as none). */
-export interface Ambience { readonly forest: number; readonly open: number; readonly built: number }
+interface Ambience { readonly forest: number; readonly open: number; readonly built: number }
 
 const AMBIENCE = {
   meadow: "open", forest: "forest", grassland: "open", scrub: "open", sparse: "open", scree: "none", rock: "none", quarry: "none",

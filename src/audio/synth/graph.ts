@@ -1,16 +1,16 @@
 /**
- * Web Audio building blocks the world synths share: noise bursts and damped pings, a voice's
- * output stage and its retirement, one-shot variants baked offline and cached per context, and
- * playing a baked buffer with a little random variation.
+ * Web Audio building blocks every synth shares: moving params, a voice built from its first params,
+ * a voice's output stage and its fade-out, struck sources, noise bursts and damped pings, one-shots
+ * baked offline and cached per context, and playing a baked buffer with a little random variation.
  *
  * Every function builds nodes only when called, so Node can import the synths.
  *
  * @module audio/synth/graph
  */
-import type { Kit, VoiceIo } from "../types.ts"
+import type { Kit, ShotIo, Voice, VoiceFactory, VoiceIo } from "../types.ts"
 
-/** Where a one-shot plays: a Shot's io. */
-export type ShotIo = Omit<VoiceIo, "cents">
+/** Time constant (s) for continuous params: about two frames, which removes zipper noise. */
+const TAU = 0.05
 
 /** A random element of `list`. */
 export const pick = <T>(list: ReadonlyArray<T>): T => list[Math.floor(Math.random() * list.length)]!
@@ -23,6 +23,46 @@ export const jitterDb = (db: number): number => 10 ** (((Math.random() * 2 - 1) 
 
 /** `x` clamped to 0…1; NaN is 0 (a non-finite AudioParam value throws, which would silence that kind for good). */
 export const unit = (x: number): number => Math.min(1, Math.max(0, x)) || 0
+
+/** Moves `param` to `value` at `now`: a jump on a voice's first update (no slide-in), a smooth chase after. */
+export const glide = (param: AudioParam, value: number, now: number, jump: boolean, tau = TAU): void => {
+  if (jump) param.setValueAtTime(value, now)
+  else param.setTargetAtTime(value, now, tau)
+}
+
+/** A voice whose nodes are built on its first update, from those params (a vehicle model fixes the graph). */
+export const builtOnFirst = <P>(build: (io: VoiceIo, first: P) => Voice<P>): VoiceFactory<P> => (io) => {
+  let voice: Voice<P> | undefined
+  return {
+    update: (params, now) => (voice ??= build(io, params)).update(params, now),
+    stop: (now) => voice?.stop(now)
+  }
+}
+
+/** A continuous voice's last node: fades in from silence into `out`; `fadeOut` ends it. */
+export const outlet = (ctx: BaseAudioContext, out: AudioNode): GainNode => {
+  const level = new GainNode(ctx, { gain: 0 })
+  level.gain.setTargetAtTime(1, ctx.currentTime, 0.1)
+  level.connect(out)
+  return level
+}
+
+/** Fades `output` to silence from `now` (gone within 6τ ≤ 0.3 s), stops `sources` then and detaches `output` once they end. */
+export const fadeOut = (output: GainNode, sources: ReadonlyArray<AudioScheduledSourceNode>, now: number, tau = TAU): void => {
+  output.gain.cancelScheduledValues(now)
+  output.gain.setTargetAtTime(0, now, tau)
+  for (const source of sources) source.stop(now + tau * 6)
+  sources[0]!.onended = () => output.disconnect()
+}
+
+/** Strikes `source` into `out` at `t`: up to `peak` in 3 ms, then an exponential decay with time constant `tau` s. */
+export const strike = (ctx: BaseAudioContext, source: AudioNode, out: AudioNode, t: number, peak: number, tau: number): void => {
+  const gain = new GainNode(ctx, { gain: 0 })
+  source.connect(gain).connect(out)
+  gain.gain.setValueAtTime(0, t)
+  gain.gain.linearRampToValueAtTime(peak, t + 0.003)
+  gain.gain.setTargetAtTime(0, t + 0.003, tau)
+}
 
 /** Band-passed `noise` at `t`: rises to `peak` in `attack` s, then decays with time constant `tau` s. */
 export const burst = (ctx: BaseAudioContext, noise: AudioBuffer, out: AudioNode, t: number, attack: number, tau: number, hz: number, q: number, peak: number): void => {
@@ -47,22 +87,6 @@ export const ping = (ctx: BaseAudioContext, out: AudioNode, t: number, hz: numbe
   tone.stop(t + seconds)
 }
 
-/** A continuous voice's last node: fades in from silence into `out`; `retire` fades it out. */
-export const outlet = (ctx: BaseAudioContext, out: AudioNode): GainNode => {
-  const level = new GainNode(ctx, { gain: 0 })
-  level.gain.setTargetAtTime(1, ctx.currentTime, 0.1)
-  level.connect(out)
-  return level
-}
-
-/** Ends a continuous voice: `level` fades out from `now`, then its `sources` stop and it leaves the emitter. */
-export const retire = (level: GainNode, sources: ReadonlyArray<AudioScheduledSourceNode>, now: number): void => {
-  level.gain.setTargetAtTime(0, now, 0.05)
-  const [first] = sources
-  if (first !== undefined) first.onended = () => level.disconnect()
-  for (const source of sources) source.stop(now + 0.3)
-}
-
 /** The largest absolute sample. */
 const peakOf = (samples: Float32Array): number => samples.reduce((peak, v) => Math.max(peak, Math.abs(v)), 0)
 
@@ -73,12 +97,16 @@ export const normalise = (sounds: ReadonlyArray<Float32Array>, peak: number, ref
   for (const samples of sounds) for (let i = 0; i < samples.length; i++) samples[i]! *= peak / loudest
 }
 
-/** Renders the mono sound `build` schedules from time 0, `seconds` long at `ctx`'s rate, offline; trailing silence (below −80 dB) is cut. */
-export const bake = async (ctx: BaseAudioContext, seconds: number, build: (oc: OfflineAudioContext) => void): Promise<Float32Array<ArrayBuffer>> => {
+/** Renders the mono sound `build` schedules from time 0, `seconds` long at `rate` Hz, offline. */
+export const bake = async (rate: number, seconds: number, build: (oc: OfflineAudioContext) => void): Promise<Float32Array<ArrayBuffer>> => {
   // One context per sound: every node runs for its context's whole length, so sharing one would cost count² time.
-  const oc = new OfflineAudioContext({ numberOfChannels: 1, length: Math.ceil(seconds * ctx.sampleRate), sampleRate: ctx.sampleRate })
+  const oc = new OfflineAudioContext({ numberOfChannels: 1, length: Math.ceil(rate * seconds), sampleRate: rate })
   build(oc)
-  const sound = (await oc.startRendering()).getChannelData(0)
+  return (await oc.startRendering()).getChannelData(0)
+}
+
+/** `sound` without its trailing silence (below −80 dB): a bake made long enough for its slowest variant. */
+export const trimmed = (sound: Float32Array<ArrayBuffer>): Float32Array<ArrayBuffer> => {
   let end = sound.length
   while (end > 1 && Math.abs(sound[end - 1]!) < 1e-4) end--
   return sound.slice(0, end)

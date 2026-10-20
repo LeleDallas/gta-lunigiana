@@ -1,11 +1,14 @@
 /**
  * One frame of the director, shared by its vehicle, people and world parts: the listener's ears
- * and surroundings, the way from any source to them (`path`, its obstacles cached per key), and
- * the frame's requests. One-shots play at once, loud ones with their echoes off the slopes;
- * continuous voices are offered (`hold`) and `commit` keeps the loudest of each kind up to its cap.
+ * and surroundings, where things stand (`groundAt`), the way from any source to them (`path`, with
+ * the ground under it and its obstacles, cached per key), and the frame's requests. One-shots play
+ * at once, loud ones with their echoes off the slopes; continuous voices are offered (`hold`) and
+ * `commit` keeps the loudest of each kind up to its cap.
  *
  * @module audio/director/frame
  */
+import { groundY, yOf } from "../../render/ground.ts"
+import { heightAt } from "../../sim/map/index.ts"
 import type { VehicleModel } from "../../sim/vehicles.ts"
 import { airCutoff, audibility, type Cabin, CABIN, dbToGain, SPEED_OF_SOUND, spreading } from "../acoustics.ts"
 import type { Echo } from "../places.ts"
@@ -15,7 +18,7 @@ import { CAPS, ECHO, echoes, KEEP_DB, LEVELS, type Level } from "./levels.ts"
 import type { Between, Occluder } from "./occluder.ts"
 
 /** How a path is heard: Doppler-shifted (vehicles), `share` of the listener's cabin in the way (1; 0.5 for their own horn), `quiet` dB under the nominal peak. */
-export interface Way { readonly doppler?: boolean; readonly share?: number; readonly quiet?: number }
+interface Way { readonly doppler?: boolean; readonly share?: number; readonly quiet?: number }
 
 /** What the director's parts see and do this frame. */
 export interface Frame {
@@ -59,6 +62,9 @@ export interface Setup {
   /** Filled by `hold`, for `commit`. */
   readonly offers: Array<Offer>
 }
+
+/** Elevation a.s.l. of what stands at (x, y): the terrain, a road, or the bridge deck nearest `near` (a previous elevation). */
+export const groundAt = (x: number, y: number, near?: number): number => groundY(x, y, near === undefined ? undefined : yOf(near)) - yOf(0)
 
 /** Nothing in the way (sounds of the listener's own car or body). */
 const CLEAR: Between = { delta: 0, forest: 0 }
@@ -108,8 +114,10 @@ export const makeFrame = (setup: Setup): Frame => {
       const r = Math.hypot(source.x - ears.x, source.y - ears.y, source.z - ears.z)
       if (audibility(level.db - (way.quiet ?? 0) - spreading(r, level.rMin) - (through?.loss ?? 0), ambient) === 0) return SILENT
       const between = key === undefined ? CLEAR : occluder.between(key, ears, source, now)
+      // ISO 9613-2's mean path height: both ends over the terrain under them (a bridge deck lifts the path).
+      const height = Math.max(0, (ears.z - heightAt(ears.x, ears.y) + source.z - heightAt(source.x, source.y)) / 2)
       return hear({
-        ears, source, db: level.db, rMin: level.rMin, quiet: way.quiet, delta: between.delta, forest: between.forest, ambient, street,
+        ears, source, db: level.db, rMin: level.rMin, height, quiet: way.quiet, delta: between.delta, forest: between.forest, ambient, street,
         cabin: through, doppler: way.doppler
       })
     },

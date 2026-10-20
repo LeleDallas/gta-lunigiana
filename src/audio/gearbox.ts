@@ -11,7 +11,8 @@
  */
 import type { VehicleModel } from "../sim/vehicles.ts"
 
-export interface Gearbox {
+/** One model's gears and revs. */
+interface Gearbox {
   /** Road speed per 1000 rpm in each gear, lowest first. */
   readonly kmhPer1000: ReadonlyArray<number>
   readonly idle: number
@@ -37,8 +38,6 @@ export interface GearOutput {
   readonly rpmN: number
   /** Engine load 0…1: the pedal along the motion; 0 while braking or shifting. */
   readonly load: number
-  /** The gear changed this step. */
-  readonly shifted: boolean
 }
 
 /** Per-model gear tables (game-tuned, not manufacturer ratios; synthesis.md §2.3). */
@@ -73,9 +72,8 @@ export const stepGearbox = (gearbox: Gearbox, state: GearState, speed: number, t
     while (state.gear < top && rpmIn(state.gear) > up) state.gear++
     while (state.gear > 0 && rpmIn(state.gear) < down && rpmIn(state.gear - 1) < up * 0.9) state.gear--
   }
-  const shifted = state.gear !== from
-  if (shifted) state.shiftLeft = gearbox.shiftS
+  if (state.gear !== from) state.shiftLeft = gearbox.shiftS
   const clutch = state.gear === 0 ? gearbox.idle + pedal * (gearbox.launch - gearbox.idle) : gearbox.idle
   const rpm = Math.min(gearbox.redline, Math.max(rpmIn(state.gear), clutch))
-  return { rpm, rpmN: (rpm - gearbox.idle) / (gearbox.redline - gearbox.idle), load: state.shiftLeft > 0 ? 0 : pedal, shifted }
+  return { rpm, rpmN: (rpm - gearbox.idle) / (gearbox.redline - gearbox.idle), load: state.shiftLeft > 0 ? 0 : pedal }
 }

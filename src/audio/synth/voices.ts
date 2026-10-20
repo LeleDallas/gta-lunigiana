@@ -6,8 +6,8 @@
  *
  * @module audio/synth/voices
  */
-import type { OneShot, Shot } from "../types.ts"
-import { jitter, type ShotIo, unit } from "./graph.ts"
+import type { OneShot, Shot, ShotIo } from "../types.ts"
+import { jitter, unit } from "./graph.ts"
 
 type Formants = readonly [number, number, number]
 

@@ -1,74 +1,65 @@
 /**
  * The audition page (lab.html; the dev server serves it, the production build leaves it out):
  * every synth on a button with its params on controls, played through the real emitter and
- * mixer from a distance and a side of the screen you pick, beside the level, gain, pan and
- * lowpass the acoustics give it there. "Render all" renders every voice and shot offline at a
- * few representative params and tabulates peak, RMS, spectral centroid and NaNs;
- * `window.lab.renderAll()` returns the same rows, for CDP checks.
- *
- * The placement is a stand-in for the director's hearing chain (spreading, air absorption, the
- * cabin, masking; no ground, foliage, occlusion or Doppler), and its levels are display defaults:
- * the director's levels table is the one the game plays.
+ * mixer from a distance and a side of the screen you pick, beside the level, gain, pan, lowpass
+ * and reverb send the director gives it there: its calibration (director/levels.ts) through its
+ * acoustic chain (director/hearing.ts), over open, flat ground with nothing in the way. "Render
+ * all" renders every voice and shot offline at a few representative params and tabulates peak,
+ * RMS, spectral centroid and NaNs; `window.lab.renderAll()` returns the same rows, for CDP checks.
  *
  * @module audio/lab
  */
 import { screenAxes } from "../sim/view.ts"
 import { VEHICLE_MODELS, type VehicleModel } from "../sim/vehicles.ts"
-import { airCutoff, AMBIENT_DB, audibility, CABIN, type Cabin, delayOf, gainToDb, mixGain, panOf, spreading } from "./acoustics.ts"
+import { AMBIENT_DB, CABIN, type Cabin, EAR_HEIGHT, gainToDb } from "./acoustics.ts"
 import { makeKit } from "./buffers.ts"
+import { hear, type Hearing } from "./director/hearing.ts"
+import { BEDS, ENGINE, type Level, LEVELS, OWN_ENGINE_DB, REVERB, WATER_R_MIN } from "./director/levels.ts"
 import { type Emitter, makeEmitter } from "./emitter.ts"
 import { measure } from "./measure.ts"
 import { makeMixer, type Mixer } from "./mixer.ts"
 import { VEHICLE_SHOTS, VEHICLE_VOICES } from "./synth/vehicles.ts"
 import { WORLD_SHOTS, WORLD_VOICES } from "./synth/world.ts"
-import type { Continuous, Kit, OneShot, Placement, Shot, Shots, Surface, Voice, VoiceFactory, Voices } from "./types.ts"
+import type { Continuous, Kit, OneShot, Shot, Shots, Surface, Voice, VoiceFactory, Voices } from "./types.ts"
 
 const VOICES = { ...VEHICLE_VOICES, ...WORLD_VOICES } satisfies Voices
 const SHOTS = { ...VEHICLE_SHOTS, ...WORLD_SHOTS } satisfies Shots
 
 type Sound = Continuous | OneShot
+type Body = Extract<Continuous, { readonly kind: "water" }>["body"]
 
 /** The screen axes on the ground, with the view in its home seat. */
 const { right: SCREEN_RIGHT, up: SCREEN_UP } = screenAxes(0)
 
-/** A kind's level at its synth's nominal peak: Lp at 1 m, dB(A), heard no closer than `rMin` m; a `bed` is that level at the listener, all around. */
-interface Level { readonly db: number; readonly rMin: number; readonly bed?: boolean }
+// ponytail: water as a point source at its bank level + 6 dB; the director takes each body's line-source level at the listener from places.
+const WATER_DB = { fountain: 65, stream: 70, river: 76 } as const satisfies Record<Body, number>
 
-/** Display defaults from the wave-2 brief (physics.md §8). */
-const ENGINE_LEVELS = {
-  panda: { db: 90, rMin: 2 }, ape: { db: 92, rMin: 2 }, truck: { db: 98, rMin: 4 }, carabinieri: { db: 93, rMin: 2.5 }
-} as const satisfies Record<VehicleModel, Level>
-/** The listener's own engine from the driver's seat: the voice makes the cabin tone, so no cabin loss. */
-const OWN_ENGINE: Level = { db: 82, rMin: 1, bed: true }
-// ponytail: water as a point source at its bank level + 6 dB; the director uses places' line-source levels (−3 dB per doubling).
-const WATER_LEVELS = { fountain: { db: 65, rMin: 1 }, stream: { db: 70, rMin: 1 }, river: { db: 76, rMin: 1 } } as const satisfies Record<Extract<Continuous, { readonly kind: "water" }>["body"], Level>
-const LEVELS = {
-  tyres: { db: 98, rMin: 2 }, scrape: { db: 105, rMin: 1 }, horn: { db: 116, rMin: 1 }, siren: { db: 117, rMin: 1 }, beeper: { db: 100, rMin: 1 },
-  wind: { db: 60, rMin: 1, bed: true }, crickets: { db: 42, rMin: 1, bed: true },
-  crash: { db: 115, rMin: 2 }, thud: { db: 85, rMin: 1 }, door: { db: 82, rMin: 1 }, ignition: { db: 85, rMin: 1 }, honk: { db: 116, rMin: 1 },
-  step: { db: 62, rMin: 0.5 }, scream: { db: 100, rMin: 1 }, shout: { db: 88, rMin: 1 }, groan: { db: 72, rMin: 1 },
-  bird: { db: 85, rMin: 1 }, bark: { db: 96, rMin: 1 }, bell: { db: 118, rMin: 5 }
-} as const satisfies Record<Exclude<Sound["kind"], "engine" | "water">, Level>
+/** A source's calibration; `wet` marks one heard at the ears, with the director's fixed reverb send. */
+type Calibration = Level & { readonly wet?: number }
 
-const levelOf = (sound: Sound): Level =>
-  sound.kind === "engine" ? (sound.inside ? OWN_ENGINE : ENGINE_LEVELS[sound.model]) : sound.kind === "water" ? WATER_LEVELS[sound.body] : LEVELS[sound.kind]
+/** `sound`'s calibration: the beds and the own engine (from the driver's seat, through no cabin) sound at the ears. */
+const sourceOf = (sound: Sound): Calibration =>
+  sound.kind === "engine" ? (sound.inside ? { db: OWN_ENGINE_DB, rMin: 1, wet: 0 } : ENGINE[sound.model])
+  : sound.kind === "water" ? { db: WATER_DB[sound.body], rMin: WATER_R_MIN }
+  : sound.kind === "wind" || sound.kind === "crickets" ? { db: BEDS[sound.kind], rMin: 1, wet: REVERB.bed }
+  : LEVELS[sound.kind]
 
-/** The listener's side of the page's controls: the source `r` m away towards `side` (−1 screen-left … 1 screen-right). */
-interface Where { readonly r: number; readonly side: number; readonly cabin: Cabin | undefined; readonly wet: number }
+/** The listener's side of the page's controls: the source `r` m away towards `side` (−1 screen-left … 1 screen-right), their cabin and street. */
+interface Where { readonly r: number; readonly side: number; readonly cabin: Cabin | undefined; readonly street: number }
 
-/** How `sound` reaches the listener: its placement, level there (dB(A)) and travel delay (only past 40 m, physics.md §6). */
-const hear = (sound: Sound, where: Where): { readonly at: Placement; readonly source: Level; readonly level: number; readonly delay: number } => {
-  const source = levelOf(sound), r = source.bed ? 1 : where.r, side = source.bed ? 0 : where.side
-  const cabin = source === OWN_ENGINE ? undefined : where.cabin
-  const loss = spreading(r, source.rMin) + (cabin?.loss ?? 0), level = source.db - loss
-  const ahead = Math.sqrt(1 - side * side)
-  const pan = panOf(r * (side * SCREEN_RIGHT.x + ahead * SCREEN_UP.x), r * (side * SCREEN_RIGHT.y + ahead * SCREEN_UP.y))
-  return {
-    at: { gain: mixGain(source.db, loss) * audibility(level, AMBIENT_DB), pan, cutoff: Math.min(airCutoff(r), cabin?.cutoff ?? 20000), cents: 0, wet: where.wet },
-    source,
-    level,
-    delay: r >= 40 ? delayOf(r) : 0
-  }
+/** Still ears over open, flat ground; sources stand at the same height, so `r` is the distance. */
+const EARS = { x: 0, y: 0, z: EAR_HEIGHT, vx: 0, vy: 0 } as const
+
+/** How `sound` reaches the listener at `where`, and its calibration. */
+const heard = (sound: Sound, where: Where): { readonly hearing: Hearing; readonly source: Calibration } => {
+  const source = sourceOf(sound), r = source.wet === undefined ? where.r : 0, ahead = Math.sqrt(1 - where.side * where.side)
+  const at = { x: r * (where.side * SCREEN_RIGHT.x + ahead * SCREEN_UP.x), y: r * (where.side * SCREEN_RIGHT.y + ahead * SCREEN_UP.y), z: EAR_HEIGHT }
+  const own = sound.kind === "engine" && sound.inside
+  const hearing = hear({
+    ears: EARS, source: at, db: source.db, rMin: source.rMin, height: EAR_HEIGHT, delta: 0, forest: 0, ambient: AMBIENT_DB, street: where.street,
+    cabin: own ? undefined : where.cabin
+  })
+  return { hearing: source.wet === undefined ? hearing : { ...hearing, placement: { ...hearing.placement, wet: source.wet } }, source }
 }
 
 const SURFACES = Object.keys({ asphalt: 0, stone: 0, gravel: 0, dirt: 0, grass: 0, leaves: 0 } satisfies Record<Surface, 0>)
@@ -307,13 +298,13 @@ const where = (): Where => {
   const value = (id: string) => Number(byId<HTMLInputElement>(id).value)
   const cabin = byId<HTMLSelectElement>("cabin").value
   // The slider is logarithmic: 0.5 m … 2 km.
-  return { r: 0.5 * 4000 ** (value("distance") / 1000), side: value("side"), cabin: cabin in CABIN ? CABIN[cabin as VehicleModel] : undefined, wet: value("wet") }
+  return { r: 0.5 * 4000 ** (value("distance") / 1000), side: value("side"), cabin: cabin in CABIN ? CABIN[cabin as VehicleModel] : undefined, street: value("street") }
 }
 
 const describe = (sound: Sound, at: Where): string => {
-  const { at: placement, source, level, delay } = hear(sound, at)
+  const { hearing: { placement, level, delay }, source } = heard(sound, at)
   const gain = placement.gain > 0 ? `gain ${gainToDb(placement.gain).toFixed(1)} dB` : "inaudible"
-  return `${source.db} dB(A)${source.bed ? " here" : " @1 m"} → ${level.toFixed(0)} dB(A) · ${gain} · pan ${placement.pan.toFixed(2)} · lowpass ${Math.round(placement.cutoff)} Hz${delay > 0 ? ` · delay ${Math.round(delay * 1000)} ms` : ""}`
+  return `${source.db} dB(A)${source.wet === undefined ? " @1 m" : " here"} → ${level.toFixed(0)} dB(A) · ${gain} · pan ${placement.pan.toFixed(2)} · lowpass ${Math.round(placement.cutoff)} Hz · send ${placement.wet.toFixed(2)}${delay > 0 ? ` · delay ${Math.round(delay * 1000)} ms` : ""}`
 }
 
 const build = (): void => {
@@ -330,7 +321,7 @@ const build = (): void => {
         return
       }
       // Silent at first: the next frame's placement fades it in.
-      const sound = read(), emitter = makeEmitter(audio.ctx, audio.mixer, { ...hear(sound, where()).at, gain: 0 })
+      const sound = read(), emitter = makeEmitter(audio.ctx, audio.mixer, { ...heard(sound, where()).hearing.placement, gain: 0 })
       holding.set(defaults.kind, { read, emitter, voice: voiceIn(audio, emitter, sound), model: modelOf(sound) })
       button.textContent = "Release"
     })
@@ -340,9 +331,9 @@ const build = (): void => {
       const audio = wake()
       // The first press waits for the shots' renders.
       void audio.ready.then(() => {
-        const { ctx, kit, mixer } = audio, sound = read(), heard = hear(sound, where())
-        const emitter = makeEmitter(ctx, mixer, heard.at)
-        emitter.free((SHOTS[sound.kind] as Shot<OneShot>).play({ ctx, out: emitter.input, kit }, sound, ctx.currentTime + heard.delay) + 0.1)
+        const { ctx, kit, mixer } = audio, sound = read(), { hearing } = heard(sound, where())
+        const emitter = makeEmitter(ctx, mixer, hearing.placement)
+        emitter.free((SHOTS[sound.kind] as Shot<OneShot>).play({ ctx, out: emitter.input, kit }, sound, ctx.currentTime + hearing.delay) + 0.1)
       })
     })
   }
@@ -369,10 +360,10 @@ const frame = (): void => {
         held.voice = voiceIn(live, held.emitter, sound)
         held.model = modelOf(sound)
       }
-      held.emitter.place(hear(sound, at).at, now)
+      held.emitter.place(heard(sound, at).hearing.placement, now)
       held.voice.update(sound, now)
     }
-    live.mixer.room({ street: Number(byId<HTMLInputElement>("street").value) }, now)
+    live.mixer.room({ street: at.street }, now)
     const level = live.mixer.level()
     byId<HTMLMeterElement>("meter").value = level
     byId("meter-shown").textContent = `${level.toFixed(1)} dBFS`

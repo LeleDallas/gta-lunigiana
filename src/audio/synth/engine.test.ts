@@ -3,7 +3,7 @@ import { test } from "node:test"
 
 import { CABIN, ENGINES, engineTargets } from "./engine.ts"
 
-const at = (rpm: number, rpmN: number, load: number) => ({ rpm, rpmN, load, shifted: false })
+const at = (rpm: number, rpmN: number, load: number) => ({ rpm, rpmN, load })
 const db = (a: number, b: number) => 20 * Math.log10(a / b)
 
 test("the firing frequency follows revs and firing pulses per revolution", () => {

@@ -13,7 +13,7 @@
  */
 import type { VehicleModel } from "../../sim/vehicles.ts"
 import type { Continuous, Kit, OneShot, Shot, VoiceFactory } from "../types.ts"
-import { builtOnFirst, fadeOut, glide } from "./patch.ts"
+import { builtOnFirst, fadeOut, glide } from "./graph.ts"
 
 /** One model's horn. */
 interface HornSpec {

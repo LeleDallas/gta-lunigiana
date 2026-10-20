@@ -28,17 +28,21 @@ test("a fresh box heard at speed settles in one step (as an engine voice does), 
       const state = { gear: 0, shiftLeft: 0 }
       stepGearbox(box, state, v, throttle, 0)
       state.shiftLeft = 0
-      for (let i = 0; i < 180; i++) assert.equal(stepGearbox(box, state, v, throttle, DT).shifted, false, `${model} at ${v} m/s, throttle ${throttle}`)
+      const settled = state.gear
+      for (let i = 0; i < 180; i++) {
+        stepGearbox(box, state, v, throttle, DT)
+        assert.equal(state.gear, settled, `${model} at ${v} m/s, throttle ${throttle}`)
+      }
     }
   }
 })
 
 test("standing still idles, the clutch slips under throttle and a shift cuts the load", () => {
   const box = GEARBOXES.panda, state = { gear: 0, shiftLeft: 0 }
-  assert.deepEqual(stepGearbox(box, state, 0, 0, DT), { rpm: 800, rpmN: 0, load: 0, shifted: false })
+  assert.deepEqual(stepGearbox(box, state, 0, 0, DT), { rpm: 800, rpmN: 0, load: 0 })
   assert.equal(stepGearbox(box, state, 0, 1, DT).rpm, box.launch)
-  const shift = stepGearbox(box, state, 8, 1, DT)
-  assert.ok(shift.shifted && shift.load === 0)
+  assert.equal(stepGearbox(box, state, 8, 1, DT).load, 0)
+  assert.equal(state.gear, 1, "shifted up")
   assert.equal(stepGearbox(box, state, 8, 1, box.shiftS / 2).load, 0)
   assert.equal(stepGearbox(box, state, 8, 1, box.shiftS).load, 1)
 })
