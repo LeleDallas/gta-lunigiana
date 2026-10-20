@@ -6,6 +6,7 @@
  *
  * @module audio/occlusion
  */
+import { pointInRing } from "../sim/collide.ts"
 import { buildingBoxes, buildingsIn, heightAt, MAP } from "../sim/map/index.ts"
 
 /** A point in the world frame: x east, y north (m), z elevation a.s.l. (m). */
@@ -14,11 +15,18 @@ export interface Point3 { readonly x: number; readonly y: number; readonly z: nu
 /** Terrain is sampled every `STEP` m, from `END` m after the start to `END` m before the end (the ground under an endpoint hides nothing). */
 const STEP = 7, END = 3
 
+/** Whether (x, y) is within building i's walls (not in a courtyard). */
+const within = (i: number, x: number, y: number): boolean => {
+  const [x0, y0, x1, y1] = buildingBoxes[i]!, { outer, holes } = MAP.buildings[i]!
+  return x >= x0 && x <= x1 && y >= y0 && y <= y1 && pointInRing(x, y, outer) && !(holes ?? []).some((hole) => pointInRing(x, y, hole))
+}
+
 /**
  * The largest Maekawa path difference δ = |ST| + |TR| − |SR| (m) over the edges T that rise above
  * the straight path from `from` to `to`: building walls crossed (exact ring-edge crossings) and
  * terrain samples every 7 m. 0 when the line of sight is clear. Endpoints carry their own height:
- * callers add `EAR_HEIGHT` or the source's height above the ground.
+ * callers add `EAR_HEIGHT` or the source's height above the ground. A building an endpoint stands
+ * in hides nothing from it: a bell at its tower's top rings out over its own walls.
  */
 export const pathDifference = (from: Point3, to: Point3): number => {
   const { x: sx, y: sy, z: sz } = from, dx = to.x - sx, dy = to.y - sy, dz = to.z - sz
@@ -56,7 +64,7 @@ export const pathDifference = (from: Point3, to: Point3): number => {
     t1 = 1
     if (!slab(dx, x0 - sx, x1 - sx) || !slab(dy, y0 - sy, y1 - sy)) return
     // The walls must rise above the path's lowest point over the box.
-    if (top <= sz + dz * (dz > 0 ? t0 : t1)) return
+    if (top <= sz + dz * (dz > 0 ? t0 : t1) || within(i, sx, sy) || within(i, to.x, to.y)) return
     ring(outer, top)
     for (const hole of holes ?? []) ring(hole, top)
   })

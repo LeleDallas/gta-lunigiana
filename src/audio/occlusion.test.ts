@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
 
-import { buildingsIn, heightAt } from "../sim/map/index.ts"
+import { buildingsIn, heightAt, MAP } from "../sim/map/index.ts"
 import { pathDifference } from "./occlusion.ts"
 
 /** A point `up` m above the ground at (x, y). */
@@ -14,6 +14,17 @@ test("an open, flat meadow hides nothing", () => {
 test("the 30 m church tower of Monzone Alto shadows the street behind it, but not from above its roof", () => {
   assert.ok(pathDifference(at(-20, -326), at(30, -326)) > 10)
   assert.equal(pathDifference(at(-20, -326, 200), at(30, -326, 200)), 0)
+})
+
+test("a bell at the top of the 30 m tower rings out over its own walls", () => {
+  const tower = MAP.buildings.reduce((a, b) => (b.h > a.h ? b : a))
+  const xs = tower.outer.filter((_, k) => k % 2 === 0), ys = tower.outer.filter((_, k) => k % 2 === 1)
+  const bell = { x: (Math.min(...xs) + Math.max(...xs)) / 2, y: (Math.min(...ys) + Math.max(...ys)) / 2, z: tower.z0 + tower.h }
+  for (let k = 0; k < 8; k++) {
+    const a = (k * Math.PI) / 4, below = { x: bell.x + 50 * Math.cos(a), y: bell.y + 50 * Math.sin(a), z: bell.z - 5 }
+    assert.equal(pathDifference(bell, below), 0, `towards ${45 * k}°`)
+    assert.equal(pathDifference(below, bell), 0, `from ${45 * k}°`)
+  }
 })
 
 test("Monte San Giorgio stands between its two flanks, with no building on the way", () => {

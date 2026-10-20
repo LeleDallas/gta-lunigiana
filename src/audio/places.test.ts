@@ -9,14 +9,16 @@ import { ambienceAt, bells, birdSpot, dogsNear, echoesAt, forestAlong, streetAt,
 const seeded = (seed: number) => () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 2 ** 32)
 const FOREST = { x: 500, y: -400 }, MEADOW = { x: -329, y: 1078 }, GRAGNOLA = { x: -1751.2, y: 3360.4 }, EQUI = { x: 1804.9, y: 721 }
 
-test("surfaces: an asphalt road's carriageway, the forest floor, a meadow", () => {
-  // Midway along the longest segment of an asphalt tertiary road, away from any junction.
-  const road = MAP.roads.find((r) => r.cls === "tertiary" && r.surface === "asphalt" && r.tunnel !== true && r.bridge !== true)!
-  let k = 0
-  for (let i = 0; i + 3 < road.pts.length; i += 2) {
-    if (Math.hypot(road.pts[i + 2]! - road.pts[i]!, road.pts[i + 3]! - road.pts[i + 1]!) > Math.hypot(road.pts[k + 2]! - road.pts[k]!, road.pts[k + 3]! - road.pts[k + 1]!)) k = i
+test("surfaces: road carriageways by their OSM surface, the forest floor, a meadow", () => {
+  // Midway along the longest segment of the first road of each surface, away from any junction.
+  const cases = [["tertiary", "asphalt", "asphalt"], ["path", "paving_stones", "stone"], ["track", "unpaved", "dirt"], ["track", "gravel", "gravel"]] as const
+  for (const [cls, surface, expected] of cases) {
+    const { pts } = MAP.roads.find((r) => r.cls === cls && r.surface === surface && r.tunnel !== true && r.bridge !== true)!
+    const length = (i: number) => Math.hypot(pts[i + 2]! - pts[i]!, pts[i + 3]! - pts[i + 1]!)
+    let k = 0
+    for (let i = 0; i + 3 < pts.length; i += 2) if (length(i) > length(k)) k = i
+    assert.equal(surfaceAt((pts[k]! + pts[k + 2]!) / 2, (pts[k + 1]! + pts[k + 3]!) / 2), expected, surface)
   }
-  assert.equal(surfaceAt((road.pts[k]! + road.pts[k + 2]!) / 2, (road.pts[k + 1]! + road.pts[k + 3]!) / 2), "asphalt")
   assert.equal(surfaceAt(FOREST.x, FOREST.y), "leaves")
   assert.equal(surfaceAt(MEADOW.x, MEADOW.y), "grass")
 })
