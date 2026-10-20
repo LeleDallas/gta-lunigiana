@@ -5,6 +5,8 @@ import { reverbBlend, rmsDb, SILENCE_DB } from "./mixer.ts"
 
 test("the reverb crossfade keeps power and clamps the room", () => {
   assert.deepEqual(reverbBlend(-1), { valley: 1, street: 0 })
+  // Regression: a NaN room made every flush throw.
+  assert.deepEqual(reverbBlend(Number.NaN), { valley: 1, street: 0 })
   assert.ok(Math.abs(reverbBlend(2).street - 1) < 1e-12)
   for (const street of [0.25, 0.5, 0.8]) {
     const { valley, street: alley } = reverbBlend(street)

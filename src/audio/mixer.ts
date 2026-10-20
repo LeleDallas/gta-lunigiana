@@ -39,9 +39,10 @@ const WET_DB = -12
 /** The reverb follows the listener's surroundings with this time constant, s (physics.md §7). */
 const ROOM_GLIDE = 0.5
 
-/** Equal-power crossfade weights: the valley reverb at `street` 0, the street reverb at 1. */
+/** Equal-power crossfade weights: the valley reverb at `street` 0 (or not a number), the street reverb at 1. */
 export const reverbBlend = (street: number): { readonly valley: number; readonly street: number } => {
-  const t = (Math.min(1, Math.max(0, street)) * Math.PI) / 2
+  // NaN would reach setTargetAtTime and throw on every flush.
+  const t = ((Math.min(1, Math.max(0, street)) || 0) * Math.PI) / 2
   return { valley: Math.cos(t), street: Math.sin(t) }
 }
 

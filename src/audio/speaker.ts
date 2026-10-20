@@ -78,10 +78,16 @@ export const makeSpeaker = (host: Window, voices: Voices, shots: Shots): Speaker
 
   const start = (): Live => {
     const ctx = new AudioContext()
-    const kit = makeKit(ctx), mixer = makeMixer(ctx)
-    // All at once; a throw inside `prepare` rejects like a failed render.
-    for (const [kind, shot] of Object.entries(shots)) Promise.resolve().then(() => shot.prepare?.(ctx, kit)).catch((error: unknown) => fail(kind, error))
-    return { ctx, kit, mixer }
+    try {
+      const kit = makeKit(ctx), mixer = makeMixer(ctx)
+      // All at once; a throw inside `prepare` rejects like a failed render.
+      for (const [kind, shot] of Object.entries(shots)) Promise.resolve().then(() => shot.prepare?.(ctx, kit)).catch((error: unknown) => fail(kind, error))
+      return { ctx, kit, mixer }
+    } catch (error) {
+      // A context left running would hold the audio device for the rest of the session.
+      void ctx.close()
+      throw error
+    }
   }
   const unlock = (event: Event) => {
     // Creating or resuming without user activation fails and makes Chrome warn; older browsers lack the flag.
@@ -155,14 +161,16 @@ export const makeSpeaker = (host: Window, voices: Voices, shots: Shots): Speaker
         victim.emitter.release(now)
         playing = playing.filter((shot) => shot !== victim)
       }
-      const emitter = makeEmitter(ctx, mixer, at)
+      let emitter: Emitter | undefined
       try {
+        // Inside the try: a non-finite placement throws here, and must not reach the game loop.
+        emitter = makeEmitter(ctx, mixer, at)
         const shot = shots[sound.kind] as Shot<OneShot>
         const end = shot.play({ ctx, out: emitter.input, kit }, sound, now + Math.max(0, delay))
         emitter.free(end + 0.1)
         playing.push({ gain: at.gain, end, emitter })
       } catch (error) {
-        emitter.free(now)
+        emitter?.free(now)
         fail(sound.kind, error)
       }
     },
