@@ -71,7 +71,7 @@ Interactive; "Grand Theft Auto" is their trademark.
 
 - Node 24. It runs the TypeScript tests and map tools directly, with no build step.
 - pnpm 10 (`packageManager` is pinned in `package.json`; `corepack enable` provides it).
-- A browser with WebGL.
+- A browser with WebGL, and Web Audio for the sound.
 
 ## Run
 
@@ -84,7 +84,9 @@ Open http://localhost:5173. Every load is a new world. Add `?seed=N` (for exampl
 `http://localhost:5173/?seed=42`) to replay the same world: the seed drives every random choice,
 so the same seed and the same keys give the same game.
 
-In dev mode, the backslash key toggles the Ritmo monitor.
+In dev mode, the backslash key toggles the Ritmo monitor, and http://localhost:5173/lab.html is
+the audio audition page: every sound on a button, its params on sliders, heard from a distance you
+pick (see [docs/audio.md](docs/audio.md#the-audition-page)).
 
 ## Controls
 
@@ -95,12 +97,24 @@ In dev mode, the backslash key toggles the Ritmo monitor.
 | F or Enter | enter the nearest vehicle (steal, enter or carjack) | get out |
 | Q / E | turn the view a quarter left / right | same |
 | Space | | handbrake |
+| H | | horn while held; in the Carabinieri car, siren on or off |
 | M | full map (pauses the game); M or Esc closes it | same |
 
 The bindings live in `bindings` in `src/sim/schema.ts`. The HUD shows the street and district you
 are in, cars stolen, people hit, the action the key would take, a speedometer while driving, and
 a minimap. M opens the full map: the whole area north-up with the villages, hamlets and main
 peaks named and your position marked.
+
+## Sound
+
+Every sound is synthesised in the browser with Web Audio, with no sample files: engines with a
+virtual gearbox, tyres on each surface, horns and the Carabinieri siren, crashes, footsteps,
+voices, wind, crickets, birds, farm dogs, the village church bells striking the hours, and the
+Lucido and its streams. Each sound reaches you through outdoor acoustics: it fades with distance
+and under the background noise, so you hear only what is near; houses and hills muffle it, the air
+dulls it, it shifts in pitch as it passes, far crashes arrive late, and loud ones echo off the
+slopes. The first key or click (the one that dismisses the title card) starts the sound. See
+[docs/audio.md](docs/audio.md).
 
 ## Scripts
 
@@ -125,12 +139,14 @@ peaks named and your position marked.
 | `src/sim/systems/` | one file per system group (spawn, enter/exit, foot, drive, traffic, pedestrians, physics, contacts, populate) |
 | `src/sim/map/` | the generated map (`monzone.json`), its types and lookups (heights, walls, road graph) |
 | `src/render/` | Three.js host code: pixel pipeline, static world meshes, actor meshes, the render schedule |
+| `src/audio/` | Web Audio host code: the audio schedule, the acoustics director, the speaker and mixer, the synths, the audition page |
 | `src/hud/` | DOM HUD: location names, score, prompt, speedometer, minimap, full map (M) |
 | `src/tools/` | the map pipeline (`build-map.ts`), the downloaders (`fetch-osm.ts`, `fetch-rt.ts`) and a top-down preview renderer |
 | `src/main.ts` | browser host: builds the scene, makes the runtime, runs the fixed loop |
 | `index.html` | canvas, HUD markup and title card |
+| `lab.html` | the audio audition page (dev server only) |
 | `data/raw/` | pinned map inputs: OSM extract, Regione Toscana CTR and LiDAR |
-| `docs/` | architecture, map pipeline and gameplay notes |
+| `docs/` | architecture, map pipeline, gameplay and audio notes |
 
 ## Rebuilding the map
 
@@ -193,6 +209,8 @@ valley study in [*ARQ*](https://arqarqt.revistas.csic.es/index.php/arqarqt/artic
 ## Documentation
 
 - [docs/architecture.md](docs/architecture.md): simulation and host, schedules, state, input,
-  rendering, HUD and checks.
+  rendering, audio, HUD and checks.
+- [docs/audio.md](docs/audio.md): how the game sounds and why: data flow, the acoustics, every
+  sound, the calibration, the audition page and tests.
 - [docs/map.md](docs/map.md): the map pipeline, the JSON format and the data's limits.
 - [docs/gameplay.md](docs/gameplay.md): on foot, vehicles, traffic, pedestrians, score and tuning.

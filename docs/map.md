@@ -321,8 +321,10 @@ the scale in hundredths. Decoding is exact: the same numbers a one-decimal JSON 
 Profiled roads and rail carry extra points where the elevation bends between OSM vertices (dips
 under the rail, crests). Graph edges run a → b in the OSM way direction, so a `oneway` road may
 only be driven from a to b. Game code reads the map through `src/sim/map/index.ts`: `MAP`,
-`graph`, `heightAt`, `wallsNear`, `districtAt`, `roadClassOf` and `buildingStyleOf`. It never
-reads the raw JSON.
+`graph`, `heightAt`, `wallsNear`, `districtAt`, `roadClassOf` and `buildingStyleOf`, plus two
+broad phases the sim and the audio host share: `buildingsIn` over the building boxes
+(`buildingBoxes`, indexed like `MAP.buildings`) and `treesIn` over the trees. It never reads the
+raw JSON.
 
 ## Checks and tools
 

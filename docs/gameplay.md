@@ -93,6 +93,13 @@ compile until it has stats here and a mesh in `src/render/actors.ts`.
 The camera zooms out with speed (6 texels/m in a car, 5 above 16 m/s). The HUD speedometer shows
 km/h.
 
+### Horn and siren
+
+H sounds the car's horn while held, from the driver's seat only: on foot it does nothing. In the
+Carabinieri Giulia each press of H turns the two-tone siren on or off instead; the siren stops when
+the player gets out. Neither has a gameplay effect: nobody gets out of the way. The `horn` binding
+is read only by the audio host ([audio.md](audio.md)).
+
 ## Traffic AI
 
 `TrafficAI` (`systems/traffic.ts`) drives the cars tagged `Traffic` on `graph.trafficEdges`, using
@@ -120,6 +127,9 @@ the lane helpers in `src/sim/route.ts`.
   on the carriageway or the verge pedestrians walk) counts four times slower: the car holds about 12 s for them to move on,
   then backs up and turns round like for anything else. A person beside the car or off the road
   counts like any other obstacle.
+- **Honking.** Half-way to backing up (`HONK_STEPS`: 1.5 s stuck, about 6 s when waiting for a
+  person) the driver honks once, a `Honk` event the audio host plays. It honks again only in a new
+  stuck episode: after backing up, or after getting going above 2.5 m/s.
 - **Lost.** A car more than 12 m from its edge joins the nearest usable road.
 
 ## Pedestrians
@@ -191,6 +201,7 @@ farther than `VIEW_REACH` (90 m, the farthest ground the camera shows).
 | `src/sim/systems/*.ts` | each system's own constants at the top of its file (physics, traffic, pedestrians, contacts, foot, enter/exit) |
 | `src/sim/map/kinds.ts` | road widths and which classes carry traffic, the player's car, or only people |
 | `src/render/pipeline.ts` | `zoomFor` zoom levels, `turnToward` view turn speed |
+| `src/audio/director/levels.ts` | how loud each sound is and how far it carries (see [audio.md](audio.md#known-limits-and-tuning)) |
 
 Gameplay changes need a test: the scenario tests in `src/sim/index.test.ts` and
 `src/sim/walls.test.ts` stage exact situations with `src/sim/testing.ts`. Fixtures find map

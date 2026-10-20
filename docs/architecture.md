@@ -2,14 +2,15 @@
 
 The game is a Ritmo ECS simulation plus a browser host. The simulation (`src/sim`) owns every rule
 that changes the world. It is headless and deterministic: no DOM, no Three.js, no wall clock, no
-`Math.random`. The host (`src/main.ts`, `src/render`, `src/hud`) captures input, draws, and shows
-the HUD. It reads the world and never writes saved state.
+`Math.random`. The host (`src/main.ts`, `src/render`, `src/audio`, `src/hud`) captures input,
+draws, plays the sound, and shows the HUD. It reads the world and never writes saved state.
 
 ```
 keyboard ──► KeyboardInput service ──► CaptureInput ──► Input resource ──► systems
                                                                              │
-             HUD ◄── PlayerView (inspector) ◄────────── world (components, resources)
-             three.js nodes ◄── render schedule (RenderSync) ◄──┘
+             HUD ◄── PlayerView (inspector) ◄────────── world (components, resources, events)
+             three.js nodes ◄── render schedule (RenderSync) ◄──┤
+             speakers ◄── director ◄── audio schedule (Hear) ◄──┘
 ```
 
 ## Simulation
@@ -39,10 +40,10 @@ keyboard ──► KeyboardInput service ──► CaptureInput ──► Input 
 | 6 | `applyDeferred` | | applies the enter/exit commands before anything moves |
 | 7 | `PlayerFoot` | `systems/foot.ts` | player walking, sprinting, sliding when down |
 | 8 | `PlayerDrive` | `systems/drive.ts` | player keys into the driven car's `CarInput` |
-| 9 | `TrafficAI` | `systems/traffic.ts` | AI drivers write their `CarInput` |
+| 9 | `TrafficAI` | `systems/traffic.ts` | AI drivers write their `CarInput`; a driver held up honks (`Honk`) |
 | 10 | `Pedestrians` | `systems/pedestrians.ts` | walkers follow their routes, flee, slide |
-| 11 | `VehiclePhysics` | `systems/physics.ts` | every vehicle moves from its `CarInput` |
-| 12 | `Contacts` | `systems/contacts.ts` | car–car, car–person and person–person contacts, knockdowns |
+| 11 | `VehiclePhysics` | `systems/physics.ts` | every vehicle moves from its `CarInput`; wall hits are `Impact` events |
+| 12 | `Contacts` | `systems/contacts.ts` | car–car, car–person and person–person contacts, knockdowns; car–car hits and knockdowns are `Impact` events |
 | 13 | `RideAlong` | `systems/drive.ts` | the driving player takes the car's pose and motion |
 | 14 | `Recover` | `systems/contacts.ts` | knocked-down people get up; pedestrians then flee |
 | 15 | `Populate` | `systems/populate.ts` | every 0.5 s spawns and despawns traffic and pedestrians |
@@ -79,20 +80,31 @@ Resources: `Time`, `Rng`, `Score` (`stolen`, `knocked`) and `View` (`turns`, the
 of the camera) are saved. `Input` is transient: it is
 rebuilt every step and never saved.
 
+Events are transient too. `Impact` (a vehicle hit a wall, another vehicle or a person: where, how
+hard, with how much mass) and `Honk` (an AI driver held up sounds the horn) carry moments that leave
+no trace in the components. `VehiclePhysics`, `Contacts` and `TrafficAI` emit them; only the audio
+schedule reads them ([audio.md](audio.md#data-flow)). Snapshots hold no events, and emitting them
+changes neither the determinism nor the saves test.
+
 Static data is module content, not state. `MAP` and `graph` (`src/sim/map/index.ts`), the wall,
-tree and edge lookups, and the per-model lane tables in `src/sim/route.ts` are built once at load
-and never change, so they are safe to share between runtimes. The lookups are compact static
-grids (`staticGrid` in `src/sim/collide.ts`, item indices packed into one `Int32Array`):
+tree, building and edge lookups, and the per-model lane tables in `src/sim/route.ts` are built once
+at load and never change, so they are safe to share between runtimes. The lookups are compact
+static grids (`staticGrid` in `src/sim/collide.ts`, item indices packed into one `Int32Array`):
 
 - `wallsNear` indexes the walls straight from the decoded flat arrays and the trees as points,
   making each trunk's square (`pushTrunk` in `src/sim/map/kinds.ts`) only when a query reaches it.
   It reuses its answer array and the segment objects in it until the next call of the same kind:
   copy the coordinates to keep them.
+- `buildingsIn` (over `buildingBoxes`, 64 m cells) and `treesIn` (the trees as points) in
+  `src/sim/map/index.ts` are broad phases that call back with candidate indices; callers run the
+  exact test. The sim (`Populate`'s pedestrian spawns) and the audio host (occlusion, streets,
+  birds) share them.
 - `edgeIndex`, `trafficIndex` and `walkIndex` (`src/sim/route.ts`) answer nearest-edge and
   spawn-band lookups without scanning the whole graph.
 
 Host state stays in the host: the camera, the render clock, the three.js scene and nodes, the
-streamed world's chunks, and the HUD's DOM.
+streamed world's chunks, the HUD's DOM, and the audio context, live voices and the director's
+memory of each sound source (pruned as sources go; see [audio.md](audio.md#where-state-lives)).
 
 ## Input
 
@@ -101,7 +113,7 @@ streamed world's chunks, and the HUD's DOM.
 2. `CaptureInput` (Ritmo's `InputCapture.system`) copies its snapshot into the `Input` resource
    at the start of each step.
 3. Systems read `Input`: `held` for movement, steering and handbrake, `pressed` (once per press)
-   for the action and turn keys.
+   for the action and turn keys. No sim system reads `horn` (H): only the audio schedule does.
 
 `bindings` in `src/sim/schema.ts` is the only list of keys. Tests and replays use the same path:
 `Keyboard.scripted(bindings, timeline)` replaces the live keyboard.
@@ -109,10 +121,12 @@ streamed world's chunks, and the HUD's DOM.
 ## Host loop
 
 `src/main.ts` drives everything from one `FixedLoop`: 60 Hz steps, at most 5 steps per frame, and
-frames clamped to 0.25 s. Each animation frame it:
+frames clamped to 0.25 s. Before the loop starts it ticks `setup`, then the `audio` schedule once:
+a system reads the events published since its own last run, so a reader that has never run would
+miss the first steps' `Impact` and `Honk` events. Each animation frame it:
 
 1. writes the loop's `alpha` (fraction of a step since the last one) into `RenderClock`;
-2. ticks the `render` schedule;
+2. ticks the `render` and `audio` schedules (`runtime.tick(render, audio)`);
 3. reads `PlayerView` and moves and turns the camera;
 4. streams the static world around the camera focus (see below);
 5. renders the pixel view, then updates the HUD.
@@ -143,12 +157,13 @@ wall and a road's edge (house fronts, sidewalks, alleys), and pebble beds along 
 Streaming:
 
 - `new World(scene)` prepares, once (≈ 190 ms in Node for the whole valley): the land-cover raster
-  for the whole map (≈ 80 ms and 4.9 MB, cheaper than clipping areas per chunk), every static item as a `Piece`
-  (an anchor polyline plus a `draw` function), the pieces bucketed per chunk with the range of
-  segments that reach it, and the trees bucketed per chunk and kind. A chunk build reads only its
-  own bucket; it draws each piece's segments plus one neighbour on each side (for ribbon mitres)
-  and keeps exactly the triangles that fall in the chunk, so the result is the same as cutting a
-  whole-map build.
+  for the whole map (`mapCover()` in `src/render/landcover.ts`, ≈ 80 ms and 4.9 MB, cheaper than
+  clipping areas per chunk; built on first use and shared read-only with the audio host), every
+  static item as a `Piece` (an anchor polyline plus a `draw` function), the pieces bucketed per
+  chunk with the range of segments that reach it, and the trees bucketed per chunk and kind. A chunk
+  build reads only its own bucket; it draws each piece's segments plus one neighbour on each side
+  (for ribbon mitres) and keeps exactly the triangles that fall in the chunk, so the result is the
+  same as cutting a whole-map build.
 - Distances are measured on the screen plane, from the focus to each chunk's box projected along
   the camera's right and up axes, terrain relief included. A valley far below a ridge counts as
   near when the camera shows it beside the focus. The boxes are measured once (`chunkBoxes`);
@@ -196,6 +211,18 @@ The pixel pipeline (`src/render/pipeline.ts`):
 - The far plane is 3 km from the camera (2.5 km past the focus): from the Apuan summits the
   deepest ground in view is ≈ 2.45 km from the camera, past the 1 km the plane used to stop at.
 
+## Audio
+
+The audio schedule (`src/audio/index.ts`) is host code beside render. Its one system,
+`Lunigiana/Hear`, reads the player, the vehicles that run or move, the people on foot, the `Impact`
+and `Honk` events and the horn key, and hands them as plain `Heard` data to the `Audio` service.
+`main.ts` provides the director (`src/audio/director`, plain TypeScript), which runs the outdoor
+acoustics and drives the Web Audio speaker (`src/audio/speaker.ts`) and its synths
+(`src/audio/synth`). The speaker starts its AudioContext on the first key or click, the one that
+dismisses the title card, and suspends it while the full map is open or the tab is hidden. In dev
+builds `gta.audio` exposes the speaker, its output level and the context. Everything else is in
+[audio.md](audio.md).
+
 ## HUD
 
 The HUD (`src/hud`) is plain DOM over the canvas, with its markup in `index.html`. It reads only
@@ -227,7 +254,8 @@ the `PlayerView` inspector (`src/sim/views.ts`) and the map:
   readers announce its title and the district.
 - While the full map is open the host pauses the game: the FixedLoop keeps running, but
   `pausable` (`src/hud/hud.ts`) skips the sim update and `main.ts` skips the frame (no world
-  render, so actors do not jitter between `PrevPose` and `Pose`). Each skipped update drains the
+  render, so actors do not jitter between `PrevPose` and `Pose`, and no audio tick) and suspends
+  the AudioContext (`speaker.pause`). Each skipped update drains the
   keyboard's press edges, so a key tapped on the map (F, Enter) does nothing on resume, while a
   key held through the pause is still held.
 
@@ -240,18 +268,23 @@ the `PlayerView` inspector (`src/sim/views.ts`) and the map:
   - everywhere: `handle-tick-result`, `prefix-descriptor-and-system-names`, `use-cell-value`;
   - in `src/sim/**`: `use-clock-for-time`, `use-random-for-randomness`, `use-ops-for-math`,
     `keep-simulation-headless`, `no-infinity-in-simulation-data`, and a ban on importing
-    `render`, `hud` or `main.ts`.
+    `render`, `hud`, `audio` or `main.ts`;
+  - in `src/audio/**`: a ban on importing `hud` or `main.ts` (they wire the audio host, never the
+    reverse).
 - `ritmo-devtools lint src/sim/index.ts`: loads `lintTarget` and lints the `setup`, `update` and
-  (described, not run) `render` schedules. Any warning fails. It also fails if a module the sim
-  loads is not covered by the oxlint simulation override.
+  (described, not run) `render` and `audio` schedules. Any warning fails: without the audio
+  schedule described, `Impact` and `Honk` would be `event-never-read`. It also fails if a module
+  the sim loads is not covered by the oxlint simulation override.
 - `node --test`. Beside the unit tests, these guard the architecture:
   - `determinism` (`src/sim/index.test.ts`): `Determinism.check` runs a 600-frame scripted joyride
     twice and requires identical state, transient components included.
   - `saves`: a snapshot taken mid-joyride goes through JSON, restores into a fresh runtime, and
     plays on identically.
-  - `src/render/index.test.ts`: every render-schedule system declares no writes.
+  - `src/render/index.test.ts`: every system of every described schedule (`render` and `audio`)
+    declares no writes.
   - `src/sim/map/map.test.ts`: invariants of the generated map (see [map.md](map.md)).
+  - the audio tests, in Node without Web Audio (see [audio.md](audio.md#tests)).
 
 `src/sim/testing.ts` is the headless test kit: `start(timeline, staging)` makes a runtime with
-scripted keys, `stage` clears the map and places exactly the cars and pedestrians a test needs,
-and `World` inspects everything as plain data.
+scripted keys and collects every `Impact` and `Honk` emitted (`heard`), `stage` clears the map and
+places exactly the cars and pedestrians a test needs, and `World` inspects everything as plain data.
