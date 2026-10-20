@@ -1,9 +1,10 @@
 /// <reference types="vite/client" />
 /**
  * Browser host: makes the streamed world and the pixel view, makes the runtime with the live
- * keyboard and the render registries, and drives everything from one FixedLoop: fixed sim steps,
- * then once per animation frame the render schedule, the camera, world streaming, the frame and
- * the HUD. While the full map (M) is open, both are skipped: the game is paused.
+ * keyboard, the render registries and the audio director, and drives everything from one
+ * FixedLoop: fixed sim steps, then once per animation frame the render and audio schedules, the
+ * camera, world streaming, the frame and the HUD. While the full map (M) is open, both are
+ * skipped and the sound is suspended: the game is paused.
  *
  * @module main
  */
@@ -12,6 +13,12 @@ import { BrowserHostClock, BrowserTickSource, Keyboard } from "@typeonce/ritmo-b
 import { Vec2 } from "@typeonce/ritmo-math"
 import { BasicShadowMap, DirectionalLight, HemisphereLight, Object3D, Scene, Vector3, WebGLRenderer } from "three"
 
+import { makeDirector } from "./audio/director/index.ts"
+import { Audio, audio } from "./audio/index.ts"
+import { makeSpeaker } from "./audio/speaker.ts"
+import { VEHICLE_SHOTS, VEHICLE_VOICES } from "./audio/synth/vehicles.ts"
+import { WORLD_SHOTS, WORLD_VOICES } from "./audio/synth/world.ts"
+import type { Shots, Voices } from "./audio/types.ts"
 import { dismissTitleOnInput, makeHud, pausable, toggleMapOnKey } from "./hud/hud.ts"
 import { groundY, terrainY } from "./render/ground.ts"
 import { blend, makeRegistries, People, render, RenderClock, Vehicles } from "./render/index.ts"
@@ -66,6 +73,9 @@ dpr.addEventListener("change", onDpr, { once: true })
 const keyboard = Keyboard.actions(window, bindings)
 const renderClock = { alpha: 0 }
 const { people, vehicles } = makeRegistries(scene)
+// The speaker starts its AudioContext on the same first key or click that dismisses the title card.
+const speaker = makeSpeaker(window, { ...VEHICLE_VOICES, ...WORLD_VOICES } satisfies Voices, { ...VEHICLE_SHOTS, ...WORLD_SHOTS } satisfies Shots)
+const director = makeDirector(speaker)
 const made = makeRuntime({
   // `?seed=123` replays a world; otherwise every load is a new one.
   seed: Number(new URLSearchParams(location.search).get("seed") ?? Math.floor(Math.random() * 2 ** 32)) >>> 0,
@@ -73,7 +83,8 @@ const made = makeRuntime({
     Game.Runtime.service(KeyboardInput, keyboard),
     Game.Runtime.service(People, people),
     Game.Runtime.service(Vehicles, vehicles),
-    Game.Runtime.service(RenderClock, renderClock)
+    Game.Runtime.service(RenderClock, renderClock),
+    Game.Runtime.service(Audio, director)
   ),
   ...(import.meta.env.DEV ? { debug: { hostClock: BrowserHostClock.make(window) } } : {})
 })
@@ -81,6 +92,9 @@ if (!made.ok) throw new Error(`runtime: ${JSON.stringify(made.error)}`)
 const runtime = made.value
 const ready = runtime.tick(setup)
 if (!ready.ok) throw new Error(`setup: ${JSON.stringify(ready.error)}`)
+// Before the first update: the audio system starts reading the Impact and Honk events from here on.
+const listening = runtime.tick(audio)
+if (!listening.ok) throw new Error(`audio: ${JSON.stringify(listening.error)}`)
 // Build everything the first frame shows now, so nothing pops in at the start.
 const spawn = runtime.inspect(PlayerView)
 if (spawn !== undefined) world.update(new Vector3(spawn.pose.x, groundY(spawn.pose.x, spawn.pose.y), -spawn.pose.y), spawn.turns * QUARTER, reach(), Infinity)
@@ -89,7 +103,6 @@ const hud = makeHud(document)
 dismissTitleOnInput(window)
 toggleMapOnKey(window, hud)
 
-
 const camera = { x: 0, y: 0, elevation: 0, placed: false, zoom: 8 }
 // The view swings through each quarter turn, or jumps when the player asks for less motion.
 const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)")
@@ -97,7 +110,7 @@ const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)")
 const draw = (frame: FixedLoop.Frame): void => {
   renderer.info.reset()
   renderClock.alpha = frame.alpha
-  const drawn = runtime.tick(render)
+  const drawn = runtime.tick(render, audio)
   if (!drawn.ok) console.error("render", drawn.error)
   const player = runtime.inspect(PlayerView)
   if (player === undefined) return
@@ -130,6 +143,7 @@ const loop = FixedLoop.start({
   update: pausable(hud.mapOpen, keyboard, () => runtime.tick(update), Result.success(undefined)),
   // The map covers the screen: no world to draw, and actors stay put (no interpolation jitter).
   render: (frame) => {
+    speaker.pause(hud.mapOpen())
     if (!hud.mapOpen()) draw(frame)
   },
   onFailure: (failure) => console.error("loop stopped", failure)
@@ -139,9 +153,11 @@ if (!loop.ok) throw new Error(`loop: ${JSON.stringify(loop.error)}`)
 // Dev only: the Ritmo monitor (backslash toggles it) and a handle for measuring from the console.
 // No HMR hooks: nothing accepts updates, so Vite reloads the page on every edit.
 if (import.meta.env.DEV) {
-  Object.assign(window, { gta: { renderer, view, scene, world, heightAt, player: () => runtime.inspect(PlayerView) } })
+  Object.assign(window, {
+    gta: { renderer, view, scene, world, heightAt, player: () => runtime.inspect(PlayerView), audio: { speaker, level: speaker.level, context: speaker.context } }
+  })
   const debug = runtime.debug
   if (debug !== undefined) {
-    void import("@typeonce/ritmo-devtools").then(({ Monitor }) => Monitor.attach({ debug }, { schedules: { update, render }, host: window }))
+    void import("@typeonce/ritmo-devtools").then(({ Monitor }) => Monitor.attach({ debug }, { schedules: { update, render, audio }, host: window }))
   }
 }
