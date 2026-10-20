@@ -26,8 +26,14 @@ test("setts rumble at one per 14 cm, only on stone", () => {
   assert.equal(tyre(14, 0, "asphalt").setts, 0)
 })
 
-test("heavy tyres are louder and darker", () => {
+test("the calibration case, the Giulia at top speed with sideways speed 0.3 of it, squeals fully", () => {
+  const full = tyre(40, 12, "asphalt")
+  assert.equal(full.squeal, tyre(40, 20, "asphalt").squeal)
+  assert.ok(tyre(40, 8, "asphalt").squeal < full.squeal)
+})
+
+test("heavy tyres are 6 dB louder and darker", () => {
   const light = tyre(15, 6, "asphalt"), heavy = tyre(15, 6, "asphalt", true)
-  assert.ok(heavy.roll > light.roll && heavy.squeal > light.squeal)
+  assert.ok(Math.abs(heavy.roll / light.roll - 2) < 1e-9 && Math.abs(heavy.squeal / light.squeal - 2) < 1e-9)
   assert.ok(heavy.rollHz < light.rollHz && heavy.pitch < light.pitch)
 })

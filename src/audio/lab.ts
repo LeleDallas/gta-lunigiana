@@ -113,55 +113,54 @@ const PLAYED = {
   bark: { kind: "bark", big: true }
 } as const satisfies { readonly [K in OneShot["kind"]]: Extract<OneShot, { readonly kind: K }> }
 
+/** Some sounds of every kind of `S`: a new kind fails to compile until "render all" plays it. */
+type Each<S extends Sound> = { readonly [K in S["kind"]]: ReadonlyArray<Extract<S, { readonly kind: K }>> }
+
 /** "Render all": representative params per voice (rendered 2 s) and per shot. */
-const VOICE_RENDERS: ReadonlyArray<Continuous> = [
-  { kind: "engine", model: "panda", speed: 0, throttle: 0, inside: false },
-  { kind: "engine", model: "panda", speed: 15, throttle: 1, inside: false },
-  { kind: "engine", model: "ape", speed: 12, throttle: 1, inside: false },
-  { kind: "engine", model: "truck", speed: 15, throttle: 1, inside: false },
-  { kind: "engine", model: "carabinieri", speed: 40, throttle: 1, inside: false },
-  { kind: "engine", model: "carabinieri", speed: 20, throttle: 0.5, inside: true },
-  { kind: "tyres", speed: 14, slip: 0, surface: "asphalt", heavy: false },
-  { kind: "tyres", speed: 20, slip: 6, surface: "asphalt", heavy: false },
-  { kind: "tyres", speed: 10, slip: 0, surface: "stone", heavy: false },
-  { kind: "tyres", speed: 15, slip: 3, surface: "gravel", heavy: true },
-  { kind: "scrape", speed: 4 },
-  { kind: "scrape", speed: 12 },
-  ...VEHICLE_MODELS.map((model) => ({ kind: "horn", model }) as const),
-  { kind: "siren" },
-  { kind: "beeper" },
-  { kind: "water", body: "fountain", flow: 0.5 },
-  { kind: "water", body: "stream", flow: 0.6 },
-  { kind: "water", body: "river", flow: 1 },
-  { kind: "wind", strength: 0.3, forest: 0 },
-  { kind: "wind", strength: 1, forest: 1 },
-  { kind: "crickets", density: 0.3 },
-  { kind: "crickets", density: 1 }
-]
-const SHOT_RENDERS: ReadonlyArray<OneShot> = [
-  { kind: "crash", speed: 2, mass: 1 },
-  { kind: "crash", speed: 7, mass: 1 },
-  { kind: "crash", speed: 15, mass: 1 },
-  { kind: "crash", speed: 15, mass: 4 },
-  { kind: "thud", speed: 5 },
-  { kind: "thud", speed: 12 },
-  { kind: "door", model: "panda", open: true },
-  { kind: "door", model: "panda", open: false },
-  { kind: "door", model: "truck", open: false },
-  ...VEHICLE_MODELS.map((model) => ({ kind: "ignition", model }) as const),
-  { kind: "honk", model: "panda" },
-  { kind: "honk", model: "truck" },
-  { kind: "step", surface: "stone", run: true },
-  { kind: "step", surface: "asphalt", run: false },
-  { kind: "step", surface: "gravel", run: true },
-  { kind: "step", surface: "grass", run: false },
-  ...(["scream", "shout", "groan"] as const).flatMap((kind) => [0.2, 0.8].map((voice) => ({ kind, voice }))),
-  { kind: "bell", pitch: 400 },
-  { kind: "bell", pitch: 800 },
-  ...(["robin", "tit", "blackbird", "chaffinch"] as const).map((species) => ({ kind: "bird", species }) as const),
-  { kind: "bark", big: true },
-  { kind: "bark", big: false }
-]
+const VOICE_RENDERS = {
+  engine: [
+    { kind: "engine", model: "panda", speed: 0, throttle: 0, inside: false },
+    { kind: "engine", model: "panda", speed: 15, throttle: 1, inside: false },
+    { kind: "engine", model: "ape", speed: 12, throttle: 1, inside: false },
+    { kind: "engine", model: "truck", speed: 15, throttle: 1, inside: false },
+    { kind: "engine", model: "carabinieri", speed: 40, throttle: 1, inside: false },
+    { kind: "engine", model: "carabinieri", speed: 20, throttle: 0.5, inside: true }
+  ],
+  tyres: [
+    // The loudest intended case, a full slide at the Giulia's top speed: peaks near 0.5.
+    { kind: "tyres", speed: 40, slip: 12, surface: "asphalt", heavy: false },
+    { kind: "tyres", speed: 14, slip: 0, surface: "asphalt", heavy: false },
+    { kind: "tyres", speed: 20, slip: 6, surface: "asphalt", heavy: false },
+    { kind: "tyres", speed: 10, slip: 0, surface: "stone", heavy: false },
+    { kind: "tyres", speed: 15, slip: 3, surface: "gravel", heavy: true }
+  ],
+  scrape: [{ kind: "scrape", speed: 4 }, { kind: "scrape", speed: 12 }],
+  horn: VEHICLE_MODELS.map((model) => ({ kind: "horn", model }) as const),
+  siren: [{ kind: "siren" }],
+  beeper: [{ kind: "beeper" }],
+  water: [{ kind: "water", body: "fountain", flow: 0.5 }, { kind: "water", body: "stream", flow: 0.6 }, { kind: "water", body: "river", flow: 1 }],
+  wind: [{ kind: "wind", strength: 0.3, forest: 0 }, { kind: "wind", strength: 1, forest: 1 }],
+  crickets: [{ kind: "crickets", density: 0.3 }, { kind: "crickets", density: 1 }]
+} satisfies Each<Continuous>
+const SHOT_RENDERS = {
+  crash: [{ kind: "crash", speed: 2, mass: 1 }, { kind: "crash", speed: 7, mass: 1 }, { kind: "crash", speed: 15, mass: 1 }, { kind: "crash", speed: 15, mass: 4 }],
+  thud: [{ kind: "thud", speed: 5 }, { kind: "thud", speed: 12 }],
+  door: [{ kind: "door", model: "panda", open: true }, { kind: "door", model: "panda", open: false }, { kind: "door", model: "truck", open: false }],
+  ignition: VEHICLE_MODELS.map((model) => ({ kind: "ignition", model }) as const),
+  honk: [{ kind: "honk", model: "panda" }, { kind: "honk", model: "truck" }],
+  step: [
+    { kind: "step", surface: "stone", run: true },
+    { kind: "step", surface: "asphalt", run: false },
+    { kind: "step", surface: "gravel", run: true },
+    { kind: "step", surface: "grass", run: false }
+  ],
+  scream: [{ kind: "scream", voice: 0.2 }, { kind: "scream", voice: 0.8 }],
+  shout: [{ kind: "shout", voice: 0.2 }, { kind: "shout", voice: 0.8 }],
+  groan: [{ kind: "groan", voice: 0.2 }, { kind: "groan", voice: 0.8 }],
+  bell: [{ kind: "bell", pitch: 400 }, { kind: "bell", pitch: 800 }],
+  bird: (["robin", "tit", "blackbird", "chaffinch"] as const).map((species) => ({ kind: "bird", species }) as const),
+  bark: [{ kind: "bark", big: true }, { kind: "bark", big: false }]
+} satisfies Each<OneShot>
 
 const RATE = 48000
 /** Voices settle (fade in) for `settle` s, are measured for `seconds`, then stopped: they must be silent `fade` s later, when the speaker frees their emitter. */
@@ -234,8 +233,8 @@ const renderAll = async (): Promise<ReadonlyArray<Row>> => {
   const kit = makeKit(new OfflineAudioContext({ length: 1, sampleRate: RATE }))
   const rows: Array<Row> = []
   // One at a time: a dozen 12 s stereo renders at once would hold hundreds of MB.
-  for (const sound of VOICE_RENDERS) rows.push(await renderVoice(kit, sound))
-  for (const sound of SHOT_RENDERS) rows.push(await renderShot(kit, sound))
+  for (const sound of Object.values(VOICE_RENDERS).flat()) rows.push(await renderVoice(kit, sound))
+  for (const sound of Object.values(SHOT_RENDERS).flat()) rows.push(await renderShot(kit, sound))
   const table = byId("renders")
   table.replaceChildren()
   const head = element("tr", element("thead", table))
@@ -286,7 +285,14 @@ const controls = <S extends Sound>(box: HTMLElement, defaults: S): (() => S) => 
 
 /** One panel per sound kind: its controls, a hold or play button, and the readout of how it is heard. */
 const panels: Array<{ readonly read: () => Sound; readonly readout: HTMLElement }> = []
-const holding = new Map<Continuous["kind"], { readonly read: () => Continuous; readonly voice: Voice<Continuous>; readonly emitter: Emitter }>()
+/** A held kind: its emitter, and its voice with the model it was built for (engines and horns fix their graph by model). */
+interface Held { readonly read: () => Continuous; readonly emitter: Emitter; voice: Voice<Continuous>; model: VehicleModel | undefined }
+const holding = new Map<Continuous["kind"], Held>()
+
+const modelOf = (sound: Continuous): VehicleModel | undefined => ("model" in sound ? sound.model : undefined)
+/** A new voice for `sound` into `emitter`. */
+const voiceIn = ({ ctx, kit }: Live, emitter: Emitter, sound: Continuous): Voice<Continuous> =>
+  (VOICES[sound.kind] as VoiceFactory<Continuous>)({ ctx, out: emitter.input, cents: emitter.cents, kit })
 
 const panel = <S extends Sound>(parent: HTMLElement, defaults: S, label: string, press: (read: () => S, button: HTMLButtonElement) => void): void => {
   const box = element("fieldset", parent)
@@ -315,7 +321,7 @@ const build = (): void => {
   for (const model of VEHICLE_MODELS) cabin.add(new Option(model, model))
   for (const defaults of Object.values(HELD)) {
     panel(byId("held"), defaults as Continuous, "Hold", (read, button) => {
-      const { ctx, kit, mixer } = wake(), now = ctx.currentTime, held = holding.get(defaults.kind)
+      const audio = wake(), now = audio.ctx.currentTime, held = holding.get(defaults.kind)
       if (held !== undefined) {
         held.voice.stop(now)
         held.emitter.release(now)
@@ -324,9 +330,8 @@ const build = (): void => {
         return
       }
       // Silent at first: the next frame's placement fades it in.
-      const emitter = makeEmitter(ctx, mixer, { ...hear(read(), where()).at, gain: 0 })
-      const voice = (VOICES[defaults.kind] as VoiceFactory<Continuous>)({ ctx, out: emitter.input, cents: emitter.cents, kit })
-      holding.set(defaults.kind, { read, voice, emitter })
+      const sound = read(), emitter = makeEmitter(audio.ctx, audio.mixer, { ...hear(sound, where()).at, gain: 0 })
+      holding.set(defaults.kind, { read, emitter, voice: voiceIn(audio, emitter, sound), model: modelOf(sound) })
       button.textContent = "Release"
     })
   }
@@ -357,10 +362,15 @@ const frame = (): void => {
   for (const { read, readout } of panels) readout.textContent = describe(read(), at)
   if (live !== undefined) {
     const now = live.ctx.currentTime
-    for (const { read, voice, emitter } of holding.values()) {
-      const sound = read()
-      emitter.place(hear(sound, at).at, now)
-      voice.update(sound, now)
+    for (const held of holding.values()) {
+      const sound = held.read()
+      if (modelOf(sound) !== held.model) {
+        held.voice.stop(now)
+        held.voice = voiceIn(live, held.emitter, sound)
+        held.model = modelOf(sound)
+      }
+      held.emitter.place(hear(sound, at).at, now)
+      held.voice.update(sound, now)
     }
     live.mixer.room({ street: Number(byId<HTMLInputElement>("street").value) }, now)
     const level = live.mixer.level()

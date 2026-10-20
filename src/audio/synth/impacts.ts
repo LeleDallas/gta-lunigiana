@@ -218,13 +218,16 @@ export const ignition: Shot<Extract<OneShot, { readonly kind: "ignition" }>> = {
   }
 }
 
-/** Grinding gain at full speed (12 m/s and up): peaks near 0.5. */
-const SCRAPE = 0.5
+/** Grinding gain at full speed (12 m/s and up): peaks near 0.5 (offline renders). */
+const SCRAPE = 0.7
+/** Top of the grinding, Hz: the noise bands' 6 dB/oct skirts and the grit reach Nyquist, a hiss over the metal's 2–4 kHz. */
+const SCRAPE_TOP = 4000
 
 /** Metal grinding along a wall at `speed` m/s. */
 export const scrape: VoiceFactory<Extract<Continuous, { readonly kind: "scrape" }>> = (io) => {
   const { ctx, kit } = io, output = new GainNode(ctx, { gain: 0 }), grind = new GainNode(ctx, { gain: 1 })
-  grind.connect(output).connect(io.out)
+  const top = new BiquadFilterNode(ctx, { type: "lowpass", frequency: SCRAPE_TOP })
+  grind.connect(top).connect(output).connect(io.out)
   const white = loop(ctx, kit.white), band = new BiquadFilterNode(ctx, { type: "bandpass", frequency: 1500, Q: 1.2 })
   white.connect(band).connect(grind)
   // The panels ring: noise exciting a steel sheet's bar modes.
@@ -239,7 +242,7 @@ export const scrape: VoiceFactory<Extract<Continuous, { readonly kind: "scrape" 
   const judder = loop(ctx, kit.gust, 40)
   judder.connect(new GainNode(ctx, { gain: 0.5 })).connect(grind.gain)
   // White noise has no pitch to shift: Doppler moves the bands it rings through.
-  for (const filter of [band, ...modes]) io.cents.connect(filter.detune)
+  for (const filter of [band, ...modes, top]) io.cents.connect(filter.detune)
   io.cents.connect(grit.detune)
   let first = true
   return {

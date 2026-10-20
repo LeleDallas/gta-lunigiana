@@ -3,7 +3,7 @@
  * as in CNOSSOS-EU; on stone setts an amplitude rumble at v / 0.14 m (one sett per 14 cm); a tonal
  * squeal from two very narrow bandpasses (980 and 1460 Hz) on asphalt and stone when the car slides;
  * a gravel crunch from noise grains on loose ground that sprays instead of squealing. Heavy tyres
- * (the truck) are darker and 6 dB louder; the loudest patch (a heavy slide) peaks near 0.5.
+ * (the truck) are darker and 6 dB louder; a full slide at the Giulia's top speed peaks near 0.5.
  *
  * @module audio/synth/tyres
  */
@@ -37,8 +37,13 @@ const GROUND = {
 
 /** The squeal's two tones, Hz. */
 const SQUEAL = [980, 1460] as const
-/** Layer gains, calibrated by offline renders (the narrow squeal bands pass about 1/9 of the noise): heavy slides and cobbles at 150 km/h peak near 0.4–0.5. */
-const ROLL = 0.246, SQUEAL_GAIN = 4.5, CRUNCH = 0.77
+/**
+ * Layer gains, calibrated by offline renders (the narrow squeal bands pass about 1/9 of the noise):
+ * the loudest intended case, a full slide at the Giulia's top speed (40 m/s, slip ≥ 12, asphalt),
+ * peaks near 0.5 (the director's tyres level). Louder by nature, the truck sliding at its top
+ * speed (20 m/s) and cobbles at 40 m/s (the setts' rumble adds crest) peak up to 4 dB higher.
+ */
+const ROLL = 0.37, SQUEAL_GAIN = 6.75, CRUNCH = 1.15
 /** Light tyres relative to heavy ones (−6 dB). */
 const LIGHT = 0.5
 
