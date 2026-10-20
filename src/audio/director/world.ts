@@ -7,7 +7,7 @@
  * @module audio/director/world
  */
 import { hash01 } from "../../tools/geometry.ts"
-import { AMBIENT_DB, CABIN, EAR_HEIGHT, mixGain, spreading, sumDb } from "../acoustics.ts"
+import { AMBIENT_DB, audibility, CABIN, dbToGain, EAR_HEIGHT, mixGain, spreading, sumDb } from "../acoustics.ts"
 import { smoothstep } from "../buffers.ts"
 import { ambienceAt, type Bell, bells, birdSpot, type Dog, dogsNear, streetAt, waterNear, type WaterHeard } from "../places.ts"
 import type { OneShot } from "../types.ts"
@@ -24,6 +24,8 @@ const NEAR_EVERY = 0.25, NEAR_MOVED = 2, WATER_REACH = 400, DOG_REACH = 200
 const STREET_TAU = 0.5
 /** Wind strength from altitude (smoothstep over `ALTITUDE` m a.s.l. to `CALM`…`GALE`), up to `OPEN` more in the open, `STREETS` less in streets. */
 const ALTITUDE = [150, 1000] as const, CALM = 0.15, GALE = 0.85, OPEN = 0.15, STREETS = 0.3
+/** The stillest the wind gets (`windDb` at `AMBIENT_DB`): the rural background itself, leaves and the far valley, even in a sheltered street. */
+const STILL = 10 ** ((AMBIENT_DB - BEDS.wind) / 40)
 /** Birds call this often (per s) in full forest, plus `HOUSES` near houses (a built share over `GARDENS`). */
 const BIRDS = { forest: 0.3, houses: 0.05 } as const, GARDENS = 0.05
 const SPECIES = [["robin", 0.35], ["tit", 0.3], ["blackbird", 0.2], ["chaffinch", 0.15]] as const satisfies ReadonlyArray<readonly [Extract<OneShot, { readonly kind: "bird" }>["species"], number]>
@@ -49,11 +51,14 @@ export const makeWorld = (clock: () => WallClock) => {
   /** Bell strokes still to ring, speaker time. */
   const strokes: Array<{ readonly bell: Bell; readonly at: number }> = []
 
-  /** The bed of `db` dB(A) at the ears: everywhere at once, through the cabin when inside. */
-  const bed = (frame: Frame, db: number): Hearing => {
+  /**
+   * The bed of `db` dB(A) at the ears, whose voice plays `under` dB under its nominal by itself: everywhere at once,
+   * through the cabin when inside. Its level is compressed like any source's, so the gain gives back what the voice took.
+   */
+  const bed = (frame: Frame, db: number, under: number): Hearing => {
     const cabin = frame.inside === undefined ? undefined : CABIN[frame.inside]
     return {
-      placement: { gain: mixGain(db, cabin?.loss ?? 0), pan: 0, cutoff: cabin?.cutoff ?? 20000, cents: 0, wet: REVERB.bed },
+      placement: { gain: mixGain(db, cabin?.loss ?? 0) * dbToGain(under), pan: 0, cutoff: cabin?.cutoff ?? 20000, cents: 0, wet: REVERB.bed },
       level: db - (cabin?.loss ?? 0),
       audible: true,
       r: 0,
@@ -62,7 +67,7 @@ export const makeWorld = (clock: () => WallClock) => {
   }
 
   return {
-    /** Before the rest of the frame: what is near, the street, and the masking floor (the rural day, the loudest water last heard, the wind). */
+    /** Before the rest of the frame: what is near, the street, and the masking floor (the wind bed, which is the rural day at its stillest, and the loudest water last heard). */
     listen: (ears: Ears, now: number, dt: number): { readonly ambient: number; readonly street: number } => {
       if (near === undefined || now - near.at >= NEAR_EVERY || Math.hypot(ears.x - near.x, ears.y - near.y) >= NEAR_MOVED) {
         const water = waterNear(ears.x, ears.y, WATER_REACH).map((w) => ({ ...w, r: Math.hypot(w.x - ears.x, w.y - ears.y, w.z + HEIGHT.water - ears.z) }))
@@ -72,13 +77,14 @@ export const makeWorld = (clock: () => WallClock) => {
       street = street === undefined ? enclosed : street + (enclosed - street) * (1 - Math.exp(-dt / STREET_TAU))
       ;({ forest, open, built } = ambienceAt(ears.x, ears.y))
       const height = CALM + (GALE - CALM) * smoothstep(ALTITUDE[0], ALTITUDE[1], ears.z - EAR_HEIGHT)
-      strength = Math.min(1, Math.max(0, height + OPEN * open - STREETS * street))
-      return { ambient: sumDb([AMBIENT_DB, loudest, windDb(strength)]), street }
+      strength = Math.min(1, Math.max(STILL, height + OPEN * open - STREETS * street))
+      return { ambient: sumDb([windDb(strength), loudest]), street }
     },
 
     hear: (frame: Frame): void => {
       const { ears, now, dt, random } = frame
-      frame.hold("wind", { kind: "wind", strength, forest }, bed(frame, BEDS.wind))
+      const wind = windDb(strength)
+      frame.hold("wind", { kind: "wind", strength, forest }, bed(frame, wind, BEDS.wind - wind))
       // Tree crickets sing in the meadows, not in the villages.
       const density = Math.max(0, open - built)
       if (density > 0) {
@@ -86,11 +92,13 @@ export const makeWorld = (clock: () => WallClock) => {
         frame.hold("crickets", { kind: "crickets", density }, { ...crickets, placement: { ...crickets.placement, wet: REVERB.bed } })
       }
 
-      // The level looked up holds the distance cue: it passes as the source level back to 1 m, the spreading as the loss.
+      // The level looked up holds the distance cue: it passes as the source level back to 1 m, the spreading as the loss
+      // (obstacles, lowpass, masking). Like a bed's, that level here is what the mix compresses: far water is no louder a source.
       loudest = -Infinity
       for (const w of near?.water ?? []) {
         const at = frame.path(w.key, { x: w.x, y: w.y, z: w.z + HEIGHT.water }, { db: w.level + spreading(w.r, WATER_R_MIN), rMin: WATER_R_MIN })
-        frame.hold(w.key, { kind: "water", body: w.body, flow: w.flow }, at)
+        const gain = mixGain(w.level, w.level - at.level) * audibility(at.level, frame.ambient)
+        frame.hold(w.key, { kind: "water", body: w.body, flow: w.flow }, { ...at, placement: { ...at.placement, gain } })
         if (at.audible) loudest = Math.max(loudest, at.level)
       }
 

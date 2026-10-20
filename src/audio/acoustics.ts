@@ -135,13 +135,15 @@ const CLOSED: Cabin = { loss: 15, cutoff: 1400 }
 /** Heard from the driver's seat (§10): closed cabins with the windows up; the Ape's cab is open at the back. */
 export const CABIN = { panda: CLOSED, ape: { loss: 6, cutoff: 3500 }, truck: CLOSED, carabinieri: CLOSED } as const satisfies Record<VehicleModel, Cabin>
 
-/** HDR mix (§9): source levels are compressed around L_REF by K, so a horn is not 56 dB above a footstep; losses stay physical. */
+/** HDR mix (§9): source levels are compressed around L_REF by K, so a horn is not 54 dB above a footstep; losses stay physical. */
 const L_REF = 120, K = 0.6
 /**
- * The compressed level, dB, that plays at gain 1, a voice's nominal peak (0.5, about −6 dBFS):
- * a 116 dB(A) horn heard from 2 m (≈ 111.6). Louder sounds rely on the master limiter.
+ * The compressed level, dB, that plays at gain 1, a voice's nominal peak (0.5, about −6 dBFS): a running step on stone
+ * heard from 1 m (62 dB(A), levels.ts). So the listener's own steps peak near −22 dBFS over a valley near −40 and traffic
+ * passing 10 m away near −20; the loudest near sounds (a horn or siren from the seat, a crash a few metres away) go past
+ * gain 1 and the master limiter holds them under −1.5 dBFS.
  */
-const FULL_SCALE = L_REF + K * (116 - L_REF) - spreading(2, 1)
+const FULL_SCALE = L_REF + K * (62 - L_REF)
 
 /** Linear gain of a source of `sourceDb` dB(A) at 1 m after `lossDb` of propagation losses. */
 export const mixGain = (sourceDb: number, lossDb: number): number => 10 ** ((L_REF + K * (sourceDb - L_REF) - lossDb - FULL_SCALE) / 20)

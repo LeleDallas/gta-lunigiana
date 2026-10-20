@@ -24,8 +24,12 @@ export const ENGINE = {
   carabinieri: { db: 93, rMin: 2.5 }
 } as const satisfies Record<VehicleModel, Level>
 
-/** The listener's own engine from the driver's seat (physics.md §10: about 6 dB under the outside mix); the voice makes the cabin tone. */
-export const OWN_ENGINE_DB = 82
+/**
+ * The listener's own engine from the driver's seat; the voice makes the cabin tone. TUNED: the voice idles about 19 dB
+ * under this, so the cabin idles near 49 dB(A), as a small car's does; at full load it is quieter than a real cabin
+ * (the voice's idle-to-redline range is narrower than an engine's), and well under the outside mix (physics.md §10).
+ */
+export const OWN_ENGINE_DB = 68
 
 /** Every other positional kind. Tyres at their squeal-capable peak; the step is a running step on stone. */
 export const LEVELS = {

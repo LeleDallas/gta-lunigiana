@@ -11,10 +11,10 @@
  */
 import { screenAxes } from "../sim/view.ts"
 import { VEHICLE_MODELS, type VehicleModel } from "../sim/vehicles.ts"
-import { AMBIENT_DB, CABIN, type Cabin, EAR_HEIGHT, gainToDb } from "./acoustics.ts"
+import { AMBIENT_DB, CABIN, type Cabin, dbToGain, EAR_HEIGHT, gainToDb } from "./acoustics.ts"
 import { makeKit } from "./buffers.ts"
 import { hear, type Hearing } from "./director/hearing.ts"
-import { BEDS, ENGINE, type Level, LEVELS, OWN_ENGINE_DB, REVERB, WATER_R_MIN } from "./director/levels.ts"
+import { BEDS, ENGINE, type Level, LEVELS, OWN_ENGINE_DB, REVERB, WATER_R_MIN, windDb } from "./director/levels.ts"
 import { type Emitter, makeEmitter } from "./emitter.ts"
 import { measure } from "./measure.ts"
 import { makeMixer, type Mixer } from "./mixer.ts"
@@ -34,14 +34,15 @@ const { right: SCREEN_RIGHT, up: SCREEN_UP } = screenAxes(0)
 // ponytail: water as a point source at its bank level + 6 dB; the director takes each body's line-source level at the listener from places.
 const WATER_DB = { fountain: 65, stream: 70, river: 76 } as const satisfies Record<Body, number>
 
-/** A source's calibration; `wet` marks one heard at the ears, with the director's fixed reverb send. */
-type Calibration = Level & { readonly wet?: number }
+/** A source's calibration; `wet` marks one heard at the ears, with the director's fixed reverb send; `under`, a bed whose voice plays that many dB under its nominal by itself, which its gain gives back (world.ts). */
+type Calibration = Level & { readonly wet?: number; readonly under?: number }
 
 /** `sound`'s calibration: the beds and the own engine (from the driver's seat, through no cabin) sound at the ears. */
 const sourceOf = (sound: Sound): Calibration =>
   sound.kind === "engine" ? (sound.inside ? { db: OWN_ENGINE_DB, rMin: 1, wet: 0 } : ENGINE[sound.model])
   : sound.kind === "water" ? { db: WATER_DB[sound.body], rMin: WATER_R_MIN }
-  : sound.kind === "wind" || sound.kind === "crickets" ? { db: BEDS[sound.kind], rMin: 1, wet: REVERB.bed }
+  : sound.kind === "wind" ? { db: windDb(sound.strength), rMin: 1, wet: REVERB.bed, under: BEDS.wind - windDb(sound.strength) }
+  : sound.kind === "crickets" ? { db: BEDS.crickets, rMin: 1, wet: REVERB.bed }
   : LEVELS[sound.kind]
 
 /** The listener's side of the page's controls: the source `r` m away towards `side` (−1 screen-left … 1 screen-right), their cabin and street. */
@@ -59,7 +60,8 @@ const heard = (sound: Sound, where: Where): { readonly hearing: Hearing; readonl
     ears: EARS, source: at, db: source.db, rMin: source.rMin, height: EAR_HEIGHT, delta: 0, forest: 0, ambient: AMBIENT_DB, street: where.street,
     cabin: own ? undefined : where.cabin
   })
-  return { hearing: source.wet === undefined ? hearing : { ...hearing, placement: { ...hearing.placement, wet: source.wet } }, source }
+  const placement = { ...hearing.placement, gain: hearing.placement.gain * dbToGain(source.under ?? 0), wet: source.wet ?? hearing.placement.wet }
+  return { hearing: { ...hearing, placement }, source }
 }
 
 const SURFACES = Object.keys({ asphalt: 0, stone: 0, gravel: 0, dirt: 0, grass: 0, leaves: 0 } satisfies Record<Surface, 0>)
@@ -304,7 +306,7 @@ const where = (): Where => {
 const describe = (sound: Sound, at: Where): string => {
   const { hearing: { placement, level, delay }, source } = heard(sound, at)
   const gain = placement.gain > 0 ? `gain ${gainToDb(placement.gain).toFixed(1)} dB` : "inaudible"
-  return `${source.db} dB(A)${source.wet === undefined ? " @1 m" : " here"} → ${level.toFixed(0)} dB(A) · ${gain} · pan ${placement.pan.toFixed(2)} · lowpass ${Math.round(placement.cutoff)} Hz · send ${placement.wet.toFixed(2)}${delay > 0 ? ` · delay ${Math.round(delay * 1000)} ms` : ""}`
+  return `${Math.round(source.db)} dB(A)${source.wet === undefined ? " @1 m" : " here"} → ${level.toFixed(0)} dB(A) · ${gain} · pan ${placement.pan.toFixed(2)} · lowpass ${Math.round(placement.cutoff)} Hz · send ${placement.wet.toFixed(2)}${delay > 0 ? ` · delay ${Math.round(delay * 1000)} ms` : ""}`
 }
 
 const build = (): void => {

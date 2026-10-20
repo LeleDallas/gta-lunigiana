@@ -112,7 +112,9 @@ components, Input (horn key) ──────┴─► audio schedule (Lunigia
 summed and converted once:
 
 - level at the ears = level at 1 m − spreading − ground − foliage − diffraction − cabin;
-- gain = `mixGain(level at 1 m, losses)` × `audibility(level at the ears, floor)`;
+- gain = `mixGain(level at 1 m, losses)` × `audibility(level at the ears, floor)` (the beds and
+  water, whose level is known at the ears, are compressed at that level: see
+  [Calibration and mix](#calibration-and-mix));
 - lowpass = the lowest of the air, diffraction and cabin cutoffs;
 - pitch = the Doppler shift (vehicle voices only);
 - reverb send = from the street around the ears and the distance.
@@ -205,7 +207,7 @@ From the driver's seat, outside sounds pass the body's insertion loss: 15 dB and
 in the closed cabins (Panda, truck, Giulia), 6 dB and 3.5 kHz in the Ape's cab, open at the back.
 Sounds of the player's own car are heard from inside it:
 
-- the engine has its own fixed level (82 dB(A), centred, no Doppler), and its voice switches to
+- the engine has its own fixed level (68 dB(A), centred, no Doppler), and its voice switches to
   the cabin tone behind the firewall (a 2.5 kHz lowpass and +4 dB at 120 Hz);
 - the horn and siren pass half the cabin (7.5 dB, a 5.3 kHz lowpass);
 - its crashes, scrapes, doors, starter and the thud of a person it hits pass none;
@@ -213,17 +215,19 @@ Sounds of the player's own car are heard from inside it:
 
 ### Masking and proximity
 
-Every sound is heard against a floor: the energy sum of the rural daytime background (35 dB(A),
-`AMBIENT_DB`), the loudest water heard in the last frame (occlusion included, so a river behind
-houses masks only as loud as it sounds) and the wind. A sound at most 5 dB under the floor plays
-at full gain. Below that it fades linearly in dB, and 15 dB under the floor it is culled: a
-one-shot is dropped, a voice is no longer held and fades out. The margin is there because a
-narrow-band sound stays detectable 5–10 dB under a broadband dB(A) floor.
+Every sound is heard against a floor: the energy sum of the wind bed, which is never stiller than
+the rural daytime background (35 dB(A), `AMBIENT_DB`), and the loudest water heard in the last
+frame (occlusion included, so a river behind houses masks only as loud as it sounds). What masks
+is what plays: the background is the wind bed, not a silent number. A sound at most 5 dB under the
+floor plays at full gain. Below that it fades linearly in dB, and 15 dB under the floor it is
+culled: a one-shot is dropped, a voice is no longer held and fades out. The margin is there because
+a narrow-band sound stays detectable 5–10 dB under a broadband dB(A) floor.
 
 The wind's strength rises with altitude, from 0.15 on the valley floor to 0.85 at 1,000 m
-(a smoothstep from 150 m), up to 0.15 more on open ground, and 0.3 less in a street. Its level is
-60 + 40·log10(strength) dB(A): it adds nothing in Monzone's streets (floor 35), brings open ground
-on the valley floor to about 40, and makes the floor about 57–60 dB(A) on the ridges.
+(a smoothstep from 150 m), up to 0.15 more on open ground, and 0.3 less in a street, but never
+under 0.24 (`STILL` in `director/world.ts`), where it is the 35 dB(A) background itself: leaves and
+the far valley, heard even in a sheltered street. Its level is 60 + 40·log10(strength) dB(A): 35
+in Monzone's streets, about 40–43 on open ground on the valley floor, 57–60 on the ridges.
 
 Over flat, open ground with nothing in the way, at the 35 dB(A) floor:
 
@@ -297,14 +301,14 @@ Continuous voices (held every frame they play):
 
 | Kind | Made of | Plays when | Level |
 |---|---|---|---|
-| `engine` | `synth/engine.ts`: an oscillator at the firing frequency (a sawtooth, or a band-limited pulse for the Ape's two-stroke and the truck's diesel), a half-order sub, a waveshaper driven by the load, two exhaust formants, noise gated at the firing rate, and a turbo whine on the truck and the Giulia. Revs come from a virtual gearbox per model (`gearbox.ts`) | a vehicle runs (AI traffic, or the player at the wheel), once its starter, if any, has caught | at full load: Panda 90 (2 m), Ape 92 (2 m), truck 98 (4 m), Giulia 93 (2.5 m); the player's own 82 from the seat |
+| `engine` | `synth/engine.ts`: an oscillator at the firing frequency (a sawtooth, or a band-limited pulse for the Ape's two-stroke and the truck's diesel), a half-order sub, a waveshaper driven by the load, two exhaust formants, noise gated at the firing rate, and a turbo whine on the truck and the Giulia. Revs come from a virtual gearbox per model (`gearbox.ts`) | a vehicle runs (AI traffic, or the player at the wheel), once its starter, if any, has caught | at full load: Panda 90 (2 m), Ape 92 (2 m), truck 98 (4 m), Giulia 93 (2.5 m); the player's own 68 from the seat |
 | `tyres` | `synth/tyres.ts`: rolling noise rising as (v / 70 km/h)^1.5, a sett rumble at v / 0.14 m on stone, a two-tone squeal (980 and 1460 Hz) on asphalt and stone when sliding, a gravel crunch on loose ground; the truck's 6 dB louder and darker | a vehicle moves faster than 1 m/s. The surface is the road's OSM surface on a carriageway (or within 0.5 m of its edge), else the land cover's | 98 (2 m) |
 | `scrape` | `synth/impacts.ts`: band-passed noise, ringing panel modes, grit and a stick-slip judder | a car hits a wall at under 1.5 m/s while still moving faster than 2 m/s; held 0.2 s past the last such hit | 105 (2 m) |
 | `horn` | `synth/horns.ts`: Panda 420 Hz, Ape 610 Hz, truck air horn 150 + 185 Hz, Giulia 410 + 500 Hz | the player holds H at the wheel of anything but the Giulia | 116 (2 m) |
 | `siren` | `synth/horns.ts`: the Italian *bitonale*, 466 and 622 Hz for 0.75 s each (D.M. 20/03/1979) | toggled by H in the Giulia the player drives; it stops when they get out | 117 (2.5 m) |
 | `beeper` | `synth/horns.ts`: a 1 kHz tone, 0.5 s on and 0.5 s off | a running truck reverses (faster than 0.3 m/s backwards) | 100 (2 m) |
 | `water` | `synth/water.ts`: bubbles ringing at their Minnaert frequency (van den Doel's model, `synth/bubbles.ts`), a pink-noise bed, and in rivers a boulder rumble and a slow surge. `body` is `river` (OSM rivers, and water 8 m wide or more), `stream` or `fountain`; `flow` comes from width and grade | the 4 loudest bodies within 400 m | from the water's level at the ears (above) |
-| `wind` | `synth/nature.ts`: a brown-noise band breathing with gusts, a whistle on strong gusts, leaves in proportion to the forest around | always, one bed | 60 at the ears at strength 1 |
+| `wind` | `synth/nature.ts`: a brown-noise band breathing with gusts, a whistle on strong gusts, leaves in proportion to the forest around | always, one bed | 60 at the ears at strength 1, never under 35 |
 | `crickets` | `synth/nature.ts`: six Italian tree crickets (*Oecanthus pellucens*) on a 2.6 kHz carrier, 0.59 echemes (chirps) a second (Dolbear's law at the game's fixed 15 °C October afternoon) | open ground outweighs buildings around the ears (`open − built` > 0) | 42 at the ears at density 1 |
 
 One-shots:
@@ -345,11 +349,36 @@ rings an 800 Hz prime; taller towers ring lower, down to 400 Hz at 30 m.
 to a horn, too much for a game mix, so only the source levels are compressed, around 120 dB(A) by 0.6;
 the losses on the way stay physical, so distance and occlusion cues keep their size:
 
-gain = 10^((120 + 0.6·(L1m − 120) − losses − 111.58) / 20)
+gain = 10^((120 + 0.6·(L1m − 120) − losses − 85.2) / 20)
 
-The 111.58 (`FULL_SCALE`) puts a 116 dB(A) horn heard from 2 m at gain 1: its synth's nominal peak.
-After compression a horn is 32 dB above a running step at 1 m instead of 54. Louder sums rely on the
-master limiter. A number in the table moves one kind against the others and nothing else.
+The 85.2 (`FULL_SCALE`) puts a running step on stone heard from 1 m (62 dB(A)) at gain 1: its
+synth's nominal peak. After compression a horn is 32 dB above a running step at 1 m instead of 54.
+A number in the table moves one kind against the others and nothing else.
+
+The beds and water are known by their level at the ears, so that level is what is compressed:
+
+- the wind at its strength, 60 + 40·log10(strength) dB(A). Its voice already plays that far under
+  its nominal by itself, so the bed's gain gives back what the compression leaves of it;
+- water at the line-source level `places` finds at the ears, with only the obstacles and the cabin
+  as losses, so a river 200 m away is not compressed as if it were a louder source 1 m away.
+
+The crickets' density moves their level by under 10 dB and is played as is.
+
+What comes out, on the game's meter (`gta.audio.level()`, the master's RMS over 43 ms of the mono
+downmix, which reads a centred voice 3 dB under either channel):
+
+- on foot in Monzone's street the valley sits near −40 dBFS (the wind bed at the 35 dB(A)
+  background, the Lucido behind the houses), a meadow near −36, a windy ridge near −31;
+- the player's own walking steps peak near −22 dBFS (−20 at the loudest);
+- the Lucido 15 m away in the clear reads −25; behind the houses it plays 15 dB lower through a
+  2.8 kHz lowpass;
+- a car cruising past 10 m away at 14 m/s peaks near −20 dBFS, 71 cents sharp coming and 69 flat
+  going;
+- the player's cabin idles near −30 and pulls near −14 (Panda) to −11 (Giulia) at full throttle;
+- the loudest near sounds go past gain 1 and the master limiter holds them near −2 dBFS: the
+  player's own horn and siren (about 19 and 17.5 dB over, so the limiter takes up to 11 dB and the
+  rest of the mix dips while they sound), a crash a few metres away, a honk 10 m away, and the
+  door slam and starter heard from the seat.
 
 ## Controls
 
@@ -382,20 +411,25 @@ On foot H does nothing. The title card lists it.
 own emitter and mixer:
 
 - **Listener:** the distance (a logarithmic slider, 0.5 m to 2 km), the side of the screen, a cabin
-  (none or a model), the reverb send, the street room, and the master level meter.
+  (none or a model), the street room, and the master level meter.
 - **One panel per kind:** each continuous kind has Hold / Release and each one-shot Play, with a
   control for every param (sliders, menus, checkboxes). Each panel shows how its sound is heard at
-  that spot: the level at 1 m and at the listener, the gain, pan, lowpass and delay. The first press
-  starts the audio.
+  that spot: the level at 1 m (at the ears for the beds) and at the listener, the gain, pan,
+  lowpass, reverb send and delay. The first press starts the audio.
 - **Render all** (also `window.lab.renderAll()`, which returns the rows) renders every voice and
   shot offline at 48 kHz at a few representative params (59 renders, about 2 s) and tabulates peak,
   RMS (dBFS), spectral centroid (`measure.ts`), NaNs and length. It flags silence (peak under
   1e-4), clipping (over 0.95), NaNs, and any sound left after a voice's stop or a shot's end.
-  Adding a kind fails to compile until the page has a panel and render rows for it.
+  Adding a kind fails to compile until the page has a panel and render rows for it. Two low peaks
+  are by design: the wind swells with gusts over seconds, so at strength 1 a 2 s render peaks near
+  0.2–0.3 while its 64 s gust loop reaches 0.45–0.65; and the blackbird's thin "seee" (30 % of its
+  calls) peaks at 0.25 yet is 6 dB louder over 125 ms than its "chink" series at 0.5.
 
-The page's placement is a stand-in for the director's chain (spreading, air absorption, the cabin
-and masking against 35 dB(A); no ground, foliage, occlusion or Doppler; water as a point source),
-and its levels table is a display copy. The game plays `levels.ts`.
+The page places every sound with the director's own facts: the levels from `levels.ts` through
+`hear` in `hearing.ts`, the source at ear height over open, flat ground with nothing in the way, no
+Doppler, masked against 35 dB(A), and the wind bed compressed at its strength as `world.ts` does.
+Only water is a stand-in: a point source at its bank level + 6 dB, where the game takes each body's
+line-source level at the listener.
 
 ## Tests
 
@@ -410,7 +444,7 @@ functions (`synth/world.test.ts` imports them to check).
 | `src/audio/acoustics.test.ts` | the laws: the line source against the exact table, the air cutoffs, Doppler, the pan, diffraction, ground, foliage, masking, the mix calibration |
 | `src/audio/occlusion.test.ts` | path differences on real map spots: a flat meadow, Monzone Alto's 30 m tower, a bell over its own walls, Monte San Giorgio between its flanks |
 | `src/audio/places.test.ts`, `src/audio/places/water.test.ts` | surfaces, ambience shares, streets, echoes at Equi Terme, bells, dogs and birds, the Torrente Lucido from Monzone station, the Fontana di Aiola |
-| `src/audio/director/index.test.ts` | the director on a recording speaker at real map spots: proximity, a building's muffling, Doppler, step cadence, travel delay, crash merging and scrapes, echoes, nothing before the context, the cabin, getting in and out, horn and siren, the bells, water and its masking, voice caps and their hysteresis, flee cues |
+| `src/audio/director/index.test.ts` | the director on a recording speaker at real map spots: proximity (in the open and behind a ridge), a building's muffling, Doppler, step cadence, travel delay, crash merging and scrapes, echoes, nothing before the context, the cabin, getting in and out, horn and siren, the bells, water and its masking, the valley's never-silent bed and the river 15 m away against behind the houses, voice caps and their hysteresis, flee cues |
 | `src/audio/director/hearing.test.ts`, `occluder.test.ts` | the reverb send; the obstacle cache's refresh and forgetting |
 | `src/audio/speaker.test.ts`, `mixer.test.ts`, `buffers.test.ts`, `measure.test.ts` | the one-shot cap, the speaker inert until a trusted gesture, the reverb crossfade, the level meter, seamless noise loops, the render measurements |
 | `src/audio/gearbox.test.ts`, `src/audio/synth/*.test.ts` | gearbox shifts; the engine, tyre and crash laws; step and cricket rates; bubbles at their Minnaert frequency; synth params clamped, NaN to silence |
@@ -424,17 +458,25 @@ functions (`synth/world.test.ts` imports them to check).
    the speaker: wrap its `hold` and `play` to count requests or check placements.
 3. The Ritmo monitor (backslash) lists the audio schedule beside `update` and `render`.
 
-Measured in headless Chrome (`?seed=3`, keys sent over CDP): standing at the spawn −83 dBFS,
-walking to the nearest car −63, in the Carabinieri Giulia idling −47, driving at 13 m/s −29, with
-the siren on −27; no console errors and no non-finite placement or param. On the audition page
-"Render all" gives 59 rows, none flagged.
+Measured in headless Chrome (`?seed=3`, keys sent over CDP, `gta.audio.level()` every 100 ms):
+standing at the spawn −40 dBFS, walking there with step peaks up to −20, 15 m from the Lucido in
+the clear −25, in the Carabinieri Giulia idling −30 and with the siren on −10 (peaks −2), in a
+stolen Panda idling −29, at 18–22 m/s −14 and honking −13.5 (peaks −2); no console errors and no
+non-finite placement or param. On the audition page "Render all" gives 59 rows, none flagged.
 
 ## Known limits and tuning
 
-- **On foot the mix is quiet.** In a village street the wind bed is about 10 dB(A), and the
-  35 dB(A) background is a masking floor that is never played, so standing at the spawn the output
-  sits some 54 dB under driving (see above). It needs a listening pass. The knobs: `BEDS` and the
-  wind constants in `director/world.ts`, or the mix rule's centre and slope in `acoustics.ts`.
+- **The loudest near sounds lean on the limiter.** The player's own horn and siren pass only half
+  the cabin (`vehicles.ts`) and play some 18 dB over gain 1, so the limiter takes up to 11 dB while
+  they sound and everything else dips with them. A horn mounted in the grille passes the whole
+  cabin; that share (1, with its 1.4 kHz lowpass) would bring the horn to about −4 dBFS with about
+  4 dB of limiting.
+- **Beds against traffic.** Compressing the beds at their level lifts a quiet valley more than a
+  car 10 m away (whose 20 dB of spreading stays physical): a car cruising past 10 m away stands
+  some 10 dB over a village street's bed on the meter and 6 dB over a meadow's, not the physical
+  20–30.
+- **The own engine's range** is the voice's: idle to full throttle spans about 19 dB, so with the
+  cabin idling near −30 dBFS the Giulia pulls near −11 at full throttle.
 - **Engines mask and rank at full load.** Masking and the voice caps count an engine at its
   full-load level whatever its throttle; the synth plays an idle about 20 dB quieter, so an
   idling car is culled later than physics says.
@@ -449,17 +491,16 @@ the siren on −27; no console errors and no non-finite placement or param. On t
 - **The occluder is bounded:** at most 12 paths a frame are re-measured, each at most every
   150 ms, so a source moving fast behind houses can lag a few frames.
 - **A car rubbing along a wall** keeps a faint scrape held while the sim reports the small hits.
-- **The audition page** keeps its own copy of the levels: it can drift from `levels.ts`.
 
 Where to tune:
 
 | Where | What |
 |---|---|
 | `src/audio/director/levels.ts` | every source level and size, heights, caps and hysteresis, the bell towers, delay, reverb and echo sends |
-| `src/audio/acoustics.ts` | `AMBIENT_DB`, `CABIN`, the mix rule (`L_REF`, `K`), the air and diffraction tables |
-| `src/audio/director/vehicles.ts` | when tyres roll, the beeper sounds, a hit crashes or scrapes, hits merge; the groan and door timings |
+| `src/audio/acoustics.ts` | `AMBIENT_DB`, `CABIN`, the mix rule (`L_REF`, `K`, `FULL_SCALE`), the air and diffraction tables |
+| `src/audio/director/vehicles.ts` | when tyres roll, the beeper sounds, a hit crashes or scrapes, hits merge; the groan and door timings; how much of the cabin the own horn and siren pass |
 | `src/audio/director/people.ts` | jumps, running, the shout radius and the cue gap |
-| `src/audio/director/world.ts` | the wind law, birds, dogs, the bell strokes, how often water and dogs are looked up |
+| `src/audio/director/world.ts` | the wind law and its floor (`STILL`), the beds and water compressed at their level, birds, dogs, the bell strokes, how often water and dogs are looked up |
 | `src/audio/director/occluder.ts` | the obstacle refresh rate, per-frame budget and forgetting |
 | `src/audio/places.ts`, `src/audio/places/water.ts` | surfaces, ambience, street probes, the echo search, bells, dogs, bird trees; water power, fountains and the Cascata |
 | `src/audio/mixer.ts`, `src/audio/speaker.ts` | master gain, limiter, the two reverbs and their return; the one-shot cap |

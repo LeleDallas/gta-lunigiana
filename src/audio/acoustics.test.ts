@@ -2,7 +2,8 @@ import assert from "node:assert/strict"
 import { test } from "node:test"
 
 import { screenAxes } from "../sim/view.ts"
-import { airCutoff, audibility, diffraction, doppler, foliageLoss, groundLoss, lineLevel, mixGain, panOf, spreading, sumDb } from "./acoustics.ts"
+import { airCutoff, audibility, diffraction, doppler, foliageLoss, groundLoss, lineLevel, mixGain, panOf, sumDb } from "./acoustics.ts"
+import { LEVELS } from "./director/levels.ts"
 
 const near = (actual: number, expected: number, tolerance: number, what = "") =>
   assert.ok(Math.abs(actual - expected) <= tolerance, `${what} ${actual} is not ${expected} ± ${tolerance}`)
@@ -55,8 +56,8 @@ test("ground, foliage and masking follow ISO 9613-2 and the culling rule", () =>
   assert.deepEqual([40, 30, 25, 10].map((level) => audibility(level, 35)), [1, 1, 0.5, 0])
 })
 
-test("mix calibration: a horn from 2 m plays at gain 1, levels add as energy", () => {
-  near(mixGain(116, spreading(2, 1)), 1, 1e-9)
+test("mix calibration: a running step on stone from 1 m plays at gain 1, levels add as energy", () => {
+  near(mixGain(LEVELS.step.db, 0), 1, 1e-9)
   // Source levels are compressed 0.6 : 1, losses are not.
   near(20 * Math.log10(mixGain(106, 0) / mixGain(116, 0)), -6, 1e-9)
   near(20 * Math.log10(mixGain(116, 10) / mixGain(116, 0)), -10, 1e-9)

@@ -3,23 +3,25 @@ import { test } from "node:test"
 
 import type { VehicleModel } from "../../sim/vehicles.ts"
 import { screenAxes } from "../../sim/view.ts"
-import { dbToGain, SPEED_OF_SOUND } from "../acoustics.ts"
+import { AMBIENT_DB, dbToGain, SPEED_OF_SOUND } from "../acoustics.ts"
 import { bells } from "../places.ts"
 import { stepRate } from "../synth/steps.ts"
 import type { Continuous, Happening, Heard, HeardPerson, HeardVehicle, OneShot, Placement, Speaker } from "../types.ts"
 import { makeDirector, type WallClock } from "./index.ts"
-import { TOWERS } from "./levels.ts"
+import { TOWERS, windDb } from "./levels.ts"
 
 /**
  * Real map spots (found by probing the map): a treeless meadow on Monte dei Bianchi clear for 300 m to the south and
  * screen-right, a lane at Pian del Molino with a 10.7 m building 30 m east and open ground 30 m north-west, a wooded
  * ridge above Aiola (900 m) with no water within 400 m, Monzone station 68 m from the Torrente Lucido, a street
  * 50 m from Monzone Alto's tower, the woods above Isolano, in earshot of eleven bell towers, and the street of Monzone
- * where the game starts, 50 m from the Lucido behind the houses, with slopes to echo off.
+ * where the game starts, 50 m from the Lucido behind the houses, with slopes to echo off; a bank 15 m from the Lucido
+ * with nothing in the way, and the two flanks of Monte San Giorgio, 400 m apart.
  */
 const MEADOW = { x: -329, y: 1078 }, STREET = { x: -916.6, y: 1706.8 }, BEHIND = { x: -886.6, y: 1706.8 }, OPEN = { x: -937.8, y: 1728 }
 const RIDGE = { x: 1600, y: -494.5 }, STATION = { x: -494, y: 437 }, BELFRY = { x: -41.8, y: -306.6 }
-const HILLSIDE = { x: -950, y: 71 }, SPAWN = { x: -412.6, y: 437.8 }
+const HILLSIDE = { x: -950, y: 71 }, SPAWN = { x: -412.6, y: 437.8 }, BANK = { x: -418.6, y: 395.8 }
+const WEST_FLANK = { x: 785.7, y: -563.4 }, EAST_FLANK = { x: 1185.7, y: -563.4 }
 const FRAME = 1 / 60
 /** Screen-right on the ground, with the view in its home seat. */
 const SCREEN_RIGHT = screenAxes(0).right
@@ -87,6 +89,15 @@ test("a running car 30 m away on screen-right is heard there; 2 km away it is no
   assert.equal(far.held().has("engine:1"), false)
 })
 
+test("a car at full load 300 m across the open meadow is heard; 400 m away behind Monte San Giorgio it is not", () => {
+  const open = rig()
+  open.hear(world(MEADOW, { vehicles: [car(1, "panda", away(MEADOW, 300, SOUTH), { throttle: 1 })] }))
+  assert.equal(open.held().has("engine:1"), true)
+  const behind = rig()
+  behind.hear(world(WEST_FLANK, { vehicles: [car(1, "panda", EAST_FLANK, { throttle: 1 })] }))
+  assert.equal(behind.held().has("engine:1"), false)
+})
+
 test("a building between the listener and a car 30 m away muffles it: lower gain and cutoff", () => {
   const director = rig()
   director.hear(world(STREET, { vehicles: [car(1, "panda", BEHIND), car(2, "panda", OPEN)] }))
@@ -106,7 +117,7 @@ test("an approaching car is shifted up, a receding one down", () => {
   assert.ok(cents(-20) < 0)
 })
 
-test("a pedestrian walking (or running) 5 m away steps at that pace's cadence; 60 m away nothing is heard", () => {
+test("a pedestrian walking (or running) 5 m away steps at that pace's cadence; 40 m away nothing is heard", () => {
   const steps = (metres: number, speed = 2.2) => {
     const director = rig()
     const start = away(MEADOW, metres, SOUTH)
@@ -114,7 +125,7 @@ test("a pedestrian walking (or running) 5 m away steps at that pace's cadence; 6
     return director.take("step").length
   }
   for (const speed of [2.2, 5]) assert.ok(Math.abs(steps(5, speed) - 3 * stepRate(speed)) <= 1, `${steps(5, speed)} steps in 3 s at ${speed} m/s`)
-  assert.equal(steps(60), 0)
+  assert.equal(steps(40), 0)
 })
 
 test("a wall impact at 10 m/s crashes; 300 m away it arrives after its travel time, 30 m away at once", () => {
@@ -259,6 +270,18 @@ test("by the Torrente Lucido at Monzone station a water voice plays; on a dry ri
   const ridge = rig()
   ridge.hear(world(RIDGE))
   assert.ok(![...ridge.held().values()].some(({ sound }) => sound.kind === "water"))
+})
+
+test("the valley is never silent: in Monzone's sheltered street the wind blows at the rural background; the Lucido 15 m away in the clear plays near full, far louder and brighter than behind the houses", () => {
+  const street = rig()
+  street.hear(world(SPAWN), 2)
+  const wind = street.held().get("wind")?.sound
+  assert.ok(wind?.kind === "wind" && windDb(wind.strength) >= AMBIENT_DB - 1e-9, `strength ${JSON.stringify(wind)}`)
+  const bank = rig()
+  bank.hear(world(BANK), 2)
+  const near = bank.held().get("water:Torrente Lucido")!.at, behind = street.held().get("water:Torrente Lucido")!.at
+  assert.ok(near.gain > dbToGain(-6) && near.gain > behind.gain * dbToGain(15), `${near.gain} vs ${behind.gain}`)
+  assert.ok(near.cutoff > 2 * behind.cutoff, `${near.cutoff} vs ${behind.cutoff} Hz`)
 })
 
 test("the Lucido behind the houses of Monzone still sounds: a river masks other sounds as loud as it is heard, never itself", () => {
