@@ -1,9 +1,10 @@
 /**
  * Pixel-art isometric pipeline (three 0.186): an orthographic camera at 30° elevation sitting
- * opposite SCREEN_UP (north-west of the focus), the scene rendered into a low-res HalfFloat target
- * (~270 texels tall), then one fullscreen pass that draws depth-edge outlines, converts linear to
- * sRGB and upscales by an integer factor with a sub-texel scroll offset. The camera snaps to the
- * texel grid, so the static world never shimmers while the view still scrolls smoothly.
+ * opposite screen-up (north-west of the focus at the home seat, turnable by quarter turns), the
+ * scene rendered into a low-res HalfFloat target (~270 texels tall), then one fullscreen pass that
+ * draws depth-edge outlines, converts linear to sRGB and upscales by an integer factor with a
+ * sub-texel scroll offset. The camera snaps to the texel grid, so the static world never shimmers
+ * while the view still scrolls smoothly.
  *
  * @module render/pipeline
  */
@@ -13,7 +14,7 @@ import {
 } from "three"
 import { FullScreenQuad } from "three/addons/postprocessing/Pass.js"
 
-import { SCREEN_UP } from "../sim/view.ts"
+import { screenAxes } from "../sim/view.ts"
 
 /** 30° elevation: world ground axes project to exact 2:1 pixel lines. */
 const ELEVATION = Math.PI / 6
@@ -22,24 +23,28 @@ const DISTANCE = 500 // metres from focus to camera along the view axis
 const NEAR = 1
 const FAR = 1000
 
+/** Radians of view yaw per quarter turn of the sim's `View` (a turn to the left is counter-clockwise). */
+export const QUARTER = Math.PI / 2
+
+const aim = new Matrix4(), origin = new Vector3()
 /**
- * Unit vector from the focus to the camera in three space: the camera looks along SCREEN_UP on
- * the ground (sim y = north maps to three −z), so it sits on the opposite side, 30° up.
+ * Writes the camera's right/up/back axes (three space, the columns of its rotation) for a view
+ * turned `yaw` rad to the left of the home seat into the given vectors, and returns the rotation.
+ * At the home seat the camera looks along screen-up on the ground (sim y = north maps to three −z),
+ * from the opposite side, 30° up. A turn to the left (counter-clockwise from above in the sim)
+ * is a rotation about three's +y.
  */
-const viewOffset = (): Vector3 => {
-  const c = Math.cos(ELEVATION)
-  return new Vector3(-SCREEN_UP.x * c, Math.sin(ELEVATION), SCREEN_UP.y * c)
+const aimAt = (yaw: number, right: Vector3, up: Vector3, back: Vector3): Matrix4 => {
+  const home = screenAxes(0).up, c = Math.cos(ELEVATION)
+  const eye = new Vector3(-home.x * c, Math.sin(ELEVATION), home.y * c).applyAxisAngle(Object3D.DEFAULT_UP, yaw)
+  return aim.lookAt(eye, origin, Object3D.DEFAULT_UP).extractBasis(right, up, back)
 }
 
-/** The fixed-orientation camera and its right/up/back basis (columns of its world matrix). */
-export const isoCamera = (): { readonly camera: OrthographicCamera; readonly right: Vector3; readonly up: Vector3; readonly back: Vector3 } => {
-  const camera = new OrthographicCamera(-1, 1, 1, -1, NEAR, FAR)
-  camera.position.copy(viewOffset())
-  camera.lookAt(0, 0, 0)
-  camera.updateMatrixWorld()
+/** The camera's right/up/back axes (three space) for a view turned `yaw` rad to the left of the home seat. */
+export const viewAxes = (yaw: number): { readonly right: Vector3; readonly up: Vector3; readonly back: Vector3 } => {
   const right = new Vector3(), up = new Vector3(), back = new Vector3()
-  camera.matrixWorld.extractBasis(right, up, back)
-  return { camera, right, up, back }
+  aimAt(yaw, right, up, back)
+  return { right, up, back }
 }
 
 const FRAGMENT = /* glsl */ `
@@ -79,11 +84,23 @@ export const zoomFor = (speed: number | undefined, last: number): number => {
   return s > 16 || (s >= 13 && last === WIDEST_ZOOM) ? WIDEST_ZOOM : 6
 }
 
+/**
+ * The view's yaw one frame of `dt` seconds on from `yaw`, swinging toward `target`: it eases out,
+ * covering 1 − e^(−12·dt) of the way, but never slower than 1 rad/s, so a quarter turn lands in
+ * about a third of a second and stops dead instead of creeping (any sub-texel creep shimmers).
+ */
+export const turnToward = (yaw: number, target: number, dt: number): number => {
+  const rest = Math.abs(target - yaw), step = Math.max(rest * (1 - Math.exp(-12 * dt)), dt)
+  return step >= rest ? target : yaw + Math.sign(target - yaw) * step
+}
+
 /** The low-res render target, the camera that fills it and the blit to the canvas. */
 export class PixelView {
-  readonly camera: OrthographicCamera
+  readonly camera = new OrthographicCamera(-1, 1, 1, -1, NEAR, FAR)
   /** World point the view is centred on; host code moves it. */
   readonly focus = new Vector3()
+  /** Radians the view is turned to the left of its home seat; host code turns it. */
+  yaw = 0
   /** Low-res texels per world metre (zoom). */
   texelsPerMetre = 8
   /** Device pixels per low-res texel (integer, from `resize`). */
@@ -96,19 +113,16 @@ export class PixelView {
   private readonly target: WebGLRenderTarget
   private readonly blit: FullScreenQuad
   private readonly material: ShaderMaterial
-  private readonly right: Vector3
-  private readonly up: Vector3
-  private readonly back: Vector3
+  private readonly right = new Vector3()
+  private readonly up = new Vector3()
+  private readonly back = new Vector3()
+  /** The yaw the camera and its axes were last aimed at. */
+  private aimed = Number.NaN
   private readonly size = new Vector2()
 
   constructor(renderer: WebGLRenderer, targetHeight = 270) {
     this.renderer = renderer
     this.targetHeight = targetHeight
-    const { camera, right, up, back } = isoCamera()
-    this.camera = camera
-    this.right = right
-    this.up = up
-    this.back = back
     this.target = new WebGLRenderTarget(1, 1, {
       type: HalfFloatType, minFilter: NearestFilter, magFilter: NearestFilter, depthTexture: new DepthTexture(1, 1)
     })
@@ -148,10 +162,14 @@ export class PixelView {
     return { width: this.view.x / this.texelsPerMetre, depth: this.view.y / this.texelsPerMetre / Math.sin(ELEVATION) }
   }
 
-  /** Renders one frame: camera snapped to the texel grid, remainder handed to the blit. */
+  /** Renders one frame: camera turned to `yaw` and snapped to the texel grid, remainder handed to the blit. */
   render(scene: Scene): void {
     const texel = 1 / this.texelsPerMetre
     const cam = this.camera
+    if (this.yaw !== this.aimed) {
+      cam.quaternion.setFromRotationMatrix(aimAt(this.yaw, this.right, this.up, this.back))
+      this.aimed = this.yaw
+    }
     cam.left = (-this.target.width * texel) / 2
     cam.right = (this.target.width * texel) / 2
     cam.top = (this.target.height * texel) / 2
@@ -171,7 +189,7 @@ export class PixelView {
   }
 }
 
-const lightBasis = new Matrix4(), origin = new Vector3(), lr = new Vector3(), lu = new Vector3(), lb = new Vector3()
+const lightBasis = new Matrix4(), lr = new Vector3(), lu = new Vector3(), lb = new Vector3()
 /**
  * Centres the sun's shadow box (half size `half` m) on `focus`, snapped to shadow-map texels in
  * light space so shadow edges do not crawl while the camera moves. `sun.target` must be in the scene.

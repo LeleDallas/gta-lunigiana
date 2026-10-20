@@ -4,12 +4,12 @@ import { test } from "node:test"
 import { Vector3 } from "three"
 
 import { MAP } from "../sim/map/index.ts"
-import { CHUNKS, chunkOf, plan, radiiFor, screenDistances, screenRects } from "./chunks.ts"
+import { chunkBoxes, CHUNKS, chunkOf, plan, radiiFor, screenDistances, screenRects } from "./chunks.ts"
 import { terrainY } from "./ground.ts"
-import { isoCamera } from "./pipeline.ts"
+import { viewAxes } from "./pipeline.ts"
 
-const { right, up, back } = isoCamera()
-const rects = screenRects(right, up)
+const { right, up, back } = viewAxes(0)
+const rects = screenRects(chunkBoxes(), right, up, new Float32Array(CHUNKS.x * CHUNKS.y * 4))
 const distancesFrom = (focus: Vector3) => screenDistances(rects, focus.dot(right), focus.dot(up), new Float32Array(CHUNKS.x * CHUNKS.y))
 const ground = (x: number, y: number) => new Vector3(x, terrainY(x, y), -y)
 

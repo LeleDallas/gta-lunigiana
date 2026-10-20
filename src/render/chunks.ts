@@ -48,11 +48,12 @@ const HEADROOM = 50
 const FOOTROOM = 5
 
 /**
- * The screen-plane rectangle of every chunk's box for a camera with axes `right` and `up` (three
- * space): flat (right0, right1, up0, up1) per key. The camera never turns, so this is computed once.
+ * Every chunk's box: flat (x0, x1, y0, y1, low, high) per key, map metres and three-space heights,
+ * from its terrain nodes plus room for what stands on them. Reading the terrain is the slow part,
+ * so this is computed once; `screenRects` projects the boxes for whichever way the view is turned.
  */
-export const screenRects = (right: Vector3, up: Vector3): Float32Array => {
-  const out = new Float32Array(CHUNKS.x * CHUNKS.y * 4)
+export const chunkBoxes = (): Float32Array => {
+  const out = new Float32Array(CHUNKS.x * CHUNKS.y * 6)
   for (let key = 0; key < CHUNKS.x * CHUNKS.y; key++) {
     const { i0, j0, i1, j1 } = chunkCells(key)
     let low = Number.MAX_VALUE, high = -Number.MAX_VALUE
@@ -61,14 +62,28 @@ export const screenRects = (right: Vector3, up: Vector3): Float32Array => {
       low = Math.min(low, h)
       high = Math.max(high, h)
     }
-    const xs = [hm.x0 + i0 * hm.cell, hm.x0 + i1 * hm.cell], ys = [hm.y0 + j0 * hm.cell, hm.y0 + j1 * hm.cell], hs = [low - FOOTROOM, high + HEADROOM]
+    out.set([hm.x0 + i0 * hm.cell, hm.x0 + i1 * hm.cell, hm.y0 + j0 * hm.cell, hm.y0 + j1 * hm.cell, low - FOOTROOM, high + HEADROOM], key * 6)
+  }
+  return out
+}
+
+/**
+ * The screen-plane rectangle of every chunk box of `boxes` for a camera with axes `right` and `up`
+ * (three space), written into `out`: flat (right0, right1, up0, up1) per key.
+ */
+export const screenRects = (boxes: Float32Array, right: Vector3, up: Vector3, out: Float32Array): Float32Array => {
+  for (let key = 0; key < out.length / 4; key++) {
     let r0 = Number.MAX_VALUE, r1 = -Number.MAX_VALUE, u0 = Number.MAX_VALUE, u1 = -Number.MAX_VALUE
-    for (const x of xs) for (const y of ys) for (const h of hs) {
+    for (let corner = 0; corner < 8; corner++) {
+      const x = boxes[key * 6 + (corner & 1)]!, y = boxes[key * 6 + 2 + ((corner >> 1) & 1)]!, h = boxes[key * 6 + 4 + (corner >> 2)]!
       // three space: (x, h, -y)
       const r = x * right.x + h * right.y - y * right.z, u = x * up.x + h * up.y - y * up.z
       r0 = Math.min(r0, r); r1 = Math.max(r1, r); u0 = Math.min(u0, u); u1 = Math.max(u1, u)
     }
-    out.set([r0, r1, u0, u1], key * 4)
+    out[key * 4] = r0
+    out[key * 4 + 1] = r1
+    out[key * 4 + 2] = u0
+    out[key * 4 + 3] = u1
   }
   return out
 }

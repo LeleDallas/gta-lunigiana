@@ -12,12 +12,25 @@ are randomly chosen spots, about 80% Pandas and 20% Apes. On a tertiary-road spo
 a roll under 10% makes a marble truck instead, at most two of them. The world's `Rng` makes every
 choice, so `?seed=N` replays the same start.
 
+## The view
+
+`TurnView` (`src/sim/index.ts`) turns the camera a quarter left (Q, counter-clockwise seen from
+above) or right (E), once per press, on foot or driving. The `View` resource counts the net
+quarter turns. It is saved state, because the on-foot keys follow it. In the home view (0), the
+camera sits north-west of the player and looks south-east: the mountains rise to the south and
+east, so this side sees every street. Driving keys steer the car and do not depend on the view.
+
+The host swings the camera through each turn in about a third of a second, or turns it at once
+under `prefers-reduced-motion`. The sun and the minimap turn with it, so the lit and shaded walls
+and the minimap's top always match the screen.
+
 ## On foot
 
 `PlayerFoot` (`systems/foot.ts`):
 
-- The movement keys walk along the screen axes: up walks along `SCREEN_UP` (south-east on the
-  ground) and right along `SCREEN_RIGHT` (south-west). The body turns to face the keys.
+- The movement keys walk along the screen axes of the turned view (`screenAxes` in
+  `src/sim/view.ts`). In the home view, up walks south-east on the ground and right south-west;
+  each quarter turn of the view swings both a quarter. The body turns to face the keys.
 - Walking speed is 2.2 m/s, sprinting (Shift) 5.5 m/s, with an acceleration of 30 m/s².
 - The body is a circle of radius 0.35 m. It slides along walk walls and never passes through them
   (`walkBy` in `src/sim/body.ts`). Velocity is what actually happened, so a wall stops it.
@@ -25,7 +38,7 @@ choice, so `?seed=N` replays the same start.
 
 ## Entering, stealing, carjacking, exiting
 
-`EnterExit` (`systems/enter-exit.ts`) handles the action key (F, E or Enter), once per press:
+`EnterExit` (`systems/enter-exit.ts`) handles the action key (F or Enter), once per press:
 
 - **Enter**: on foot and standing, the player enters the vehicle whose body is nearest, within
   2 m (`ENTER_GAP`), with no walk wall in between. The HUD prompt uses the same test
@@ -171,13 +184,13 @@ farther than `VIEW_REACH` (90 m, the farthest ground the camera shows).
 |---|---|
 | `src/sim/tuning.ts` | `ENTER_GAP`, `PERSON_RADIUS`, `WALK_SPEED`, `SPRINT_SPEED`, `KNOCK_SPEED` |
 | `src/sim/vehicles.ts` | `VEHICLES` handling table, `CAR_COLORS` |
-| `src/sim/view.ts` | `SCREEN_UP`, `SCREEN_RIGHT`, `LOOK_AHEAD`, `VIEW_REACH` |
+| `src/sim/view.ts` | `screenAxes` (screen axes of the home view), `LOOK_AHEAD`, `VIEW_REACH` |
 | `src/sim/route.ts` | lane offsets, passing room (`PASS_MARGIN`), pedestrian verge, `cruiseSpeed`, truck road classes, hairpin limit |
 | `src/sim/systems/populate.ts` | `TRAFFIC`, `PEDESTRIANS` population limits, `PEOPLED` (where pedestrians spawn), spawn model mix |
 | `src/sim/systems/spawn.ts` | parked cars (`PARKED`), trucks (`TRUCKS`) |
 | `src/sim/systems/*.ts` | each system's own constants at the top of its file (physics, traffic, pedestrians, contacts, foot, enter/exit) |
 | `src/sim/map/kinds.ts` | road widths and which classes carry traffic, the player's car, or only people |
-| `src/render/pipeline.ts` | `zoomFor` zoom levels |
+| `src/render/pipeline.ts` | `zoomFor` zoom levels, `turnToward` view turn speed |
 
 Gameplay changes need a test: the scenario tests in `src/sim/index.test.ts` and
 `src/sim/walls.test.ts` stage exact situations with `src/sim/testing.ts`. Fixtures find map
