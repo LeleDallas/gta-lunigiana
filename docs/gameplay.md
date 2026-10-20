@@ -6,7 +6,7 @@ All rules are simulation systems in `src/sim/systems`. The step order is in
 ## Start
 
 `SpawnWorld` puts the player on the Via Cesare Battisti sidewalk in front of the Carabinieri
-station. 150 of the map's parked spots (`PARKED`) get a car, picked at random, so the cars spread
+station. 200 of the map's parked spots (`PARKED`) get a car, picked at random, so the cars spread
 over the villages as the spots do. The two spots nearest the station get Carabinieri cars. The rest
 are randomly chosen spots, about 80% Pandas and 20% Apes. On a tertiary-road spot where it fits,
 a roll under 10% makes a marble truck instead, at most two of them. The world's `Rng` makes every
@@ -117,7 +117,7 @@ the lane helpers in `src/sim/route.ts`.
 - **Unsticking.** A car stuck below 1 m/s for 3 s reverses for 1.5 s at 3 m/s. If it is lined up
   with its lane, it may turn round: half the time when the way back is not a dead end, always
   from its second try, never on a oneway. Waiting for a person in the way (ahead of the bumper,
-  on the carriageway) counts four times slower: the car holds about 12 s for them to move on,
+  on the carriageway or the verge pedestrians walk) counts four times slower: the car holds about 12 s for them to move on,
   then backs up and turns round like for anything else. A person beside the car or off the road
   counts like any other obstacle.
 - **Lost.** A car more than 12 m from its edge joins the nearest usable road.

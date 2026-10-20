@@ -21,7 +21,7 @@ const ELEVATION = Math.PI / 6
 const MARGIN = 1 // extra low-res texels per side, consumed by the sub-texel offset
 const DISTANCE = 500 // metres from focus to camera along the view axis
 const NEAR = 1
-const FAR = 1000
+const FAR = 3000 // 2.5 km past the focus: from the Apuan summits the deepest ground in view is ≈ 2.45 km from the camera
 
 /** Radians of view yaw per quarter turn of the sim's `View` (a turn to the left is counter-clockwise). */
 export const QUARTER = Math.PI / 2
@@ -157,19 +157,24 @@ export class PixelView {
     this.material.uniforms["uScale"]!.value = this.scale
   }
 
-  /** Visible ground extent in metres (width, depth along screen-up). */
-  get ground(): { readonly width: number; readonly depth: number } {
-    return { width: this.view.x / this.texelsPerMetre, depth: this.view.y / this.texelsPerMetre / Math.sin(ELEVATION) }
+  /** Turns the camera and its axes to `yaw` if they are not there yet. */
+  private aim(): void {
+    if (this.yaw === this.aimed) return
+    this.camera.quaternion.setFromRotationMatrix(aimAt(this.yaw, this.right, this.up, this.back))
+    this.aimed = this.yaw
+  }
+
+  /** The shadow box over the ground this view shows (`shadowFit`), at its current yaw; `groundAt(x, z)` is the terrain's render y. */
+  shadowFit(toSun: Vector3, groundAt: (x: number, z: number) => number): ShadowFit {
+    this.aim()
+    return shadowFit(this.focus, { right: this.right, up: this.up, back: this.back }, this.view.x / this.texelsPerMetre, this.view.y / this.texelsPerMetre, toSun, groundAt)
   }
 
   /** Renders one frame: camera turned to `yaw` and snapped to the texel grid, remainder handed to the blit. */
   render(scene: Scene): void {
     const texel = 1 / this.texelsPerMetre
     const cam = this.camera
-    if (this.yaw !== this.aimed) {
-      cam.quaternion.setFromRotationMatrix(aimAt(this.yaw, this.right, this.up, this.back))
-      this.aimed = this.yaw
-    }
+    this.aim()
     cam.left = (-this.target.width * texel) / 2
     cam.right = (this.target.width * texel) / 2
     cam.top = (this.target.height * texel) / 2
@@ -190,20 +195,70 @@ export class PixelView {
 }
 
 const lightBasis = new Matrix4(), lr = new Vector3(), lu = new Vector3(), lb = new Vector3()
+
+/** The sun's shadow box around the focus: half size across the light, and how far the shown ground reaches toward (`above`) and away from (`below`) the sun. */
+export interface ShadowFit { readonly half: number; readonly above: number; readonly below: number }
+
+/** Widest shadow box half size, m: the 2048 map is then 0.3 m per texel. */
+const SHADOW_CAP = 300
+/** Ray-march step down to the ground, m. */
+const MARCH = 4
+const ray = new Vector3(), hit = new Vector3()
+
 /**
- * Centres the sun's shadow box (half size `half` m) on `focus`, snapped to shadow-map texels in
- * light space so shadow edges do not crawl while the camera moves. `sun.target` must be in the scene.
+ * The shadow box that covers the ground a view of `width` × `height` m (screen plane, around
+ * `focus`) shows. On flat ground that is the view's ground rectangle; the rays through its corners
+ * and edge midpoints are also marched from the camera plane to the first ground they hit, because a
+ * slope falling away from the camera shows ground far past that rectangle, and a valley far below
+ * lies deep along the light.
  */
-export const followSun = (sun: DirectionalLight, focus: Vector3, toSun: Vector3, half: number): void => {
-  const shadow = sun.shadow.camera
+export const shadowFit = (
+  focus: Vector3, axes: { readonly right: Vector3; readonly up: Vector3; readonly back: Vector3 }, width: number, height: number, toSun: Vector3,
+  groundAt: (x: number, z: number) => number
+): ShadowFit => {
+  lightBasis.lookAt(toSun, origin, Object3D.DEFAULT_UP).extractBasis(lr, lu, lb)
+  let half = Math.hypot(width, height / Math.sin(ELEVATION)) / 2, above = 0, below = 0
+  for (const [u, v] of [[-1, -1], [0, -1], [1, -1], [-1, 0], [1, 0], [-1, 1], [0, 1], [1, 1]] as const) {
+    ray.copy(focus).addScaledVector(axes.right, (u * width) / 2).addScaledVector(axes.up, (v * height) / 2).addScaledVector(axes.back, DISTANCE)
+    // The first crossing from above the ground to below it (the camera plane may start inside a hill).
+    let wasAbove = false
+    for (let t = 0; t < FAR; t += MARCH, ray.addScaledVector(axes.back, -MARCH)) {
+      const isAbove = ray.y > groundAt(ray.x, ray.z)
+      if (wasAbove && !isAbove) {
+        hit.subVectors(ray, focus)
+        half = Math.max(half, Math.abs(hit.dot(lr)), Math.abs(hit.dot(lu)))
+        above = Math.max(above, hit.dot(toSun))
+        below = Math.min(below, hit.dot(toSun))
+        break
+      }
+      wasAbove = isAbove
+    }
+  }
+  return { half: Math.min(SHADOW_CAP, half + 10), above, below }
+}
+
+/** Shadow casters may stand this far toward the sun from the ground shown, m (a ridge over a valley). */
+const CASTERS = 1500
+/** Depth bias, m (three's `shadow.bias` is a share of the box's depth). */
+const BIAS = 0.45
+
+/**
+ * Fits the sun's shadow box (`shadowFit`) on `focus`, snapped to shadow-map texels in light space
+ * so shadow edges do not crawl while the camera moves. `sun.target` must be in the scene.
+ */
+export const followSun = (sun: DirectionalLight, focus: Vector3, toSun: Vector3, fit: ShadowFit): void => {
+  const shadow = sun.shadow.camera, half = fit.half
   shadow.left = -half
   shadow.right = half
   shadow.top = half
   shadow.bottom = -half
+  const distance = Math.max(0, fit.above) + CASTERS
+  shadow.far = distance - Math.min(0, fit.below) + 50
+  sun.shadow.bias = -BIAS / (shadow.far - shadow.near)
   shadow.updateProjectionMatrix()
   const texel = (2 * half) / sun.shadow.mapSize.x
   lightBasis.lookAt(toSun, origin, Object3D.DEFAULT_UP).extractBasis(lr, lu, lb)
   const x = Math.round(focus.dot(lr) / texel) * texel, y = Math.round(focus.dot(lu) / texel) * texel
   sun.target.position.copy(lr).multiplyScalar(x).addScaledVector(lu, y).addScaledVector(lb, focus.dot(lb))
-  sun.position.copy(sun.target.position).addScaledVector(toSun, 400)
+  sun.position.copy(sun.target.position).addScaledVector(toSun, distance)
 }

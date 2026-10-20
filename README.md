@@ -29,20 +29,27 @@ period of prosperity; Monzone station's freight yard served the marble trade, wi
 brought down by an aerial cableway. The Lucca–Aulla railway still climbs the valley through
 Gragnola, Monzone and Equi Terme.
 
-The playable map covers about 5.2 × 4.6 km of it:
+The playable map covers the whole valley, ridge to ridge: 7.8 × 10 km, from Gragnola up to
+1,800 m.
 
 - **Monzone**: the station quarter on Via Cesare Battisti, the Carabinieri station, and the
   stone lanes of Monzone Alto.
-- **Equi Terme**: the spa village up the eastern branch, with its own station.
+- **Vinca**: the stone village at the head of the western branch, at the end of the SP59's
+  hairpins, under Pizzo d'Uccello and Monte Sagro.
+- **Equi Terme**: the spa village up the eastern branch, with its own station, and above it the
+  Solco di Equi gorge with the old marble road's tunnels and its quarries.
 - **Gragnola**: the old town at the mouth of the valley, on the SR445 della Garfagnana and the
   Aulella, with the Castello dell'Aquila on the hill nearby.
-- **The hill villages** west of the Lucido: Viano, Pieve di Viano, Colognola, Campiglione and
-  Vezzanello.
+- **The hill villages**: Tenerano, Viano, Pieve di Viano, Colognola, Campiglione and Vezzanello
+  west of the Lucido; Ugliancaldo on the ridge above the Solco.
+- **The Apuan ridge**: Pizzo d'Uccello's north face, the Garnerone, Foce di Vinca, Monte Sagro
+  and Monte Borla, with the white marble quarries of the Sagro basin.
 - Aiola, Mezzana, Codiponte, Casciana and the woods, streams and hairpins in between.
 
 Roads, rivers, the railway, woods and place names come from OpenStreetMap. Buildings (with their
 surveyed eave heights), road widths and surfaces come from Regione Toscana's 1:2000 technical map
-(2019), and the terrain from its 1 m LiDAR survey (2010).
+(2019), the terrain from its 1 m LiDAR surveys (2010 and 2012), and the bare rock, pastures and
+quarries from its land-cover map (2019).
 
 This is a fan project. It is not affiliated with or endorsed by Rockstar Games or Take-Two
 Interactive; "Grand Theft Auto" is their trademark.
@@ -53,10 +60,12 @@ Interactive; "Grand Theft Auto" is their trademark.
 |---|---|
 | ![On foot beside the Carabinieri's Alfa Romeo Giulia on Via Cesare Battisti, Monzone](docs/screenshots/monzone-carabinieri.png) | ![Driving the stolen Carabinieri car over the Via delle Cave bridge across the Lucido, beside the railway](docs/screenshots/driving.png) |
 | On foot in Monzone, next to the Carabinieri's car | Over the Lucido in the stolen Giulia |
-| ![The full map, opened with M: the valley from Monzone to Gragnola and Codiponte](docs/screenshots/full-map.png) | ![Gragnola's old town on the Lucido and the Via Borgo Lucido bridge](docs/screenshots/gragnola.png) |
+| ![The full map, opened with M: the whole valley from Gragnola down to Vinca, Pizzo d'Uccello and Monte Sagro](docs/screenshots/full-map.png) | ![Gragnola's old town on the Lucido and the Via Borgo Lucido bridge](docs/screenshots/gragnola.png) |
 | The full map (M) | Gragnola, on the Lucido |
 | ![Equi Terme around Piazza delle Terme](docs/screenshots/equi-terme.png) | ![Monzone Alto with the church of San Prospero and its bell tower](docs/screenshots/monzone-alto.png) |
 | Equi Terme | Monzone Alto and San Prospero |
+| ![Vinca's stone borgo around Sant'Andrea, at the head of the SP59](docs/screenshots/vinca.png) | ![The Solco di Equi: woods, bare marble walls and Cava Cattani above Equi Terme](docs/screenshots/solco-di-equi.png) |
+| Vinca | The Solco di Equi and its quarries |
 
 ## Requirements
 
@@ -90,8 +99,8 @@ In dev mode, the backslash key toggles the Ritmo monitor.
 
 The bindings live in `bindings` in `src/sim/schema.ts`. The HUD shows the street and district you
 are in, cars stolen, people hit, the action the key would take, a speedometer while driving, and
-a minimap. M opens the full map: the whole area north-up with the villages and hamlets named and
-your position marked.
+a minimap. M opens the full map: the whole area north-up with the villages, hamlets and main
+peaks named and your position marked.
 
 ## Scripts
 
@@ -129,14 +138,14 @@ your position marked.
 pnpm map
 ```
 
-The build reads only `data/raw` and takes about 3.5 s. Its output is deterministic: with the
-same inputs, `monzone.json` (about 10.6 MB) comes out byte-identical. Never edit `monzone.json`
+The build reads only `data/raw` and takes about 7.5 s. Its output is deterministic: with the
+same inputs, `monzone.json` (about 36 MB) comes out byte-identical. Never edit `monzone.json`
 by hand.
 
 Inputs in `data/raw`:
 
 - `lunigiana.osm.gz`: an OpenStreetMap API 0.6 extract of the play area plus 100 m (lat
-  44.1546–44.1977, lon 10.0925–10.1600), written by `pnpm fetch-osm` (`src/tools/fetch-osm.ts`)
+  44.1060–44.1977, lon 10.0925–10.1925), written by `pnpm fetch-osm` (`src/tools/fetch-osm.ts`)
   from 4 × 4 `https://api.openstreetmap.org/api/0.6/map?bbox=...` tiles. Every land-use, natural,
   building, leisure or amenity multipolygon is fetched whole with
   `https://api.openstreetmap.org/api/0.6/relation/<id>/full`, because most of a forest's member
@@ -144,12 +153,15 @@ Inputs in `data/raw`:
   always gives the same file.
 - `rt/`: Regione Toscana data from the Geoscopio cartoteca, written by `pnpm fetch-rt`
   (`src/tools/fetch-rt.ts`, which needs `unzip`; the download URLs are pinned there):
-  - `ctr/<sheet>_<layer>.shp.gz` + `.dbf.gz`: CTR 1:2000 (2019), the 16 sheets over the play
-    area (23D11–13, 23D18–21, 23D26–29, 23D34–37, 23D43), layers `AED` (buildings with eave
-    elevations), `AGE` (garages, ruins), `AVI` (road surfaces with street names) and `AZR` (the
-    area each sheet maps).
-  - `dtm.bin` + `dtm.json`: the 1 m LiDAR terrain model (2010) of the 20 tiles over the play
-    area, mosaicked, cropped to the play area plus 32 m and averaged to 2 m cells.
+  - `ctr/<sheet>_<layer>.shp.gz` + `.dbf.gz`: CTR 1:2000 (2019), the 25 sheets that map ground
+    in the play area (23D11–15, 23D18–21, 23D26–31, 23D34–37, 23D43, 23D46, 23D47, 23D53–55),
+    layers `AED` (buildings with eave elevations), `AGE` (garages, ruins), `AVI` (road surfaces
+    with street names) and `AZR` (the area each sheet maps).
+  - `dtm.bin` + `dtm.json`: the 1 m LiDAR terrain model, 46 tiles of the 2010 flight and 19 of
+    the 2012 flight (Monte Sagro and the Carrara side), mosaicked, cropped to the play area plus
+    32 m and averaged to 2 m cells. The 0.65 km² no flight covers come from the 10 m DTM.
+  - `ucs.json.gz`: the land cover 1:10 000 (2019) polygons the build uses (quarries, bare rock,
+    sparse vegetation, pastures, heath), from the Regione Toscana WFS.
 
 Downloading the OSM data again pulls current edits, so the map changes. The files in `data/raw`
 are what pins it. `node src/tools/preview-map.ts` draws a top-down PNG of the built map (see
@@ -160,12 +172,14 @@ are what pins it. `node src/tools/preview-map.ts` draws a top-down PNG of the bu
 - Map data © OpenStreetMap contributors, available under the Open Database License (ODbL) 1.0:
   https://www.openstreetmap.org/copyright. `monzone.json` is a derived database and stays under
   the ODbL.
-- Buildings, road surfaces and elevation: "Fonte dei dati: Regione Toscana – Rilievi LIDAR" and
-  the Carta Tecnica Regionale 1:2000, both under Creative Commons Attribution 4.0
-  (https://creativecommons.org/licenses/by/4.0/), from the Geoscopio cartoteca:
+- Buildings, road surfaces, elevation and land cover: "Fonte dei dati: Regione Toscana – Rilievi
+  LIDAR", the Carta Tecnica Regionale 1:2000 and the Uso e copertura del suolo 2019, under
+  Creative Commons Attribution 4.0 (https://creativecommons.org/licenses/by/4.0/), and the DTM
+  10x10 metri, under Creative Commons Attribution 3.0 Italia
+  (https://creativecommons.org/licenses/by/3.0/it/), from the Geoscopio cartoteca:
   https://www502.regione.toscana.it/geoscopio/cartoteca.html.
 
-The game shows both credits on the title card and in the HUD.
+The game shows these credits on the title card and in the HUD.
 
 Sources for "The valley": [Grotte di Equi, *La Valle del Lucido*](https://grottediequi.it/territorio/la-valle-del-lucido/),
 [*Il nome Valle del Lucido*](https://aipiedidelleapuane.wordpress.com/2017/02/28/il-nome-valle-del-lucido/),

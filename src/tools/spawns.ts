@@ -1,8 +1,9 @@
 // Deterministic tree scatter, the player spawn and parked-car spots.
 import { staticGrid } from "../sim/collide.ts"
 import type { Area, Spawn } from "../sim/map/index.ts"
+import { pushTrunk, TRUNK } from "../sim/map/kinds.ts"
 import type { BuildingF, RailF, RoadF, WaterF } from "./features.ts"
-import { arcLengths, BOUNDS, centroid, fillPolygon, hash01, inBounds, pointAt, pointInRing, r1, ringBox, segIndex } from "./geometry.ts"
+import { arcLengths, BOUNDS, centroid, fillPolygon, hash01, inBounds, pointAt, pointInRing, r1, ringBox, segDist2, segIndex } from "./geometry.ts"
 
 const TREE_AREA = 50 // m² per tree
 const MASK_RES = 2
@@ -33,7 +34,7 @@ export const scatterTrees = (areas: ReadonlyArray<Area>, roads: ReadonlyArray<Ro
   const trees: Array<number> = [], planted = new Set<number>()
   /** Rounded to the metre, two jittered lattice points can land on one spot: keep the first. */
   const plant = (x: number, y: number, scale: number) => {
-    const tx = Math.round(x), ty = Math.round(y), key = tx * 8192 + ty
+    const tx = Math.round(x), ty = Math.round(y), key = tx * 65536 + ty
     if (planted.has(key)) return
     planted.add(key)
     trees.push(tx, ty, r1(scale))
@@ -56,20 +57,43 @@ export const scatterTrees = (areas: ReadonlyArray<Area>, roads: ReadonlyArray<Ro
   return trees
 }
 
-/** Wall clearance checks against flat (ax, ay, bx, by) segment lists. */
-export const clearance = (lists: ReadonlyArray<ReadonlyArray<number>>) => {
+/** Segments farther than this from a clearance query are ignored, m (every caller asks less). */
+const REACH = 3
+
+/**
+ * Clearance checks against flat (ax, ay, bx, by) `walls` plus the TRUNK square of every tree in
+ * flat (x, y, scale) `trees`. Trees are indexed as points and their squares made on query, as
+ * `wallsNear` does in the game: a segment per trunk edge would take gigabytes at a million trees.
+ */
+export const clearance = (walls: ReadonlyArray<number>, trees: ReadonlyArray<number>) => {
   const idx = segIndex<null>()
-  for (const flat of lists) for (let i = 0; i + 3 < flat.length; i += 4) idx.add(flat[i]!, flat[i + 1]!, flat[i + 2]!, flat[i + 3]!, 3, null)
+  for (let i = 0; i + 3 < walls.length; i += 4) idx.add(walls[i]!, walls[i + 1]!, walls[i + 2]!, walls[i + 3]!, REACH, null)
+  const treesIn = staticGrid(trees.length / 3, (i) => [trees[3 * i]!, trees[3 * i + 1]!, trees[3 * i]!, trees[3 * i + 1]!], 16)
+  const trunk: Array<number> = [], edge = { ax: 0, ay: 0, bx: 0, by: 0 }
+  /** Calls `visit` for every wall and trunk edge within REACH of (x, y), with its squared distance. */
+  const near = (x: number, y: number, visit: (seg: { readonly ax: number; readonly ay: number; readonly bx: number; readonly by: number }, d2: number) => void) => {
+    idx.within(x, y, visit)
+    const r = REACH + TRUNK
+    treesIn(x - r, y - r, x + r, y + r, (i) => {
+      trunk.length = 0
+      pushTrunk(trunk, trees[3 * i]!, trees[3 * i + 1]!)
+      for (let k = 0; k < trunk.length; k += 4) {
+        [edge.ax, edge.ay, edge.bx, edge.by] = [trunk[k]!, trunk[k + 1]!, trunk[k + 2]!, trunk[k + 3]!]
+        const { d2 } = segDist2(x, y, edge.ax, edge.ay, edge.bx, edge.by)
+        if (d2 < REACH * REACH) visit(edge, d2)
+      }
+    })
+  }
   const circle = (x: number, y: number, r: number) => {
     let ok = true
-    idx.within(x, y, (_, d2) => (ok &&= d2 >= r * r))
+    near(x, y, (_, d2) => (ok &&= d2 >= r * r))
     return ok
   }
   /** No segment crosses or lies inside the oriented box (half-length hl along `angle`, half-width hw). */
   const box = (x: number, y: number, angle: number, hl: number, hw: number) => {
     const c = Math.cos(angle), s = Math.sin(angle)
     let ok = true
-    idx.within(x, y, (seg) => {
+    near(x, y, (seg) => {
       const ax = (seg.ax - x) * c + (seg.ay - y) * s, ay = -(seg.ax - x) * s + (seg.ay - y) * c
       const dx = (seg.bx - x) * c + (seg.by - y) * s - ax, dy = -(seg.bx - x) * s + (seg.by - y) * c - ay
       let t0 = 0, t1 = 1

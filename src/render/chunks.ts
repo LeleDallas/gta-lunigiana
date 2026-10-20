@@ -17,8 +17,11 @@ const hm = MAP.heightmap
 const CHUNK_CELLS = 32
 /** Chunk side in metres. */
 const CHUNK = CHUNK_CELLS * hm.cell
-/** Apron cells beyond each map edge (96 m: more than the camera ever shows past the bounds). */
-export const APRON = 24
+/**
+ * Apron cells beyond each map edge (192 m): more than the camera shows past the bounds from any
+ * road, mountain edges included (where the SP10 leaves the map the view reaches about 150 m out).
+ */
+export const APRON = 48
 /** Heightmap cells along x and y. */
 export const CELLS = { x: hm.cols - 1, y: hm.rows - 1 } as const
 /** South-west corner of chunk (0, 0), metres. */

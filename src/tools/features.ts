@@ -108,26 +108,33 @@ export const nameFromAddresses = (osm: Osm, roads: ReadonlyArray<RoadF>): void =
   }
 }
 
+/** Mean ground (m) below which a Lucido or Caldanella way runs on the valley floor; above it, the stream is a wooded mountain gully. */
+const MAIN_BELOW = 500
+
 /**
- * Water width, gravel-bed half-width and depth, m. The rivers are measured on the 2010
- * orthophoto: the Aulella runs in a 25-35 m gravel bed at Gragnola (a wooded 10 m channel at
- * Codiponte), the Lucido in a 22 m one below Monzone. The Lucido's Vinca branch and the
- * Caldanella (from Equi) are the two main streams; other named streams are 4 m wide, unnamed ones 2 m.
+ * Water width, gravel-bed half-width and depth, m, from the way's name, kind and mean ground `z`
+ * (LiDAR, over its vertices). The rivers are measured on the 2010 orthophoto: the Aulella runs in
+ * a 25-35 m gravel bed at Gragnola (a wooded 10 m channel at Codiponte), the Lucido in a 22 m one
+ * below Monzone. The Lucido's Vinca branch and the Caldanella (from Equi) are the main streams on
+ * the valley floor (5-16 m of open marble gravel below 400 m). Above Vinca the Lucido runs in a
+ * beech-wood gully with only 3-6 m of bed showing, like the other named streams (4 m); unnamed ones are 2 m.
  */
-const waterSize = (name: string | undefined, kind: "river" | "stream"): { readonly w: number; readonly bed: number; readonly depth: number } => {
+const waterSize = (name: string | undefined, kind: "river" | "stream", z: number): { readonly w: number; readonly bed: number; readonly depth: number } => {
   if (name === "Torrente Aulella") return { w: 12, bed: 13, depth: 2.5 }
   if (name === "Torrente Lucido" && kind === "river") return { w: 14, bed: 11, depth: 2.5 }
-  const main = name === "Torrente Lucido" || name === "Torrente Caldanella"
+  const main = (name === "Torrente Lucido" || name === "Torrente Caldanella") && z < MAIN_BELOW
   const w = main ? 8 : name !== undefined ? 4 : 2
   return { w, bed: Math.max(w / 2 + 1, 3), depth: kind === "river" ? 2.5 : main ? 1.5 : 1 }
 }
 
-export const extractWater = (osm: Osm): Array<WaterF> =>
+export const extractWater = (osm: Osm, ground: (x: number, y: number) => number): Array<WaterF> =>
   [...osm.ways.values()].filter((w) => w.tags.waterway !== undefined && w.tags.tunnel !== "culvert").flatMap((w) => {
     const t = w.tags
     const kind = t.waterway === "river" ? "river" : "stream"
-    const size = waterSize(t.name, kind)
-    return clipLine(vertices(osm, w.nds)).map((pts): WaterF => ({ id: +w.id, kind, ...(t.name ? { name: t.name } : {}), ...size, pts }))
+    return clipLine(vertices(osm, w.nds)).map((pts): WaterF => {
+      const z = pts.reduce((s, p) => s + ground(p.x, p.y), 0) / pts.length
+      return { id: +w.id, kind, ...(t.name ? { name: t.name } : {}), ...waterSize(t.name, kind, z), pts }
+    })
   })
 
 export const extractRail = (osm: Osm): Array<RailF> =>
@@ -168,7 +175,14 @@ const STONE_CORES: ReadonlyArray<readonly [number, number, number]> = [
   [-2270, 2790, 50], // La Traggiara
   [1605, 3195, 100], // Codiponte, the borgo south of the Aulella
   [1735, 3180, 55], // Codiponte, the eastern houses
-  [2050, 2300, 120] // Casciana
+  [2050, 2300, 120], // Casciana
+  [2275, -2630, 115], // Vinca, the borgo around Sant'Andrea
+  [2165, -2565, 48], // Vinca, the old houses along the upper street west of the core
+  [-2212, -865, 65], // Tenerano, the ring borgo
+  [4130, 1445, 55], // Ugliancaldo, the castle ring
+  [4205, 1405, 60], // Ugliancaldo, the borgo along the ridge
+  [4270, 1320, 65], // Ugliancaldo, the borgo down to Sant'Andrea
+  [4805, 3225, 65] // Argigliano, the borgo below Santa Maria
 ]
 /** Generic buildings closer than this (m) form a hamlet: up to HAMLET of them take one facade style. */
 const HAMLET_LINK = 25
@@ -191,14 +205,27 @@ const styleOf = (t: Tags, cx: number, cy: number): BuildingStyle => {
 
 /**
  * Buildings: the CTR's where its sheets map the ground, OSM's elsewhere. A CTR building inside an
- * OSM footprint takes that building's name, and its style when the CTR only says "building".
+ * OSM footprint takes that building's name, and its style when the CTR only says "building" and
+ * surveyed no fixed-style unit (the church itself) inside that footprint: then the other units are
+ * the houses around it.
  */
 export const extractBuildings = (osm: Osm, ctr: Ctr): Array<BuildingF> => {
   const fromOsm = osmBuildings(osm)
-  const fromCtr = ctr.buildings.map((c): BuildingF => {
+  const osmIn = staticGrid(fromOsm.length, (k) => ringBox(fromOsm[k]!.outer), 32)
+  /** The index of the first OSM footprint (file order) around the point, or -1. */
+  const hostOf = (x: number, y: number) => {
+    let first = fromOsm.length
+    osmIn(x, y, x, y, (k) => {
+      if (k < first && pointInRing(x, y, fromOsm[k]!.outer)) first = k
+    })
+    return first < fromOsm.length ? first : -1
+  }
+  const hosts = ctr.buildings.map((c) => hostOf(...centroid(c.outer)))
+  const surveyed = new Set(ctr.buildings.flatMap((c, i) => (c.style !== undefined && hosts[i]! >= 0 ? [hosts[i]!] : [])))
+  const fromCtr = ctr.buildings.map((c, i): BuildingF => {
     const [cx, cy] = centroid(c.outer)
-    const host = fromOsm.find((o) => pointInRing(cx, cy, o.outer))
-    const style = c.style ?? (host !== undefined && !isGeneric(host.style) ? host.style : genericStyle(cx, cy))
+    const host = fromOsm[hosts[i]!]
+    const style = c.style ?? (host !== undefined && !isGeneric(host.style) && !surveyed.has(hosts[i]!) ? host.style : genericStyle(cx, cy))
     return {
       id: c.id, kind: c.kind, ...(host?.name !== undefined ? { name: host.name } : {}), h: c.h, ...(c.eave !== undefined ? { eave: c.eave } : {}), style,
       ...(style === "ruin" ? { ruins: true } : {}), tint: Math.floor(hash01(-c.id % 1e9, 7) * 4), outer: c.outer, ...(c.holes !== undefined ? { holes: c.holes } : {})
@@ -275,7 +302,7 @@ const unifyStyles = (bs: ReadonlyArray<BuildingF>, link: number, max = Infinity)
   return bs.map((b, i) => (generic[i] && size.get(find(i))! <= max ? { ...b, style: stone.get(find(i))! > 0 ? "stone" : "plaster" } : b))
 }
 
-const LANDUSE = ["cemetery", "vineyard", "farmland", "farmyard", "industrial", "residential", "forest"] as const satisfies ReadonlyArray<AreaKind>
+const LANDUSE = ["cemetery", "vineyard", "farmland", "farmyard", "industrial", "residential", "forest", "quarry"] as const satisfies ReadonlyArray<AreaKind>
 const landuses: ReadonlySet<string> = new Set(LANDUSE)
 const isLanduse = (landuse: string): landuse is (typeof LANDUSE)[number] => landuses.has(landuse)
 
@@ -286,8 +313,11 @@ const areaKind = (t: Tags): AreaKind | undefined => {
   if (t.amenity === "parking" || t.amenity === "school") return t.amenity
   if (t.railway === "platform") return "platform"
   if (t.historic === "ruins" || t.historic === "archaeological_site") return "ruins"
-  if (t.natural === "grassland") return "grassland"
+  if (t.natural === "grassland" || t.natural === "fell" || t.landuse === "meadow" || t.landuse === "grass") return "grassland"
   if (t.natural === "wood") return "forest"
+  if (t.natural === "bare_rock" || t.natural === "rock") return "rock"
+  if (t.natural === "scree" || t.natural === "shingle") return "scree" // mostly ravaneti, the quarries' marble waste
+  if (t.natural === "scrub" || t.natural === "heath") return "scrub"
   return undefined
 }
 

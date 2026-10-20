@@ -4,7 +4,7 @@ import { test } from "node:test"
 import { Vector3 } from "three"
 
 import { screenAxes } from "../sim/view.ts"
-import { QUARTER, turnToward, viewAxes, zoomFor } from "./pipeline.ts"
+import { QUARTER, shadowFit, turnToward, viewAxes, zoomFor } from "./pipeline.ts"
 
 test("at every quarter turn the camera's screen axes are the sim's on the ground, and ground axes project as exact 2:1 pixel lines", () => {
   for (const turns of [0, 1, 2, 3, -1, 6]) {
@@ -40,4 +40,16 @@ test("the driving zoom widens above 16 m/s and narrows again only below 13 m/s",
   assert.equal(zoomFor(-14, 5), 5, "slowing through the band keeps the wide view")
   assert.equal(zoomFor(12, 5), 6)
   assert.equal(zoomFor(15, 6), 6)
+})
+
+// Regression: sized for flat ground, the shadow box left most of a mountain view unshadowed.
+test("the shadow box covers the view's ground rectangle on the flat and the far ground a falling slope shows", () => {
+  const axes = viewAxes(0), toSun = new Vector3(-0.75, 1, 0.35).normalize(), focus = new Vector3(0, 0, 0)
+  const flat = shadowFit(focus, axes, 100, 60, toSun, () => 0)
+  assert.ok(Math.abs(flat.half - (Math.hypot(100, 60 / Math.sin(Math.PI / 6)) / 2 + 10)) < 1e-9)
+  // Ground falling away from the camera at 25° along screen-up (three −z is north, screen-up points south-east).
+  const fall = Math.tan((25 * Math.PI) / 180), dir = new Vector3(axes.up.x, 0, axes.up.z).normalize()
+  const slope = shadowFit(focus, axes, 100, 60, toSun, (x, z) => -fall * Math.max(0, x * dir.x + z * dir.z))
+  assert.ok(slope.half > flat.half + 20, `half ${slope.half} vs ${flat.half}`)
+  assert.ok(slope.below < -10, "the far ground lies away from the sun, deeper than the focus")
 })

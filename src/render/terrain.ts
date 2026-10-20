@@ -13,11 +13,9 @@ import { CELLS, chunkCells } from "./chunks.ts"
 import { terrainNodeY } from "./ground.ts"
 import { COVER_LOOK, coverName, type CoverLook } from "./landcover.ts"
 import { linear } from "./geometry.ts"
-import { PALETTE } from "./palette.ts"
 
 const hm = MAP.heightmap
 
-const ROCK: CoverLook = { base: PALETTE.limestone, alt: PALETTE.stoneLight, share: 0.35 }
 /** Faces steeper than this (normal y below it, ≈ 50°) show bare rock. */
 const ROCK_NORMAL_Y = 0.64
 
@@ -51,7 +49,7 @@ export const terrainChunk = (key: number, cover: Uint8Array): BufferGeometry => 
     let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx
     const l = Math.sqrt(nx * nx + ny * ny + nz * nz) || 1
     nx /= l; ny /= l; nz /= l
-    const rgb = linear(shade(ny < ROCK_NORMAL_Y ? ROCK : look, i, j))
+    const rgb = linear(shade(ny < ROCK_NORMAL_Y ? COVER_LOOK.rock : look, i, j))
     put(ax, ah, -ay, nx, ny, nz, rgb)
     put(bx, bh, -by, nx, ny, nz, rgb)
     put(cx, ch, -cy, nx, ny, nz, rgb)

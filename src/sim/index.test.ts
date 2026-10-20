@@ -19,7 +19,7 @@ import { BATTISTI, battistiTraffic, door, ON_BATTISTI, press, stage, start, stra
 import { screenAxes, VIEW_REACH } from "./view.ts"
 import { VEHICLES } from "./vehicles.ts"
 
-test("setup: the player at the map spawn, 150 parked cars on random spots, Carabinieri in front of the station", () => {
+test("setup: the player at the map spawn, 200 parked cars on random spots, Carabinieri in front of the station", () => {
   const { run, view, world } = start()
   run(1)
   assert.equal(view()?.mode, "foot")

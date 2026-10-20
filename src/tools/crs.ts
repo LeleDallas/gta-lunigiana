@@ -1,9 +1,9 @@
 // Coordinate reference systems of the Regione Toscana sources, to and from WGS84 lat/lon (degrees).
 // - CTR 1:2000 (2019): EPSG:6707, RDN2008 / UTM 32N on GRS80. RDN2008 (ETRF2000) and WGS84 agree
 //   within a few centimetres here, so no datum shift.
-// - LiDAR (2010): EPSG:3003, Monte Mario / Gauss-Boaga west, on the International 1924 ellipsoid.
-//   The datum shift is the EPSG:1660 Helmert ("Monte Mario to WGS 84 (4)", mainland Italy, a few
-//   metres); `GB_RESIDUAL` removes what is left, fitted on Monzone's buildings.
+// - LiDAR, 10 m DTM, land cover: EPSG:3003, Monte Mario / Gauss-Boaga west, on the International
+//   1924 ellipsoid. The datum shift is the EPSG:1660 Helmert ("Monte Mario to WGS 84 (4)", mainland
+//   Italy, a few metres); `GB_RESIDUAL` removes what is left, fitted on Monzone's buildings.
 // Transverse Mercator uses Krüger's series to n³, sub-millimetre within 3° of the central meridian.
 
 interface Ellipsoid { readonly a: number; readonly f: number }
@@ -93,3 +93,7 @@ export const latLonToGaussBoaga = (lat: number, lon: number): [number, number] =
   const [e, n] = tmForward(GB_WEST, la, lo)
   return [e + GB_RESIDUAL.e, n + GB_RESIDUAL.n]
 }
+
+/** EPSG:3003 easting, northing -> WGS84 lat, lon: the inverse of `latLonToGaussBoaga`. */
+export const gaussBoagaToLatLon = (e: number, n: number): [number, number] =>
+  fromEcef(WGS84, ...helmert(1, toEcef(HAYFORD, ...tmInverse(GB_WEST, e - GB_RESIDUAL.e, n - GB_RESIDUAL.n))))

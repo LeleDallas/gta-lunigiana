@@ -25,14 +25,21 @@ export const fitMap = (bounds: Bounds, width: number, height: number): Fit => {
   return { scale, ox: MARGIN.left + (w - bw * scale) / 2, oy: MARGIN.top + (h - bh * scale) / 2 }
 }
 
-/** A named place: villages are `major` (big labels, placed first), hamlets are not. */
+/** A named place: villages are `major` (big labels, placed first), hamlets and peaks are not. */
 export interface Place { readonly name: string; readonly x: number; readonly y: number; readonly major: boolean }
 
-/** The villages and hamlets OSM names inside the map (its `place=*` POIs; localities left out). */
-export const PLACES: ReadonlyArray<Place> = MAP.pois.flatMap((p) =>
-  p.name !== undefined && (p.kind === "place=town" || p.kind === "place=village" || p.kind === "place=hamlet")
-    ? [{ name: p.name, x: p.x, y: p.y, major: p.kind !== "place=hamlet" }]
-    : [])
+const isPlace = (kind: string) => kind === "place=town" || kind === "place=village" || kind === "place=hamlet"
+const districts: ReadonlySet<string> = new Set(MAP.districts.map((d) => d.name))
+
+/**
+ * The villages and hamlets OSM names inside the map (its `place=*` POIs; localities left out), then
+ * the peaks the HUD names (a landmark district of the same name), once per name: OSM has two
+ * Argigliano nodes and two Monte Borla summits. Peaks come last, so a hamlet beats a peak it overlaps.
+ */
+export const PLACES: ReadonlyArray<Place> = [
+  ...MAP.pois.flatMap((p) => (p.name !== undefined && isPlace(p.kind) ? [{ name: p.name, x: p.x, y: p.y, major: p.kind !== "place=hamlet" }] : [])),
+  ...MAP.pois.flatMap((p) => (p.name !== undefined && p.kind === "natural=peak" && districts.has(p.name) ? [{ name: p.name, x: p.x, y: p.y, major: false }] : []))
+].filter((p, i, all) => all.findIndex((q) => q.name === p.name) === i)
 
 /** A label's screen box. */
 interface Box { readonly x0: number; readonly y0: number; readonly x1: number; readonly y1: number }

@@ -8,7 +8,7 @@
 import { MAP, roadClassOf, type RoadClass } from "../sim/map/index.ts"
 import { segDist2 } from "../tools/geometry.ts"
 
-/** Metres a.s.l. subtracted from every elevation before it reaches the GPU (the map spans ≈150–980 m). */
+/** Metres a.s.l. subtracted from every elevation before it reaches the GPU (the map spans ≈150–1800 m). */
 const ELEVATION_BASE = 200
 
 /** Render y of a map elevation (m a.s.l.). */

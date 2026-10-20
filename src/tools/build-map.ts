@@ -1,22 +1,22 @@
 // Builds src/sim/map/monzone.json from data/raw: OSM (fetch-osm.ts) and the Regione
-// Toscana CTR 1:2000 and LiDAR DTM (data/raw/rt, written by fetch-rt.ts).
+// Toscana CTR 1:2000, LiDAR DTM and land cover (data/raw/rt, written by fetch-rt.ts).
 // Run: node src/tools/build-map.ts  (pnpm map), from any directory. Output is deterministic.
 import { writeFileSync } from "node:fs"
 import { join } from "node:path"
 
 import type { MonzoneMapJson } from "../sim/map/index.ts"
-import { pushTrunk } from "../sim/map/kinds.ts"
 import { fitRoads, readCtr } from "./ctr.ts"
 import { fitDistricts } from "./districts.ts"
 import { extractAreas, extractBarriers, extractBuildings, extractPois, extractRail, extractRoads, extractWater, nameFromAddresses, type RoadF } from "./features.ts"
 import { along, arcLengths, BOUNDS, crossings, flatLine, M_PER_DEG, ORIGIN, r1, segIndex, type V } from "./geometry.ts"
 import { buildGraph } from "./graph.ts"
-import { packPoints, packRows } from "./pack.ts"
+import { packRows, packTrees, packWalls } from "./pack.ts"
 import { readOsm } from "./osm.ts"
 import { chainsOf, lifted, makeProfiler, type Bound, type Linear } from "./profiles.ts"
 import { clearance, parkedSpots, playerSpawn, scatterTrees } from "./spawns.ts"
 import { loadDtm, makeGrid, sampleGrid } from "./terrain.ts"
-import { buildWalls, clipBuildings } from "./walls.ts"
+import { readUcs } from "./ucs.ts"
+import { buildWalls, clipBuildings, openBarriers } from "./walls.ts"
 import { carveAll, fitUnderDecks, waterLine, waterProfiles, type Crossed } from "./water.ts"
 
 const ROOT = join(import.meta.dirname, "../..")
@@ -26,15 +26,20 @@ const lap = (label: string) => console.log(`${label.padEnd(10)} ${((performance.
 
 const osm = readOsm(join(ROOT, "data/raw/lunigiana.osm.gz"))
 const ctr = readCtr(join(ROOT, "data/raw/rt/ctr"))
-const roads = extractRoads(osm), water = extractWater(osm), rail = extractRail(osm)
-fitRoads(roads, ctr.roadAreas)
+const roads = extractRoads(osm), rail = extractRail(osm)
+fitRoads(roads, ctr.roadAreas, ctr.mapped)
 nameFromAddresses(osm, roads)
-const buildings = clipBuildings(extractBuildings(osm, ctr), roads), barriers = extractBarriers(osm), pois = extractPois(osm)
-const areas = [...extractAreas(osm), ...ctr.roadAreas.filter((a) => a.paved).map((a) => ({ kind: "paved", rings: a.rings }))] // squares, lay-bys
+const buildings = clipBuildings(extractBuildings(osm, ctr), roads), barriers = openBarriers(extractBarriers(osm), roads), pois = extractPois(osm)
+const areas = [
+  ...extractAreas(osm),
+  ...readUcs(join(ROOT, "data/raw/rt/ucs.json.gz")), // rock, pastures and quarries OSM lacks above the woods
+  ...ctr.roadAreas.filter((a) => a.paved).map((a) => ({ kind: "paved", rings: a.rings })) // squares, lay-bys
+]
 lap("features")
 
 // ---- terrain: LiDAR -> 4 m grid -> carved water -> roads and rail -> water kept under the decks ----
 const ground = loadDtm(join(ROOT, "data/raw/rt")) // the untouched 1 m terrain every profile samples
+const water = extractWater(osm, ground) // widths depend on the way's mean ground
 const grid = makeGrid(ground)
 const at = (x: number, y: number) => sampleGrid(grid, x, y)
 const wp = waterProfiles(water, ground)
@@ -55,9 +60,9 @@ const zAt = (l: Linear, s: number) => along(arcLengths(l.pts), zOf.get(l)!, s)
 const RAIL_DECK = 1.5 // rail bridge structure above an underpass's clear height, m
 const UNDERPASS = 4 // clear height of an untagged underpass, m
 const RAIL_OVER_WATER = 3 // minimum rail height over the water it bridges, m (more fights the station level crossing 25 m away)
-/** Rail over road without a shared node (rail bridge or road tunnel): the road keeps the clearance under the rail. */
+/** Rail over road without a shared node (rail bridge or road tunnel): the road keeps the clearance under the rail. A rail tunnel passes under. */
 const railRoad = rail.flatMap((rl) => roads.flatMap((rd) => {
-  if (!lifted(rl) && rd.tunnel !== true) return []
+  if (rl.bridge !== true && rd.tunnel !== true) return []
   const level = (c: V) => rl.pts.some((v) => v.id !== undefined && Math.hypot(v.x - c.x, v.y - c.y) < 0.1 && rd.pts.some((u) => u.id === v.id))
   return crossings(rl.pts, rd.pts).filter((c) => !level(c)).map((c) => ({ rl, rd, c, clear: (rd.maxheight ?? UNDERPASS) + RAIL_DECK, exact: rd.maxheight !== undefined }))
 }))
@@ -81,7 +86,7 @@ const levels = rail.flatMap((rl) => roads.flatMap((rd) => rd.pts.flatMap((v, i) 
 const railBounds = (chain: Chain): Array<Bound> => [
   ...levels.filter((x) => chain.some((m) => m.item === x.rl)).map((x) => ({ x: x.v.x, y: x.v.y, z: naturalAt(x.rd, x.s) })),
   ...railRoad.filter((x) => x.exact && chain.some((m) => m.item === x.rl)).map((x) => ({ x: x.c.x, y: x.c.y, z: naturalAt(x.rd, x.c.sb) + x.clear })),
-  ...chain.filter((m) => lifted(m.item)).flatMap((m) => water.flatMap((w, wi) =>
+  ...chain.filter((m) => m.item.bridge === true).flatMap((m) => water.flatMap((w, wi) =>
     crossings(m.item.pts, w.pts).map((c) => ({ x: c.x, y: c.y, z: along(wp[wi]!.s, wp[wi]!.z, c.sb) + RAIL_OVER_WATER, kind: "min" as const }))))
 ]
 const widest = (chain: ReadonlyArray<{ readonly item: RoadF }>) => Math.max(...chain.map((m) => m.item.w))
@@ -130,9 +135,7 @@ const walls = buildWalls(grid, roads, water, buildings, barriers)
 lap("walls")
 const trees = scatterTrees(areas, roads, buildings, water, rail)
 lap("trees")
-const trunks: Array<number> = []
-for (let i = 0; i < trees.length; i += 3) pushTrunk(trunks, trees[i]!, trees[i + 1]!)
-const walkClear = clearance([walls.walk, trunks]), driveClear = clearance([walls.drive, trunks])
+const walkClear = clearance(walls.walk, trees), driveClear = clearance(walls.drive, trees)
 /** Room for a car to stop and turn (map.test.ts asks the same of every traffic dead end). */
 const TURN = 2.3
 const graph = buildGraph(roads, (x, y) => driveClear.circle(x, y, TURN))
@@ -181,8 +184,8 @@ const map: MonzoneMapJson = {
   pois,
   districts,
   graph: { xy: graph.xy, edges: graph.edges, traffic: graph.traffic, walk: graph.walk },
-  walls: { walk: packPoints(walls.walk, BOUNDS, 4, 4, "walk walls"), drive: packPoints(walls.drive, BOUNDS, 4, 4, "drive walls") },
-  trees: packPoints(trees, BOUNDS, 3, 2, "trees"),
+  walls: { walk: packWalls(walls.walk, BOUNDS, "walk walls"), drive: packWalls(walls.drive, BOUNDS, "drive walls") },
+  trees: packTrees(trees, BOUNDS),
   spawns: { player, parked }
 }
 const json = JSON.stringify(map)

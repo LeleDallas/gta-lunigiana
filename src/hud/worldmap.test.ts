@@ -28,11 +28,12 @@ test("labels: villages win over overlapping hamlets, apart labels all stay, orde
 
 test("places: the villages and hamlets the user asked for are named on the map", () => {
   const names = new Set(PLACES.map((p) => p.name))
-  for (const name of ["Monzone", "Equi Terme", "Gragnola", "Colognola", "Campiglione", "Viano"]) assert.ok(names.has(name), name)
+  for (const name of ["Monzone", "Equi Terme", "Gragnola", "Colognola", "Campiglione", "Viano", "Vinca", "Ugliancaldo", "Tenerano", "Monte Sagro", "Pizzo d'Uccello"]) assert.ok(names.has(name), name)
+  assert.equal(names.size, PLACES.length, "one label per name")
   assert.ok(PLACES.filter((p) => p.major).map((p) => p.name).includes("Gragnola"), "Gragnola is a village (big label)")
   assert.ok(PLACES.every((p) => p.x >= MAP.bounds.minX && p.x <= MAP.bounds.maxX && p.y >= MAP.bounds.minY && p.y <= MAP.bounds.maxY))
   // Every place sits in the HUD district of the same name, so the map and the HUD agree.
-  for (const name of ["Equi Terme", "Gragnola", "Colognola", "Campiglione", "Viano"]) {
+  for (const name of ["Equi Terme", "Gragnola", "Colognola", "Campiglione", "Viano", "Vinca", "Ugliancaldo", "Tenerano", "Monte Sagro", "Pizzo d'Uccello"]) {
     const p = PLACES.find((q) => q.name === name)!
     assert.equal(districtAt(p.x, p.y).name, name)
   }

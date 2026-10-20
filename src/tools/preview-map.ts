@@ -44,7 +44,8 @@ for (let j = 0; j < H; j++) for (let i = 0; i < W; i++) {
 const AREA = {
   forest: [40, 110, 50], cemetery: [150, 150, 170], pitch: [90, 200, 90], park: [120, 190, 100], parking: [170, 170, 170], vineyard: [170, 140, 200],
   farmland: [220, 210, 140], farmyard: [210, 180, 140], industrial: [200, 160, 200], residential: [230, 200, 190], platform: [120, 120, 120],
-  school: [240, 220, 120], ruins: [160, 120, 90], grassland: [170, 210, 120], paved: [140, 140, 135]
+  school: [240, 220, 120], ruins: [160, 120, 90], grassland: [170, 210, 120], paved: [140, 140, 135], quarry: [250, 250, 245],
+  rock: [215, 210, 195], sparse: [200, 200, 150], scree: [190, 180, 160], scrub: [110, 150, 80]
 } as const satisfies Record<AreaKind, RGB>
 for (const a of MAP.areas) fill(a.rings, isAreaKind(a.kind) ? AREA[a.kind] : [255, 0, 255], a.kind === "forest" ? 0.25 : 0.45)
 for (let i = 0; i + 2 < MAP.trees.length; i += 3) dot(MAP.trees[i]!, MAP.trees[i + 1]!, 0.9 * MAP.trees[i + 2]!, [20, 70, 30], 0.8)
