@@ -34,7 +34,16 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #2c3d22; }
 #hud-minimap { position: absolute; left: 16px; bottom: 48px; line-height: 0; }
 .minimap { image-rendering: pixelated; border: 2px solid var(--shadow); outline: 2px solid var(--ink); }
 
-.credits { position: absolute; right: 16px; bottom: 8px; font-size: 10px; text-transform: none; letter-spacing: 0; opacity: 0.85; }
+#hud-map { position: fixed; inset: 0; z-index: 1; background: var(--shadow); }
+#hud-map:focus { outline: none; }
+#hud-map canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+.map-head { position: absolute; top: 16px; left: 24px; right: 24px; display: flex; justify-content: space-between; align-items: baseline; gap: 16px; }
+.map-title { font-size: 22px; color: var(--accent); }
+.map-head small { font-size: 10px; opacity: 0.75; }
+#hud-map-here { color: var(--accent); }
+.map-keys { font-size: 12px; }
+
+.credits { z-index: 2; position: absolute; right: 16px; bottom: 8px; font-size: 10px; text-transform: none; letter-spacing: 0; opacity: 0.85; }
 
 #title { position: fixed; inset: 0; display: grid; place-items: center; background: rgb(23 22 26 / 0.55); color: var(--ink); text-shadow: 2px 2px 0 var(--shadow); }
 #title[hidden] { display: none; }

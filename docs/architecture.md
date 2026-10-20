@@ -193,6 +193,21 @@ the `PlayerView` inspector (`src/sim/views.ts`) and the map:
   across, rotated so that screen-up is up. At 0.5 px/m the whole map is 2600 × 2298 px (6 MP,
   24 MB): under every browser's canvas limit (the strictest, Safari's, is 16.7 MP). Drawing it
   takes ≈ 10 ms at load; the per-frame blit ≈ 1 ms.
+- The full map (`src/hud/worldmap.ts`, `#hud-map` in `index.html`): the key labelled M toggles
+  it (matched by the character it types, so AZERTY works; non-Latin layouts fall back to the key's
+  position) and Esc closes it; repeats and Ctrl/Cmd/Alt chords are ignored. It paints the whole
+  area north-up at screen resolution with the same layers as the minimap (`paintMap`), but roads
+  light and at least 1.5–2 px wide so the network reads. It names the OSM villages (big, placed
+  first) and hamlets (`place=*` POIs, localities left out); a label that would overlap another or
+  the north arrow is dropped with its dot. The player is a red arrow in a red ring (no label is
+  red), with a 1 km bar and the player's district in the header. It is repainted on open, on
+  resize, and when the pixel ratio changes. The dialog takes focus when it opens, so screen
+  readers announce its title and the district.
+- While the full map is open the host pauses the game: the FixedLoop keeps running, but
+  `pausable` (`src/hud/hud.ts`) skips the sim update and `main.ts` skips the frame (no world
+  render, so actors do not jitter between `PrevPose` and `Pose`). Each skipped update drains the
+  keyboard's press edges, so a key tapped on the map (F, Enter) does nothing on resume, while a
+  key held through the pause is still held.
 
 ## Checks
 

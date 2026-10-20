@@ -38,10 +38,12 @@ In dev mode, the backslash key toggles the Ritmo monitor.
 | Shift | sprint | |
 | F, E or Enter | enter the nearest vehicle (steal, enter or carjack) | get out |
 | Space | | handbrake |
+| M | full map (pauses the game); M or Esc closes it | same |
 
 The bindings live in `bindings` in `src/sim/schema.ts`. The HUD shows the street and district you
 are in, cars stolen, people hit, the action the key would take, a speedometer while driving, and
-a minimap.
+a minimap. M opens the full map: the whole area north-up with the villages and hamlets named and
+your position marked.
 
 ## Scripts
 
@@ -66,7 +68,7 @@ a minimap.
 | `src/sim/systems/` | one file per system group (spawn, enter/exit, foot, drive, traffic, pedestrians, physics, contacts, populate) |
 | `src/sim/map/` | the generated map (`monzone.json`), its types and lookups (heights, walls, road graph) |
 | `src/render/` | Three.js host code: pixel pipeline, static world meshes, actor meshes, the render schedule |
-| `src/hud/` | DOM HUD: location names, score, prompt, speedometer, minimap |
+| `src/hud/` | DOM HUD: location names, score, prompt, speedometer, minimap, full map (M) |
 | `src/tools/` | the map pipeline (`build-map.ts`), the downloaders (`fetch-osm.ts`, `fetch-rt.ts`) and a top-down preview renderer |
 | `src/main.ts` | browser host: builds the scene, makes the runtime, runs the fixed loop |
 | `index.html` | canvas, HUD markup and title card |

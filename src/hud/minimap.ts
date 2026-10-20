@@ -1,7 +1,7 @@
 /**
  * The minimap: the whole map drawn once (areas, water, rail, roads, buildings) into an offscreen
  * canvas, then blitted every frame around the player, rotated so that screen-up is minimap-up,
- * with the player as an arrow.
+ * with the player as an arrow. `paintMap` and `paintArrow` also draw the full map (`worldmap.ts`).
  *
  * @module hud/minimap
  */
@@ -28,22 +28,23 @@ const AREA_HEX: Partial<Record<AreaKind, number>> = {
  */
 export const MINIMAP_ROTATION = -Math.PI / 2 - Math.atan2(-SCREEN_UP.y, SCREEN_UP.x)
 
-const drawBase = (document: Document): HTMLCanvasElement => {
+/**
+ * Paints the map layers (areas, water, rail, roads, buildings) north-up at `scale` px/m, with the
+ * map's north-west corner at canvas pixel (ox, oy). Lines stay at least 1 px wide; those thinner
+ * than that at this scale fade instead. `overview` (the full map) draws roads light and at least
+ * 2 px (main roads) or 1.5 px wide, so the network reads at a few pixels per hundred metres.
+ */
+export const paintMap = (ctx: CanvasRenderingContext2D, scale: number, ox = 0, oy = 0, overview = false): void => {
   const { minX, minY, maxX, maxY } = MAP.bounds
-  const canvas = document.createElement("canvas")
-  canvas.width = Math.ceil((maxX - minX) * BASE)
-  canvas.height = Math.ceil((maxY - minY) * BASE)
-  const ctx = canvas.getContext("2d")
-  if (ctx === null) return canvas
-  const u = (x: number) => (x - minX) * BASE, v = (y: number) => (maxY - y) * BASE
-  const path = (flat: ReadonlyArray<number>, closed: boolean, into = new Path2D()) => {
+  const u = (x: number) => ox + (x - minX) * scale, v = (y: number) => oy + (maxY - y) * scale
+  const path = (flat: ArrayLike<number>, closed: boolean, into = new Path2D()) => {
     into.moveTo(u(flat[0]!), v(flat[1]!))
     for (let i = 2; i + 1 < flat.length; i += 2) into.lineTo(u(flat[i]!), v(flat[i + 1]!))
     if (closed) into.closePath()
     return into
   }
   ctx.fillStyle = css(PALETTE.grass)
-  ctx.fillRect(0, 0, canvas.width, canvas.height)
+  ctx.fillRect(u(minX), v(maxY), (maxX - minX) * scale, (maxY - minY) * scale)
   for (const area of MAP.areas) {
     const hex = isAreaKind(area.kind) ? AREA_HEX[area.kind] : undefined
     if (hex === undefined) continue
@@ -54,16 +55,52 @@ const drawBase = (document: Document): HTMLCanvasElement => {
   }
   ctx.lineCap = "round"
   ctx.lineJoin = "round"
-  const stroke = (flat: ReadonlyArray<number>, width: number, hex: number) => {
+  const stroke = (flat: ArrayLike<number>, width: number, hex: number, min = 1) => {
     ctx.strokeStyle = css(hex)
-    ctx.lineWidth = Math.max(1, width * BASE)
+    ctx.lineWidth = Math.max(min, width * scale)
+    ctx.globalAlpha = Math.min(1, Math.max(0.3, (width * scale) / min))
     ctx.stroke(path(flat, false))
+    ctx.globalAlpha = 1
   }
   for (const w of MAP.water) stroke(w.pts, w.w, PALETTE.waterShallow)
   for (const r of MAP.rail) if (r.tunnel !== true) stroke(r.pts, 2, PALETTE.stoneDark)
-  for (const road of MAP.roads) if (road.tunnel !== true && roadClassOf(road) !== "path") stroke(road.pts, road.w * 1.6, roadHex(road))
+  for (const road of MAP.roads) {
+    const cls = roadClassOf(road)
+    if (road.tunnel === true || cls === "path") continue
+    if (!overview) stroke(road.pts, road.w * 1.6, roadHex(road))
+    else {
+      ctx.strokeStyle = css(cls === "track" ? PALETTE.stoneLight : PALETTE.limestone)
+      ctx.lineWidth = Math.max(cls === "tertiary" ? 2 : 1.5, road.w * 1.6 * scale)
+      ctx.stroke(path(road.pts, false))
+    }
+  }
   ctx.fillStyle = css(PALETTE.roofTile)
   for (const b of MAP.buildings) ctx.fill(path(b.outer, true))
+}
+
+/** The player marker: an arrow along +x, `size` px from tail to tip, centred on the current origin. */
+export const paintArrow = (ctx: CanvasRenderingContext2D, size = 9, fill: number = PALETTE.signYellow): void => {
+  const k = size / 9
+  ctx.beginPath()
+  ctx.moveTo(5 * k, 0)
+  ctx.lineTo(-4 * k, 3.5 * k)
+  ctx.lineTo(-2 * k, 0)
+  ctx.lineTo(-4 * k, -3.5 * k)
+  ctx.closePath()
+  ctx.fillStyle = css(fill)
+  ctx.strokeStyle = css(PALETTE.outline)
+  ctx.lineWidth = Math.max(1, k)
+  ctx.fill()
+  ctx.stroke()
+}
+
+const drawBase = (document: Document): HTMLCanvasElement => {
+  const { minX, minY, maxX, maxY } = MAP.bounds
+  const canvas = document.createElement("canvas")
+  canvas.width = Math.ceil((maxX - minX) * BASE)
+  canvas.height = Math.ceil((maxY - minY) * BASE)
+  const ctx = canvas.getContext("2d")
+  if (ctx !== null) paintMap(ctx, BASE)
   return canvas
 }
 
@@ -91,17 +128,7 @@ export const makeMinimap = (document: Document, size = 180) => {
       ctx.drawImage(base, -(x - MAP.bounds.minX) * BASE, -(MAP.bounds.maxY - y) * BASE)
       ctx.setTransform(1, 0, 0, 1, s / 2, s / 2)
       ctx.rotate(MINIMAP_ROTATION - angle)
-      ctx.beginPath()
-      ctx.moveTo(5, 0)
-      ctx.lineTo(-4, 3.5)
-      ctx.lineTo(-2, 0)
-      ctx.lineTo(-4, -3.5)
-      ctx.closePath()
-      ctx.fillStyle = css(PALETTE.signYellow)
-      ctx.strokeStyle = css(PALETTE.outline)
-      ctx.lineWidth = 1
-      ctx.fill()
-      ctx.stroke()
+      paintArrow(ctx)
     }
   }
 }

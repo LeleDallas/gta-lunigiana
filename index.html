@@ -21,6 +21,13 @@
       <div id="hud-prompt" hidden></div>
       <div id="hud-speedo" hidden><span id="hud-speed">0</span><span class="unit">km/h</span><div id="hud-vehicle"></div></div>
       <div id="hud-minimap"></div>
+      <div id="hud-map" role="dialog" aria-modal="true" aria-labelledby="hud-map-title" aria-describedby="hud-map-desc" tabindex="-1" hidden>
+        <div class="map-head">
+          <div><span class="map-title" id="hud-map-title">Mappa</span> <small>map</small></div>
+          <div class="map-here" id="hud-map-desc">Qui <small>you are here</small> <span id="hud-map-here"></span></div>
+          <div class="map-keys">M · Esc — chiudi <small>close</small></div>
+        </div>
+      </div>
       <div class="credits">Map data © OpenStreetMap contributors (ODbL) · Fonte dei dati: Regione Toscana – CTR 1:2000, Rilievi LIDAR (CC BY 4.0)</div>
     </div>
     <div id="title">
@@ -32,6 +39,7 @@
           <div><dt>Shift</dt><dd>sprint</dd></div>
           <div><dt>F / E / Enter</dt><dd>enter · exit · steal</dd></div>
           <div><dt>Space</dt><dd>handbrake</dd></div>
+          <div><dt>M</dt><dd>map (pauses)</dd></div>
         </dl>
         <p class="go">Press any key</p>
         <p class="fine">Map data © OpenStreetMap contributors (ODbL)<br />Fonte dei dati: Regione Toscana – CTR 1:2000, Rilievi LIDAR (CC BY 4.0)</p>

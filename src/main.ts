@@ -3,16 +3,16 @@
  * Browser host: makes the streamed world and the pixel view, makes the runtime with the live
  * keyboard and the render registries, and drives everything from one FixedLoop: fixed sim steps,
  * then once per animation frame the render schedule, the camera, world streaming, the frame and
- * the HUD.
+ * the HUD. While the full map (M) is open, both are skipped: the game is paused.
  *
  * @module main
  */
-import { FixedLoop } from "@typeonce/ritmo"
+import { FixedLoop, Result } from "@typeonce/ritmo"
 import { BrowserHostClock, BrowserTickSource, Keyboard } from "@typeonce/ritmo-browser"
 import { Vec2 } from "@typeonce/ritmo-math"
 import { BasicShadowMap, DirectionalLight, HemisphereLight, Scene, Vector3, WebGLRenderer } from "three"
 
-import { dismissTitleOnInput, makeHud } from "./hud/hud.ts"
+import { dismissTitleOnInput, makeHud, pausable, toggleMapOnKey } from "./hud/hud.ts"
 import { groundY } from "./render/ground.ts"
 import { blend, makeRegistries, People, render, RenderClock, Vehicles } from "./render/index.ts"
 import { PALETTE } from "./render/palette.ts"
@@ -57,6 +57,7 @@ addEventListener("resize", resize)
 let dpr = matchMedia(`(resolution: ${devicePixelRatio}dppx)`)
 const onDpr = () => {
   resize()
+  hud.repaintMap()
   dpr = matchMedia(`(resolution: ${devicePixelRatio}dppx)`)
   dpr.addEventListener("change", onDpr, { once: true })
 }
@@ -86,6 +87,8 @@ if (spawn !== undefined) world.update(new Vector3(spawn.pose.x, groundY(spawn.po
 
 const hud = makeHud(document)
 dismissTitleOnInput(window)
+toggleMapOnKey(window, hud)
+
 
 const camera = { x: 0, y: 0, elevation: 0, placed: false, zoom: 8 }
 
@@ -121,8 +124,11 @@ const loop = FixedLoop.start({
   step: STEP,
   maxFrameSeconds: 0.25,
   maxStepsPerFrame: 5,
-  update: () => runtime.tick(update),
-  render: draw,
+  update: pausable(hud.mapOpen, keyboard, () => runtime.tick(update), Result.success(undefined)),
+  // The map covers the screen: no world to draw, and actors stay put (no interpolation jitter).
+  render: (frame) => {
+    if (!hud.mapOpen()) draw(frame)
+  },
   onFailure: (failure) => console.error("loop stopped", failure)
 })
 if (!loop.ok) throw new Error(`loop: ${JSON.stringify(loop.error)}`)
