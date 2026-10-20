@@ -1,7 +1,7 @@
 import type { Vec2 } from "@typeonce/ritmo-math"
 
 import { forwardSpeed, vehicleInReach } from "./body.ts"
-import { Down, Driving, Game, Motion, Player, Pose, type PoseValue, PrevPose, Score, Stolen, Traffic, Vehicle } from "./schema.ts"
+import { Down, Driving, Game, Motion, Player, Pose, type PoseValue, PrevPose, Score, Stolen, Traffic, Vehicle, View } from "./schema.ts"
 import { VEHICLES } from "./vehicles.ts"
 
 /** Plain view data for the camera and HUD. */
@@ -17,6 +17,8 @@ export interface PlayerViewModel {
   /** The vehicle the action key would enter right now, when on foot (not knocked down). */
   readonly nearby: { readonly label: string; readonly occupied: boolean; readonly stolen: boolean } | undefined
   readonly score: { readonly stolen: number; readonly knocked: number }
+  /** Net quarter turns of the view to the left of its home seat (the `View` resource). */
+  readonly turns: number
 }
 
 /** The one projection the host reads for the camera and HUD. */
@@ -42,7 +44,7 @@ export const PlayerView = Game.Inspector("Lunigiana/PlayerView", {
       }
     })
   },
-  resources: { score: Game.System.readResource(Score) }
+  resources: { score: Game.System.readResource(Score), view: Game.System.readResource(View) }
 }, ({ queries, resources }): PlayerViewModel | undefined => {
   const found = queries.player.singleOptional()
   if (!found.ok || found.value === undefined) return undefined
@@ -67,6 +69,7 @@ export const PlayerView = Game.Inspector("Lunigiana/PlayerView", {
     nearby: near === undefined
       ? undefined
       : { label: VEHICLES[near.data.vehicle.get().model].label, occupied: near.data.traffic.present, stolen: near.data.stolen.present },
-    score: resources.score.get()
+    score: resources.score.get(),
+    turns: resources.view.get().turns
   }
 })

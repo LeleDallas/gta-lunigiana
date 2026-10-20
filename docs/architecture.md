@@ -16,7 +16,8 @@ keyboard ──► KeyboardInput service ──► CaptureInput ──► Input 
 
 `src/sim/index.ts` is the entry. It re-exports the schema, defines the schedules, and exports
 `makeRuntime({ seed, services, debug? })`, which makes a runtime with the starting resources:
-`Time` (60 Hz clock), `Rng` (seeded from `seed`), `Score` (zeroed) and `Input` (idle keys).
+`Time` (60 Hz clock), `Rng` (seeded from `seed`), `Score` (zeroed), `View` (home view) and
+`Input` (idle keys).
 
 ### Schedules and system order
 
@@ -33,18 +34,19 @@ keyboard ──► KeyboardInput service ──► CaptureInput ──► Input 
 | 1 | `AdvanceTime` | `index.ts` | advances `Time` (Ritmo `Clock.system`) |
 | 2 | `CaptureInput` | `index.ts` | copies the `KeyboardInput` snapshot into `Input` |
 | 3 | `StorePrevious` | `index.ts` | copies every `Pose` into `PrevPose` (for interpolation) |
-| 4 | `EnterExit` | `systems/enter-exit.ts` | action key: enter, steal, carjack, get out |
-| 5 | `applyDeferred` | | applies the enter/exit commands before anything moves |
-| 6 | `PlayerFoot` | `systems/foot.ts` | player walking, sprinting, sliding when down |
-| 7 | `PlayerDrive` | `systems/drive.ts` | player keys into the driven car's `CarInput` |
-| 8 | `TrafficAI` | `systems/traffic.ts` | AI drivers write their `CarInput` |
-| 9 | `Pedestrians` | `systems/pedestrians.ts` | walkers follow their routes, flee, slide |
-| 10 | `VehiclePhysics` | `systems/physics.ts` | every vehicle moves from its `CarInput` |
-| 11 | `Contacts` | `systems/contacts.ts` | car–car, car–person and person–person contacts, knockdowns |
-| 12 | `RideAlong` | `systems/drive.ts` | the driving player takes the car's pose and motion |
-| 13 | `Recover` | `systems/contacts.ts` | knocked-down people get up; pedestrians then flee |
-| 14 | `Populate` | `systems/populate.ts` | every 0.5 s spawns and despawns traffic and pedestrians |
-| 15 | `applyDeferred` | | applies spawns, despawns, inserts and removals |
+| 4 | `TurnView` | `index.ts` | turn keys: the view's quarter turns (`View`) |
+| 5 | `EnterExit` | `systems/enter-exit.ts` | action key: enter, steal, carjack, get out |
+| 6 | `applyDeferred` | | applies the enter/exit commands before anything moves |
+| 7 | `PlayerFoot` | `systems/foot.ts` | player walking, sprinting, sliding when down |
+| 8 | `PlayerDrive` | `systems/drive.ts` | player keys into the driven car's `CarInput` |
+| 9 | `TrafficAI` | `systems/traffic.ts` | AI drivers write their `CarInput` |
+| 10 | `Pedestrians` | `systems/pedestrians.ts` | walkers follow their routes, flee, slide |
+| 11 | `VehiclePhysics` | `systems/physics.ts` | every vehicle moves from its `CarInput` |
+| 12 | `Contacts` | `systems/contacts.ts` | car–car, car–person and person–person contacts, knockdowns |
+| 13 | `RideAlong` | `systems/drive.ts` | the driving player takes the car's pose and motion |
+| 14 | `Recover` | `systems/contacts.ts` | knocked-down people get up; pedestrians then flee |
+| 15 | `Populate` | `systems/populate.ts` | every 0.5 s spawns and despawns traffic and pedestrians |
+| 16 | `applyDeferred` | | applies spawns, despawns, inserts and removals |
 
 Controls are read before movement, all movement happens before contacts, and contacts happen
 before the player's pose follows the car. Gameplay is in [gameplay.md](gameplay.md).
@@ -73,7 +75,8 @@ Saved world state (in snapshots), declared in `src/sim/schema.ts`:
 `Vehicle` has a pose, previous pose, motion and `CarInput`; `Traffic` also needs `Route` and
 `Autopilot`.
 
-Resources: `Time`, `Rng` and `Score` (`stolen`, `knocked`) are saved. `Input` is transient: it is
+Resources: `Time`, `Rng`, `Score` (`stolen`, `knocked`) and `View` (`turns`, the net quarter turns
+of the camera) are saved. `Input` is transient: it is
 rebuilt every step and never saved.
 
 Static data is module content, not state. `MAP` and `graph` (`src/sim/map/index.ts`), the wall,
@@ -98,7 +101,7 @@ streamed world's chunks, and the HUD's DOM.
 2. `CaptureInput` (Ritmo's `InputCapture.system`) copies its snapshot into the `Input` resource
    at the start of each step.
 3. Systems read `Input`: `held` for movement, steering and handbrake, `pressed` (once per press)
-   for the action key.
+   for the action and turn keys.
 
 `bindings` in `src/sim/schema.ts` is the only list of keys. Tests and replays use the same path:
 `Keyboard.scripted(bindings, timeline)` replaces the live keyboard.
@@ -110,7 +113,7 @@ frames clamped to 0.25 s. Each animation frame it:
 
 1. writes the loop's `alpha` (fraction of a step since the last one) into `RenderClock`;
 2. ticks the `render` schedule;
-3. reads `PlayerView` and moves the camera;
+3. reads `PlayerView` and moves and turns the camera;
 4. streams the static world around the camera focus (see below);
 5. renders the pixel view, then updates the HUD.
 
@@ -148,8 +151,10 @@ Streaming:
   whole-map build.
 - Distances are measured on the screen plane, from the focus to each chunk's box projected along
   the camera's right and up axes, terrain relief included. A valley far below a ridge counts as
-  near when the camera shows it beside the focus.
-- `world.update(focus, reach, budgetMs)` runs every frame. `reach` is the half-diagonal of the view
+  near when the camera shows it beside the focus. The boxes are measured once (`chunkBoxes`);
+  their screen rectangles are projected again whenever the view's yaw changes, which is every
+  frame of a turn (≈ 1,600 boxes of 8 corners each).
+- `world.update(focus, yaw, reach, budgetMs)` runs every frame. `reach` is the half-diagonal of the view
   at the widest zoom (`WIDEST_ZOOM`, 5 texels/m), so zooming out never shows a missing chunk.
   Chunks within reach + 64 m are built, nearest first, until 4 ms of the frame are spent (at least
   one per frame). Chunks beyond reach + 64 + 128 m are dropped: removed from the scene, their
@@ -164,10 +169,14 @@ The pixel pipeline (`src/render/pipeline.ts`):
 
 - An orthographic camera at 30° elevation. At that angle the ground axes project to exact 2:1
   pixel lines.
-- The camera sits north-west of the focus and looks south-east. `SCREEN_UP` and `SCREEN_RIGHT`
-  in `src/sim/view.ts` define this. The sim maps on-foot keys through them, and the camera,
-  minimap and sun are built from them. The mountains rise to the south and east, so this side
-  sees every street.
+- In its home view the camera sits north-west of the focus and looks south-east: the mountains
+  rise to the south and east, so this side sees every street. Q and E turn it a quarter at a time
+  (the sim's `View`). `screenAxes(turns)` in `src/sim/view.ts` gives the screen axes on the
+  ground for each turn. The sim maps on-foot keys through them, and the camera and minimap are
+  built from them.
+- The host eases the camera's yaw toward `turns × π/2` (`turnToward`). A quarter turn takes
+  about a third of a second and stops exactly on the heading, so at rest the 2:1 lines and the
+  texel snapping are exact again. Under `prefers-reduced-motion` the view turns at once.
 - The scene renders into a low-resolution HalfFloat target about 270 texels tall. One fullscreen
   pass then darkens depth edges (outlines), converts to sRGB, and upscales by an integer factor.
 - The camera snaps to the texel grid and the remainder becomes a sub-texel scroll offset. The
@@ -175,7 +184,8 @@ The pixel pipeline (`src/render/pipeline.ts`):
 - Zoom (`zoomFor`): 8 texels/m on foot, 6 in a car, 5 above 16 m/s (back to 6 below 13 m/s).
 - The camera leads the player by 0.6 s of velocity, at most 14 m (`LOOK_AHEAD`), and eases
   toward its target.
-- The sun's shadow box follows the view, snapped to shadow-map texels.
+- The sun's shadow box follows the view, snapped to shadow-map texels. The sun turns with the
+  view, so the lit and shaded wall faces look the same whichever way the camera looks.
 
 ## HUD
 
@@ -184,13 +194,13 @@ the `PlayerView` inspector (`src/sim/views.ts`) and the map:
 
 - `PlayerView` returns a `PlayerViewModel`: previous and current pose, velocity, mode (`foot`,
   `driving`, `down`), the driven vehicle's label and speed, the vehicle in reach (label,
-  occupied, stolen), and the score.
+  occupied, stolen), the score, and the view's quarter turns.
 - `vehicleInReach` (`src/sim/body.ts`) answers both the HUD prompt and the `EnterExit` action, so
   the prompt never offers something the key will not do.
 - Location: the name of the nearest road within 15 m, if it has one (tracks and paths skipped,
   so an unnamed road never borrows a side street's name), and the district disc from `districtAt`. Looked up again only after moving 2 m.
 - The minimap is drawn once to an offscreen canvas and then blitted around the player, 300 m
-  across, rotated so that screen-up is up. At 0.5 px/m the whole map is 2600 × 2298 px (6 MP,
+  across, turned with the view so that screen-up is up. At 0.5 px/m the whole map is 2600 × 2298 px (6 MP,
   24 MB): under every browser's canvas limit (the strictest, Safari's, is 16.7 MP). Drawing it
   takes ≈ 10 ms at load; the per-frame blit ≈ 1 ms.
 - The full map (`src/hud/worldmap.ts`, `#hud-map` in `index.html`): the key labelled M toggles

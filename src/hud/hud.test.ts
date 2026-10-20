@@ -4,13 +4,14 @@ import { test } from "node:test"
 import { Keyboard } from "@typeonce/ritmo-browser"
 
 import { bindings, type PlayerViewModel } from "../sim/index.ts"
-import { SCREEN_UP } from "../sim/view.ts"
+import { screenAxes } from "../sim/view.ts"
+import { QUARTER } from "../render/pipeline.ts"
 import { kmh, pausable, promptText, toggleMapOnKey } from "./hud.ts"
-import { MINIMAP_ROTATION } from "./minimap.ts"
+import { minimapRotation } from "./minimap.ts"
 
 const pose = { x: 0, y: 0, angle: 0 }
 const view = (patch: Partial<PlayerViewModel>): PlayerViewModel =>
-  ({ prev: pose, pose, velocity: { x: 0, y: 0 }, mode: "foot", vehicle: undefined, nearby: undefined, score: { stolen: 0, knocked: 0 }, ...patch })
+  ({ prev: pose, pose, velocity: { x: 0, y: 0 }, mode: "foot", vehicle: undefined, nearby: undefined, score: { stolen: 0, knocked: 0 }, turns: 0, ...patch })
 
 test("the prompt names the action the key would take", () => {
   assert.equal(promptText(view({})), "")
@@ -26,11 +27,14 @@ test("speed reads in whole km/h, reversing included", () => {
   assert.equal(kmh(-2.5), 9)
 })
 
-test("the minimap turns SCREEN_UP to the top", () => {
-  // North-up canvas vector of SCREEN_UP, rotated by the canvas transform (y grows downwards).
-  const u = SCREEN_UP.x, v = -SCREEN_UP.y, c = Math.cos(MINIMAP_ROTATION), s = Math.sin(MINIMAP_ROTATION)
-  assert.ok(Math.abs(u * c - v * s) < 1e-9)
-  assert.ok(Math.abs(u * s + v * c + 1) < 1e-9)
+test("the minimap turns screen-up to the top, whichever way the view is turned", () => {
+  for (const turns of [0, 1, 2, 3, -1]) {
+    // North-up canvas vector of screen-up, rotated by the canvas transform (y grows downwards).
+    const { up } = screenAxes(turns), r = minimapRotation(turns * QUARTER)
+    const u = up.x, v = -up.y, c = Math.cos(r), s = Math.sin(r)
+    assert.ok(Math.abs(u * c - v * s) < 1e-9, `turns ${turns}`)
+    assert.ok(Math.abs(u * s + v * c + 1) < 1e-9, `turns ${turns}`)
+  }
 })
 
 /** A keydown/keyup the way a browser fills it (Node's EventTarget has no KeyboardEvent). */

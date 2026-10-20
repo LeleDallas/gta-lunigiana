@@ -1,9 +1,9 @@
 import { InputAxis, Ops, Vec2 } from "@typeonce/ritmo-math"
 
 import { walkBy } from "../body.ts"
-import { Down, Driving, Game, Input, Motion, Player, Pose, Time } from "../schema.ts"
+import { Down, Driving, Game, Input, Motion, Player, Pose, Time, View } from "../schema.ts"
 import { SPRINT_SPEED, WALK_SPEED } from "../tuning.ts"
-import { SCREEN_RIGHT, SCREEN_UP } from "../view.ts"
+import { screenAxes } from "../view.ts"
 
 /** On-foot acceleration toward the wanted velocity, m/s². */
 const FOOT_ACCEL = 30
@@ -14,7 +14,7 @@ const SLIDE_DECEL = 10
 export const slide = (velocity: Vec2.Vec2, dt: number): Vec2.Vec2 => Vec2.moveToward(velocity, Vec2.zero, SLIDE_DECEL * dt)
 
 /**
- * The player on foot: arrow keys move along the screen axes (up key = +SCREEN_UP),
+ * The player on foot: arrow keys move along the screen axes of the turned view (up key = screen-up),
  * sprint held runs, the body faces where the keys point. Knocked down, it only slides.
  */
 export const PlayerFoot = Game.System("Lunigiana/PlayerFoot", {
@@ -25,17 +25,22 @@ export const PlayerFoot = Game.System("Lunigiana/PlayerFoot", {
       without: [Driving]
     })
   },
-  resources: { input: Game.System.readResource(Input), time: Game.System.thisTick(Game.System.readResource(Time)) }
+  resources: {
+    input: Game.System.readResource(Input),
+    view: Game.System.readResource(View),
+    time: Game.System.thisTick(Game.System.readResource(Time))
+  }
 }, ({ queries, resources }) => {
   const { dt } = resources.time.get()
   const keys = resources.input.get()
+  const { up, right } = screenAxes(resources.view.get().turns)
   for (const { data } of queries.player.each()) {
     const pose = data.pose.get()
     const motion = data.motion.get()
     const current = { x: motion.vx, y: motion.vy }
     const ix = InputAxis.axis(keys.left.held, keys.right.held)
     const iy = InputAxis.axis(keys.down.held, keys.up.held)
-    const wish = data.down.present ? Vec2.zero : Vec2.normalizeOr({ x: SCREEN_RIGHT.x * ix + SCREEN_UP.x * iy, y: SCREEN_RIGHT.y * ix + SCREEN_UP.y * iy }, Vec2.zero)
+    const wish = data.down.present ? Vec2.zero : Vec2.normalizeOr({ x: right.x * ix + up.x * iy, y: right.y * ix + up.y * iy }, Vec2.zero)
     const velocity = data.down.present
       ? slide(current, dt)
       : Vec2.moveToward(current, Vec2.scale(wish, keys.sprint.held ? SPRINT_SPEED : WALK_SPEED), FOOT_ACCEL * dt)

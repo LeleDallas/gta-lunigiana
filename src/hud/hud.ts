@@ -26,7 +26,7 @@ const element = (document: Document, id: string): HTMLElement => {
   return found
 }
 
-/** Binds the HUD to its markup; `update` once per frame with the interpolated player position. */
+/** Binds the HUD to its markup; `update` once per frame with the interpolated player position and the view's yaw. */
 export const makeHud = (document: Document) => {
   const road = element(document, "hud-road"), district = element(document, "hud-district")
   const stolen = element(document, "hud-stolen"), knocked = element(document, "hud-knocked")
@@ -53,7 +53,7 @@ export const makeHud = (document: Document) => {
     repaintMap: (): void => {
       if (worldMap.open) worldMap.show(last.x, last.y, last.angle)
     },
-    update: (view: PlayerViewModel, x: number, y: number, angle: number): void => {
+    update: (view: PlayerViewModel, x: number, y: number, angle: number, yaw: number): void => {
       last = { x, y, angle }
       // Names change slowly: look them up again only after moving a couple of metres.
       if (!(Math.hypot(x - located.x, y - located.y) < 2)) {
@@ -72,7 +72,7 @@ export const makeHud = (document: Document) => {
       const text = promptText(view)
       show(prompt, text !== "")
       set(prompt, text)
-      minimap.draw(x, y, angle)
+      minimap.draw(x, y, angle, yaw)
     }
   }
 }

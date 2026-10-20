@@ -2,9 +2,9 @@ import { Clock, HostClock } from "@typeonce/ritmo"
 import type { RuntimeServices } from "@typeonce/ritmo/Runtime"
 import { InputCapture, Keyboard } from "@typeonce/ritmo-browser"
 import type * as Lint from "@typeonce/ritmo-devtools/Lint"
-import { Random } from "@typeonce/ritmo-math"
+import { InputAxis, Random } from "@typeonce/ritmo-math"
 
-import { bindings, Game, Input, KeyboardInput, Pose, PrevPose, Root, STEP, Time } from "./schema.ts"
+import { bindings, Game, Input, KeyboardInput, Pose, PrevPose, Root, STEP, Time, View } from "./schema.ts"
 import { Contacts, Recover } from "./systems/contacts.ts"
 import { PlayerDrive, RideAlong } from "./systems/drive.ts"
 import { EnterExit } from "./systems/enter-exit.ts"
@@ -28,6 +28,15 @@ const StorePrevious = Game.System("Lunigiana/StorePrevious", {
   for (const { data } of queries.all.each()) data.prev.set(data.pose.get())
 })
 
+/** The turn keys swing the view a quarter left or right; on foot, the movement keys follow it. */
+const TurnView = Game.System("Lunigiana/TurnView", {
+  resources: { input: Game.System.readResource(Input), view: Game.System.writeResource(View) }
+}, ({ resources }) => {
+  const keys = resources.input.get()
+  const turn = InputAxis.axis(keys.turnRight.pressed, keys.turnLeft.pressed)
+  if (turn !== 0) resources.view.update(({ turns }) => ({ turns: turns + turn }))
+})
+
 /** Ticked once after the runtime is made. */
 export const setup = Game.Schedule(SpawnWorld, Game.Schedule.applyDeferred())
 /** One fixed step of the game. */
@@ -35,6 +44,7 @@ export const update = Game.Schedule(
   AdvanceTime,
   CaptureInput,
   StorePrevious,
+  TurnView,
   EnterExit,
   Game.Schedule.applyDeferred(),
   PlayerFoot,
@@ -56,7 +66,7 @@ export const makeRuntime = <const Services extends RuntimeServices<any>>(options
   readonly debug?: { readonly hostClock: HostClock.HostClock }
 }) => Game.Runtime.make({
   services: options.services,
-  resources: { Time: Clock.start(STEP), Rng: Random.seed(options.seed), Score: { stolen: 0, knocked: 0 }, Input: Keyboard.idle(bindings) },
+  resources: { Time: Clock.start(STEP), Rng: Random.seed(options.seed), Score: { stolen: 0, knocked: 0 }, View: { turns: 0 }, Input: Keyboard.idle(bindings) },
   debug: options.debug
 })
 

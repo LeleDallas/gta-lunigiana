@@ -16,7 +16,7 @@ import { parkedCar, pedestrian } from "./spawning.ts"
 import { PEDESTRIANS, PEOPLED, TRAFFIC } from "./systems/populate.ts"
 import { PARKED } from "./systems/spawn.ts"
 import { BATTISTI, battistiTraffic, door, ON_BATTISTI, press, stage, start, straightOn, teleport, type Timeline, walkClear } from "./testing.ts"
-import { SCREEN_UP, VIEW_REACH } from "./view.ts"
+import { screenAxes, VIEW_REACH } from "./view.ts"
 import { VEHICLES } from "./vehicles.ts"
 
 test("setup: the player at the map spawn, 150 parked cars on random spots, Carabinieri in front of the station", () => {
@@ -38,12 +38,13 @@ test("setup: the player at the map spawn, 150 parked cars on random spots, Carab
   assert.ok(vehicles.filter((v) => v.model === "truck").length <= 2)
 })
 
-test("on foot: the up key walks along SCREEN_UP and stops at a building wall", () => {
+test("on foot: the up key walks along screen-up and stops at a building wall", () => {
   // 6 m north-west of a house wall that faces the camera (1.3° off square on), 5.65 m to contact.
   const from = { x: -59.4926, y: 160.9426, angle: 0 }
   const { run, view } = start([{ frame: 0, press: ["up"] }], [from])
-  const along = (p: PoseValue) => (p.x - from.x) * SCREEN_UP.x + (p.y - from.y) * SCREEN_UP.y
-  const across = (p: PoseValue) => (p.x - from.x) * SCREEN_UP.y - (p.y - from.y) * SCREEN_UP.x
+  const { up } = screenAxes(0)
+  const along = (p: PoseValue) => (p.x - from.x) * up.x + (p.y - from.y) * up.y
+  const across = (p: PoseValue) => (p.x - from.x) * up.y - (p.y - from.y) * up.x
   const path: Array<PoseValue> = []
   run(240, () => path.push(view()!.pose))
   assert.ok(along(path[20]!) > 0.3 && Math.abs(across(path[20]!)) < 1e-9, JSON.stringify(path[20]))
@@ -97,6 +98,19 @@ test("exit: the player gets out at the driver's door, clear of walls, and the ca
   assert.ok((me.pose.x - car!.x) * -Ops.sin(car!.angle) + (me.pose.y - car!.y) * Ops.cos(car!.angle) > 0, "on its left")
   assert.ok(walkClear(me.pose))
   assert.equal(car!.input.handbrake, true)
+})
+
+test("view: Q turns the view a quarter left, E a quarter right, and the up key walks along the turned screen-up", () => {
+  for (const [keys, turns] of [[["turnLeft"], 1], [["turnLeft", "turnLeft"], 2], [["turnRight"], -1]] as const) {
+    const { run, view } = start([...keys.flatMap((key, i) => press(2 * i, key)), { frame: 4, press: ["up"] }], [ON_BATTISTI])
+    run(4)
+    assert.equal(view()!.turns, turns)
+    const from = view()!.pose
+    run(20)
+    const to = view()!.pose, { up } = screenAxes(turns)
+    const along = (to.x - from.x) * up.x + (to.y - from.y) * up.y, across = (to.x - from.x) * up.y - (to.y - from.y) * up.x
+    assert.ok(along > 0.3 && Math.abs(across) < 1e-9, `turns ${turns}: ${along} along, ${across} across`)
+  }
 })
 
 // Regression: the camera led by the pose change, so the hop in or out of a car jolted it.
@@ -274,12 +288,12 @@ test("populate: pedestrians spawn in the villages, never inside a house, and non
   }
 })
 
-/** Walk to a car, drive it hard around Via Cesare Battisti, get out: every system has work to do. */
+/** Walk to a car, drive it hard around Via Cesare Battisti, turn the view, get out: every system has work to do. */
 const joyride: Timeline = [
   { frame: 0, press: ["left"] }, { frame: 10, release: ["left"] },
   ...press(12, "action"),
   { frame: 14, press: ["up"] }, { frame: 100, press: ["left"] }, { frame: 130, release: ["left"], press: ["handbrake", "right"] },
-  { frame: 170, release: ["handbrake", "right"] }, { frame: 240, release: ["up"], press: ["down"] }, { frame: 300, release: ["down"] },
+  { frame: 170, release: ["handbrake", "right"] }, ...press(200, "turnLeft"), { frame: 240, release: ["up"], press: ["down"] }, { frame: 300, release: ["down"] },
   ...press(330, "action"), { frame: 340, press: ["up", "sprint"] }, { frame: 400, release: ["up", "sprint"] }
 ]
 const joyrideCast = [door(ON_BATTISTI), { cars: [parkedCar("panda", 0xb8312b, ON_BATTISTI)] }] as const
@@ -303,6 +317,7 @@ test("saves: a snapshot taken mid-joyride restores through JSON and plays on ide
     if (modes.at(-1) !== mode) modes.push(mode)
   })
   assert.deepEqual(modes, ["foot", "driving", "foot"], "the joyride gets in, drives and gets out")
+  assert.equal(a.view()!.turns, 1, "and turns the view")
   const b = start()
   assert.ok(b.runtime.restore(JSON.parse(JSON.stringify(a.runtime.snapshot()))).ok)
   assert.deepEqual(b.view(), a.view())
@@ -313,8 +328,9 @@ test("saves: a snapshot taken mid-joyride restores through JSON and plays on ide
 })
 
 test("contacts: sprinting into a parked car does not knock the player down", () => {
-  // 5 m behind the car along SCREEN_UP, sprinting straight into it (the player then slides around it).
-  const from = { x: ON_BATTISTI.x - SCREEN_UP.x * 5, y: ON_BATTISTI.y - SCREEN_UP.y * 5, angle: 0 }
+  // 5 m behind the car along screen-up, sprinting straight into it (the player then slides around it).
+  const { up } = screenAxes(0)
+  const from = { x: ON_BATTISTI.x - up.x * 5, y: ON_BATTISTI.y - up.y * 5, angle: 0 }
   assert.ok(walkClear(from))
   const { run, view } = start([{ frame: 0, press: ["up", "sprint"] }], [from, { cars: [parkedCar("panda", 0xb8312b, ON_BATTISTI)] }])
   const modes = new Set<string>()

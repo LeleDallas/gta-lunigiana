@@ -10,13 +10,13 @@
 import { FixedLoop, Result } from "@typeonce/ritmo"
 import { BrowserHostClock, BrowserTickSource, Keyboard } from "@typeonce/ritmo-browser"
 import { Vec2 } from "@typeonce/ritmo-math"
-import { BasicShadowMap, DirectionalLight, HemisphereLight, Scene, Vector3, WebGLRenderer } from "three"
+import { BasicShadowMap, DirectionalLight, HemisphereLight, Object3D, Scene, Vector3, WebGLRenderer } from "three"
 
 import { dismissTitleOnInput, makeHud, pausable, toggleMapOnKey } from "./hud/hud.ts"
 import { groundY } from "./render/ground.ts"
 import { blend, makeRegistries, People, render, RenderClock, Vehicles } from "./render/index.ts"
 import { PALETTE } from "./render/palette.ts"
-import { followSun, PixelView, WIDEST_ZOOM, zoomFor } from "./render/pipeline.ts"
+import { followSun, PixelView, QUARTER, turnToward, WIDEST_ZOOM, zoomFor } from "./render/pipeline.ts"
 import { World } from "./render/world.ts"
 import { heightAt } from "./sim/map/index.ts"
 import { bindings, Game, KeyboardInput, makeRuntime, PlayerView, setup, STEP, update } from "./sim/index.ts"
@@ -34,8 +34,10 @@ renderer.info.autoReset = false // two renders per frame (scene + blit): reset o
 const scene = new Scene()
 // Sky from above, warm bounce from the ground: shaded walls stay readable.
 scene.add(new HemisphereLight(0xdbe8f5, 0x9a8a68, 1.8))
-// The camera sits north-west, so the sun comes from its side (west-south-west): west walls lit, north walls in shade.
-const toSun = new Vector3(-0.75, 1, 0.35).normalize()
+// At its home seat the camera sits north-west, so the sun comes from its side (west-south-west): west walls lit,
+// north walls in shade. The sun turns with the view, so whichever way it looks the walls it shows keep that look.
+const HOME_SUN = new Vector3(-0.75, 1, 0.35).normalize()
+const toSun = new Vector3()
 const sun = new DirectionalLight(0xfff0d8, 2)
 sun.castShadow = true
 sun.shadow.mapSize.set(2048, 2048)
@@ -83,7 +85,7 @@ const ready = runtime.tick(setup)
 if (!ready.ok) throw new Error(`setup: ${JSON.stringify(ready.error)}`)
 // Build everything the first frame shows now, so nothing pops in at the start.
 const spawn = runtime.inspect(PlayerView)
-if (spawn !== undefined) world.update(new Vector3(spawn.pose.x, groundY(spawn.pose.x, spawn.pose.y), -spawn.pose.y), reach(), Infinity)
+if (spawn !== undefined) world.update(new Vector3(spawn.pose.x, groundY(spawn.pose.x, spawn.pose.y), -spawn.pose.y), spawn.turns * QUARTER, reach(), Infinity)
 
 const hud = makeHud(document)
 dismissTitleOnInput(window)
@@ -91,6 +93,8 @@ toggleMapOnKey(window, hud)
 
 
 const camera = { x: 0, y: 0, elevation: 0, placed: false, zoom: 8 }
+// The view swings through each quarter turn, or jumps when the player asks for less motion.
+const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)")
 
 const draw = (frame: FixedLoop.Frame): void => {
   renderer.info.reset()
@@ -107,16 +111,18 @@ const draw = (frame: FixedLoop.Frame): void => {
   camera.x += (x + lead.x - camera.x) * ease
   camera.y += (y + lead.y - camera.y) * ease
   camera.elevation += (groundY(x, y, camera.placed ? camera.elevation : undefined) - camera.elevation) * ease
-  camera.placed = true
   view.focus.set(camera.x, camera.elevation, -camera.y)
+  const yaw = player.turns * QUARTER
+  view.yaw = camera.placed && !reduceMotion.matches ? turnToward(view.yaw, yaw, dt) : yaw
+  camera.placed = true
   const zoom = (camera.zoom = zoomFor(player.vehicle?.speed, camera.zoom))
   view.texelsPerMetre += Math.abs(zoom - view.texelsPerMetre) < 0.01 ? zoom - view.texelsPerMetre : (zoom - view.texelsPerMetre) * (1 - Math.exp(-3 * dt))
   const { width, depth } = view.ground
   // The view's ground rectangle turns against the light: its half-diagonal bounds it in every light direction.
-  followSun(sun, view.focus, toSun, Math.hypot(width, depth) / 2 + 10)
-  world.update(view.focus, reach(), STREAM_BUDGET_MS)
+  followSun(sun, view.focus, toSun.copy(HOME_SUN).applyAxisAngle(Object3D.DEFAULT_UP, view.yaw), Math.hypot(width, depth) / 2 + 10)
+  world.update(view.focus, view.yaw, reach(), STREAM_BUDGET_MS)
   view.render(scene)
-  hud.update(player, x, y, angle)
+  hud.update(player, x, y, angle, view.yaw)
 }
 
 const loop = FixedLoop.start({

@@ -87,6 +87,11 @@ export const Rng = Descriptor.ConstructedResource(Random)("Lunigiana/Rng")
 export const Score = Descriptor.ConstructedResource(
   Decode.struct({ stolen: Decode.integer, knocked: Decode.integer })
 )("Lunigiana/Score")
+/**
+ * Net quarter turns of the camera to the left of its home seat (any integer, mod 4 is the heading;
+ * see `screenAxes`). Saved: the on-foot keys depend on it.
+ */
+export const View = Descriptor.ConstructedResource(Decode.struct({ turns: Decode.integer }))("Lunigiana/View")
 
 /** Player controls. Keys are host detail, but they live here so `Controls` has one home. */
 export const bindings = {
@@ -96,7 +101,9 @@ export const bindings = {
   right: ["ArrowRight", Keyboard.code("KeyD")],
   sprint: ["Shift"],
   handbrake: [Keyboard.code("Space")],
-  action: [Keyboard.code("KeyF"), Keyboard.code("KeyE"), "Enter"]
+  action: [Keyboard.code("KeyF"), "Enter"],
+  turnLeft: [Keyboard.code("KeyQ")],
+  turnRight: [Keyboard.code("KeyE")]
 } as const
 type Controls = Keyboard.Snapshot<typeof bindings>
 
@@ -108,7 +115,7 @@ export const KeyboardInput = Descriptor.Service<InputCapture.Source<Controls>>()
 export const Game = Schema.bind(
   Schema.fragment({
     components: { Pose, PrevPose, Motion, Player, Person, Pedestrian, Down, Vehicle, CarInput, Traffic, Route, Driving, Autopilot, Stolen },
-    resources: { Time, Rng, Score, Input },
+    resources: { Time, Rng, Score, View, Input },
     requires: [
       Schema.requires(Player, Pose, PrevPose, Motion, Person),
       Schema.requires(Pedestrian, Pose, PrevPose, Motion, Person, Route),

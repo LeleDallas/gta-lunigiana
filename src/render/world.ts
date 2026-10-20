@@ -12,11 +12,11 @@ import { InstancedMesh, Mesh, type BufferGeometry, type Material, type Object3D,
 
 import { MAP } from "../sim/map/index.ts"
 import { buildingPieces } from "./buildings.ts"
-import { CHUNKS, chunkOf, plan, radiiFor, screenDistances, screenRects } from "./chunks.ts"
+import { chunkBoxes, CHUNKS, chunkOf, plan, radiiFor, screenDistances, screenRects } from "./chunks.ts"
 import { decalMaterial, merge, solidMaterial, Triangles, type Piece, type Sink } from "./geometry.ts"
 import { rasterCover } from "./landcover.ts"
 import { linePieces } from "./lines.ts"
-import { isoCamera } from "./pipeline.ts"
+import { viewAxes } from "./pipeline.ts"
 import { terrainChunk } from "./terrain.ts"
 import { bucketTrees, treeMeshes } from "./trees.ts"
 
@@ -66,20 +66,29 @@ export class World {
   private readonly byChunk = bucketPieces(this.pieces)
   private readonly trees = bucketTrees()
   private readonly cover = rasterCover(MAP)
-  private readonly axes = isoCamera()
-  private readonly rects = screenRects(this.axes.right, this.axes.up)
+  private readonly boxes = chunkBoxes()
+  private readonly rects = new Float32Array(CHUNKS.x * CHUNKS.y * 4)
   private readonly distances = new Float32Array(CHUNKS.x * CHUNKS.y)
+  private axes = viewAxes(0)
+  /** The view yaw `rects` were projected for. */
+  private yaw = Number.NaN
 
   constructor(parent: Object3D) {
     this.parent = parent
   }
 
   /**
-   * Streams around `focus` (three space). `reach` is how far from its centre the view shows, in
-   * screen metres (see `radiiFor`). Drops chunks beyond the unload radius, then builds the missing
-   * ones within the load radius, nearest first, until `budgetMs` is spent (always at least one).
+   * Streams around `focus` (three space) for a view turned `yaw` rad (see `PixelView.yaw`). `reach`
+   * is how far from its centre the view shows, in screen metres (see `radiiFor`). Drops chunks
+   * beyond the unload radius, then builds the missing ones within the load radius, nearest first,
+   * until `budgetMs` is spent (always at least one).
    */
-  update(focus: Vector3, reach: number, budgetMs: number): void {
+  update(focus: Vector3, yaw: number, reach: number, budgetMs: number): void {
+    if (yaw !== this.yaw) {
+      this.axes = viewAxes(yaw)
+      screenRects(this.boxes, this.axes.right, this.axes.up, this.rects)
+      this.yaw = yaw
+    }
     screenDistances(this.rects, focus.dot(this.axes.right), focus.dot(this.axes.up), this.distances)
     const { build, drop } = plan(this.distances, this.loaded, radiiFor(reach))
     for (const key of drop) {

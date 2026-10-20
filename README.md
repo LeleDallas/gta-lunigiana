@@ -5,8 +5,8 @@
 A small open-world car-theft game in isometric pixel art, set in the real Valle del Lucido in
 Lunigiana, Tuscany. You walk the village streets, steal parked cars (the Carabinieri's Alfa Romeo
 included, from right outside their station), carjack traffic and knock pedestrians over, all on a
-map built from survey data of the actual valley. The view is a fixed isometric camera with a
-low-resolution pixel-art look.
+map built from survey data of the actual valley. The view is an isometric camera that turns a
+quarter at a time, with a low-resolution pixel-art look.
 
 ## The valley
 
@@ -83,7 +83,8 @@ In dev mode, the backslash key toggles the Ritmo monitor.
 |---|---|---|
 | W A S D or arrow keys | walk along the screen directions | up: throttle, down: brake and reverse, left/right: steer |
 | Shift | sprint | |
-| F, E or Enter | enter the nearest vehicle (steal, enter or carjack) | get out |
+| F or Enter | enter the nearest vehicle (steal, enter or carjack) | get out |
+| Q / E | turn the view a quarter left / right | same |
 | Space | | handbrake |
 | M | full map (pauses the game); M or Esc closes it | same |
 
