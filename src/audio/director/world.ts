@@ -43,6 +43,8 @@ export const makeWorld = (clock: () => WallClock) => {
   let near: { readonly x: number; readonly y: number; readonly at: number; readonly water: ReadonlyArray<Water>; readonly dogs: ReadonlyArray<Dog> } | undefined
   let street: number | undefined
   let strength = 0, forest = 0, open = 0, built = 0
+  /** The loudest water as heard last frame (occlusion and cabin included), dB(A): an occluded river masks only as loud as it sounds. */
+  let loudest = -Infinity
   let rung = ""
   /** Bell strokes still to ring, speaker time. */
   const strokes: Array<{ readonly bell: Bell; readonly at: number }> = []
@@ -60,7 +62,7 @@ export const makeWorld = (clock: () => WallClock) => {
   }
 
   return {
-    /** Before the rest of the frame: what is near, the street, and the masking floor (the rural day, the loudest water, the wind). */
+    /** Before the rest of the frame: what is near, the street, and the masking floor (the rural day, the loudest water last heard, the wind). */
     listen: (ears: Ears, now: number, dt: number): { readonly ambient: number; readonly street: number } => {
       if (near === undefined || now - near.at >= NEAR_EVERY || Math.hypot(ears.x - near.x, ears.y - near.y) >= NEAR_MOVED) {
         const water = waterNear(ears.x, ears.y, WATER_REACH).map((w) => ({ ...w, r: Math.hypot(w.x - ears.x, w.y - ears.y, w.z + HEIGHT.water - ears.z) }))
@@ -71,7 +73,7 @@ export const makeWorld = (clock: () => WallClock) => {
       ;({ forest, open, built } = ambienceAt(ears.x, ears.y))
       const height = CALM + (GALE - CALM) * smoothstep(ALTITUDE[0], ALTITUDE[1], ears.z - EAR_HEIGHT)
       strength = Math.min(1, Math.max(0, height + OPEN * open - STREETS * street))
-      return { ambient: sumDb([AMBIENT_DB, near.water[0]?.level ?? -Infinity, windDb(strength)]), street }
+      return { ambient: sumDb([AMBIENT_DB, loudest, windDb(strength)]), street }
     },
 
     hear: (frame: Frame): void => {
@@ -85,9 +87,11 @@ export const makeWorld = (clock: () => WallClock) => {
       }
 
       // The level looked up holds the distance cue: it passes as the source level back to 1 m, the spreading as the loss.
+      loudest = -Infinity
       for (const w of near?.water ?? []) {
         const at = frame.path(w.key, { x: w.x, y: w.y, z: w.z + HEIGHT.water }, { db: w.level + spreading(w.r, WATER_R_MIN), rMin: WATER_R_MIN })
         frame.hold(w.key, { kind: "water", body: w.body, flow: w.flow }, at)
+        if (at.audible) loudest = Math.max(loudest, at.level)
       }
 
       if (fires(random, BIRDS.forest * forest + (built > GARDENS ? BIRDS.houses : 0), dt)) {

@@ -3,7 +3,7 @@ import { test } from "node:test"
 
 import type { VehicleModel } from "../../sim/vehicles.ts"
 import { screenAxes } from "../../sim/view.ts"
-import { SPEED_OF_SOUND } from "../acoustics.ts"
+import { dbToGain, SPEED_OF_SOUND } from "../acoustics.ts"
 import { bells } from "../places.ts"
 import { stepRate } from "../synth/steps.ts"
 import type { Continuous, Happening, Heard, HeardPerson, HeardVehicle, OneShot, Placement, Speaker } from "../types.ts"
@@ -14,11 +14,12 @@ import { TOWERS } from "./levels.ts"
  * Real map spots (found by probing the map): a treeless meadow on Monte dei Bianchi clear for 300 m to the south and
  * screen-right, a lane at Pian del Molino with a 10.7 m building 30 m east and open ground 30 m north-west, a wooded
  * ridge above Aiola (900 m) with no water within 400 m, Monzone station 68 m from the Torrente Lucido, a street
- * 50 m from Monzone Alto's tower, and the woods above Isolano, in earshot of eleven bell towers.
+ * 50 m from Monzone Alto's tower, the woods above Isolano, in earshot of eleven bell towers, and the street of Monzone
+ * where the game starts, 50 m from the Lucido behind the houses, with slopes to echo off.
  */
 const MEADOW = { x: -329, y: 1078 }, STREET = { x: -916.6, y: 1706.8 }, BEHIND = { x: -886.6, y: 1706.8 }, OPEN = { x: -937.8, y: 1728 }
 const RIDGE = { x: 1600, y: -494.5 }, STATION = { x: -494, y: 437 }, BELFRY = { x: -41.8, y: -306.6 }
-const HILLSIDE = { x: -950, y: 71 }
+const HILLSIDE = { x: -950, y: 71 }, SPAWN = { x: -412.6, y: 437.8 }
 const FRAME = 1 / 60
 /** Screen-right on the ground, with the view in its home seat. */
 const SCREEN_RIGHT = screenAxes(0).right
@@ -29,9 +30,8 @@ const seeded = (seed: number) => () => ((seed = (seed * 1664525 + 1013904223) >>
 /** A one-shot played at speaker time `t`, `delay` s ahead. */
 interface Played { readonly sound: OneShot; readonly at: Placement; readonly delay: number; readonly t: number }
 
-/** A director on a recording speaker whose clock the test advances one frame per `hear`. */
-const rig = (clock: () => WallClock = () => ({ hour: 10, minute: 10, second: 0 })) => {
-  let t = 1
+/** A director on a recording speaker whose clock (from `t`; 0 is no context yet) the test advances by `dt` per `hear`. */
+const rig = (clock: () => WallClock = () => ({ hour: 10, minute: 10, second: 0 }), t = 1) => {
   let holding = new Map<string, { readonly sound: Continuous; readonly at: Placement }>()
   let held = holding
   const plays: Array<Played> = []
@@ -91,7 +91,8 @@ test("a building between the listener and a car 30 m away muffles it: lower gain
   const director = rig()
   director.hear(world(STREET, { vehicles: [car(1, "panda", BEHIND), car(2, "panda", OPEN)] }))
   const behind = director.held().get("engine:1")!.at, open = director.held().get("engine:2")!.at
-  assert.ok(behind.gain < open.gain && behind.cutoff < open.cutoff, `${behind.gain} < ${open.gain}, ${behind.cutoff} < ${open.cutoff}`)
+  // Being a metre farther (uphill) is worth under a decibel; the roof takes 15 dB and leaves the diffraction lowpass.
+  assert.ok(behind.gain < open.gain * dbToGain(-10) && behind.cutoff <= 2800, `${behind.gain} < ${open.gain}, ${behind.cutoff} Hz`)
 })
 
 test("an approaching car is shifted up, a receding one down", () => {
@@ -105,15 +106,14 @@ test("an approaching car is shifted up, a receding one down", () => {
   assert.ok(cents(-20) < 0)
 })
 
-test("a pedestrian walking 5 m away steps at the walking cadence; 60 m away nothing is heard", () => {
-  const steps = (metres: number) => {
+test("a pedestrian walking (or running) 5 m away steps at that pace's cadence; 60 m away nothing is heard", () => {
+  const steps = (metres: number, speed = 2.2) => {
     const director = rig()
     const start = away(MEADOW, metres, SOUTH)
-    for (let i = 0; i <= 180; i++) director.hear(world(MEADOW, { people: [person(9, { x: start.x + 2.2 * i * FRAME, y: start.y }, { vx: 2.2 })] }))
+    for (let i = 0; i <= 180; i++) director.hear(world(MEADOW, { people: [person(9, { x: start.x + speed * i * FRAME, y: start.y }, { vx: speed })] }))
     return director.take("step").length
   }
-  const expected = 3 * stepRate(2.2)
-  assert.ok(Math.abs(steps(5) - expected) <= 1, `${steps(5)} steps in 3 s`)
+  for (const speed of [2.2, 5]) assert.ok(Math.abs(steps(5, speed) - 3 * stepRate(speed)) <= 1, `${steps(5, speed)} steps in 3 s at ${speed} m/s`)
   assert.equal(steps(60), 0)
 })
 
@@ -128,6 +128,53 @@ test("a wall impact at 10 m/s crashes; 300 m away it arrives after its travel ti
   const [far] = crash(300)
   assert.ok(far !== undefined && Math.abs(far.delay - 300 / SPEED_OF_SOUND) < 0.02, `${far?.delay} s`)
   assert.equal(crash(30)[0]?.delay, 0)
+})
+
+test("a wall hit split over two steps crashes once, a 1.5× harder one at once again; soft contacts of a moving car grind for 0.2 s", () => {
+  const director = rig()
+  const at = away(MEADOW, 10, SOUTH)
+  const step = (speeds: ReadonlyArray<number>, frames = 1, vx = 8) => director.hear(world(MEADOW, {
+    vehicles: [car(1, "panda", at, { vx })],
+    happenings: speeds.map((speed): Happening => ({ kind: "impact", hit: "wall", x: at.x, y: at.y, speed, mass: 1100, car: 1 }))
+  }), frames)
+  step([7.1])
+  step([4.4])
+  step([9])
+  assert.equal(director.take("crash").length, 1, "the tail, and a hit not 1.5× harder")
+  step([11])
+  assert.equal(director.take("crash").length, 1, "a harder hit")
+  step([], 7)
+  step([3])
+  assert.equal(director.take("crash").length, 1, "a new hit after 0.1 s")
+  step([0.3])
+  assert.equal(director.held().has("scrape:1"), true)
+  step([], 13)
+  assert.equal(director.held().has("scrape:1"), false, "0.2 s after the last contact")
+  step([0.3], 1, 0)
+  assert.equal(director.held().has("scrape:1"), false, "pressed against the wall, not moving along it")
+  assert.equal(director.take("crash").length, 0)
+})
+
+test("a hard crash answers off the slopes, later and fainter; a soft one does not", () => {
+  const crash = (speed: number) => {
+    const director = rig()
+    const at = away(SPAWN, 10, SOUTH)
+    director.hear(world(SPAWN, { vehicles: [car(1, "panda", at)], happenings: [{ kind: "impact", hit: "wall", x: at.x, y: at.y, speed, mass: 1100, car: 1 }] }))
+    return director.take("crash")
+  }
+  const [direct, ...echoes] = crash(10)
+  assert.ok(echoes.length > 0 && echoes.every((e) => e.delay > direct!.delay + 0.1 && e.at.gain < direct!.at.gain / 2), `${echoes.length} echoes`)
+  assert.equal(crash(4).length, 1)
+})
+
+test("before the audio context runs nothing is measured or played, but who sits where is still tracked", () => {
+  const director = rig(undefined, 0)
+  director.hear(world(MEADOW, { people: [person(1, MEADOW, { player: true })] }), 1, 0)
+  director.hear(world(MEADOW, { vehicles: [car(5, "panda", MEADOW, { mine: true })] }, 5), 30, 0)
+  assert.equal(director.plays.length, 0)
+  director.hear(world(MEADOW, { vehicles: [car(5, "panda", MEADOW, { mine: true })] }, 5), 60)
+  assert.equal(director.take("door").length, 0, "no doors replayed once it runs")
+  assert.equal(director.held().has("engine:5"), true)
 })
 
 test("inside a closed car an outside engine is cut to the cabin's lowpass; the open Ape lets more in", () => {
@@ -214,6 +261,12 @@ test("by the Torrente Lucido at Monzone station a water voice plays; on a dry ri
   assert.ok(![...ridge.held().values()].some(({ sound }) => sound.kind === "water"))
 })
 
+test("the Lucido behind the houses of Monzone still sounds: a river masks other sounds as loud as it is heard, never itself", () => {
+  const director = rig()
+  director.hear(world(SPAWN), 2)
+  assert.equal(director.held().has("water:Torrente Lucido"), true)
+})
+
 test("twenty running cars around: only the eight loudest, nearest engines play, and near-equals do not swap", () => {
   const director = rig()
   // Every 10 m to the south; the ninth at `ninth` m.
@@ -228,10 +281,10 @@ test("twenty running cars around: only the eight loudest, nearest engines play, 
   assert.deepEqual(engines(), [...nearest.filter((key) => key !== "engine:8"), "engine:9"].sort())
 })
 
-test("a pedestrian who turns from walking to fleeing screams or shouts once", () => {
+test("a pedestrian who turns from walking to fleeing screams or shouts once, not again while still fleeing", () => {
   const director = rig()
   const at = away(MEADOW, 10, SOUTH)
   director.hear(world(MEADOW, { people: [person(4, at)] }), 10)
-  director.hear(world(MEADOW, { people: [person(4, at, { fleeing: true })] }), 60)
+  director.hear(world(MEADOW, { people: [person(4, at, { fleeing: true })] }), 6 * 60)
   assert.equal(director.plays.filter((p) => p.sound.kind === "scream" || p.sound.kind === "shout").length, 1)
 })
