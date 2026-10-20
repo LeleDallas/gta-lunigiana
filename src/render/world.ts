@@ -3,18 +3,17 @@
  * chunk is one terrain mesh, one solid mesh (buildings, roofs, bridges, platforms), one decal
  * mesh (roads, water, rail) and an InstancedMesh per tree kind. Pieces and trees are bucketed
  * per chunk once, so a build reads only its own; the land cover is rasterised once for the whole
- * map (≈ 80 ms, 4.9 MB, cheaper than clipping areas per chunk). Dynamic actors are not here
- * (see render/index.ts).
+ * map (`mapCover`, shared with the audio host; ≈ 80 ms, 4.9 MB, cheaper than clipping areas per
+ * chunk). Dynamic actors are not here (see render/index.ts).
  *
  * @module render/world
  */
 import { InstancedMesh, Mesh, type BufferGeometry, type Material, type Object3D, type Vector3 } from "three"
 
-import { MAP } from "../sim/map/index.ts"
 import { buildingPieces } from "./buildings.ts"
 import { chunkBoxes, CHUNKS, chunkOf, plan, radiiFor, screenDistances, screenRects } from "./chunks.ts"
 import { decalMaterial, merge, solidMaterial, Triangles, type Piece, type Sink } from "./geometry.ts"
-import { rasterCover } from "./landcover.ts"
+import { mapCover } from "./landcover.ts"
 import { linePieces } from "./lines.ts"
 import { viewAxes } from "./pipeline.ts"
 import { terrainChunk } from "./terrain.ts"
@@ -65,7 +64,7 @@ export class World {
   private readonly pieces: ReadonlyArray<Piece> = [...buildingPieces(), ...linePieces()]
   private readonly byChunk = bucketPieces(this.pieces)
   private readonly trees = bucketTrees()
-  private readonly cover = rasterCover(MAP)
+  private readonly cover = mapCover()
   private readonly boxes = chunkBoxes()
   private readonly rects = new Float32Array(CHUNKS.x * CHUNKS.y * 4)
   private readonly distances = new Float32Array(CHUNKS.x * CHUNKS.y)
