@@ -18,7 +18,7 @@ import { BOUNDS, fromLocal } from "./geometry.ts"
 
 const ROOT = join(import.meta.dirname, "../..")
 const OUT = join(ROOT, "data/raw/rt")
-const CACHE = join(tmpdir(), "gta-lunigiana-rt")
+const CACHE = join(tmpdir(), "grand-theft-auto-vdl-rt")
 const BASE = "https://www502.regione.toscana.it/geoscopio/download"
 
 /** Every 2019 CTR 1:2000 sheet over the play area (cartoteca layer rt_cartoteca.ctr2k). */

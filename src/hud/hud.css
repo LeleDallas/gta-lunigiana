@@ -50,6 +50,7 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #2c3d22; }
 #title[hidden] { display: none; }
 #title .card { padding: 24px 32px; background: var(--panel); border: 2px solid var(--accent); text-align: center; }
 #title h1 { margin: 0; font-size: 40px; color: var(--accent); text-transform: uppercase; letter-spacing: 0.08em; }
+#title h1 small { display: block; font-size: 16px; color: var(--ink); letter-spacing: 0.32em; }
 #title .sub { margin: 4px 0 20px; text-transform: uppercase; }
 #title .keys { display: grid; gap: 4px; margin: 0 0 20px; text-align: left; }
 #title .keys div { display: grid; grid-template-columns: 14ch 1fr; gap: 16px; }

@@ -1,5 +1,5 @@
 {
-  "name": "gta-lunigiana",
+  "name": "grand-theft-auto-vdl",
   "scripts": {
     "typecheck": "tsc",
     "lint": "oxlint && ritmo-devtools lint src/sim/index.ts",
