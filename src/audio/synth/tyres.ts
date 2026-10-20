@@ -11,7 +11,7 @@ import { loop, smoothstep } from "../buffers.ts"
 import type { Continuous, Surface, VoiceFactory } from "../types.ts"
 import { fadeOut, glide } from "./patch.ts"
 
-type TyreSound =Extract<Continuous, { readonly kind: "tyres" }>
+type TyreSound = Extract<Continuous, { readonly kind: "tyres" }>
 
 /** How a surface sounds under a tyre. */
 interface Ground {

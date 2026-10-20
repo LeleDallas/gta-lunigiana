@@ -18,7 +18,7 @@ import { VEHICLE_MODELS, type VehicleModel } from "../../sim/vehicles.ts"
 import { loop } from "../buffers.ts"
 import type { Continuous, Kit, OneShot, Shot, VoiceFactory } from "../types.ts"
 import { engine, ENGINES } from "./engine.ts"
-import { fadeOut, glide, noise, normalise, pick, playBuffer, renderOffline, rendered, strike } from "./patch.ts"
+import { fadeOut, glide, normalise, pick, playBuffer, renderOffline, rendered, strike } from "./patch.ts"
 
 /** Free-free bar mode ratios: the panels' inharmonic ring. */
 const BAR = [1, 2.756, 5.404, 8.933] as const
@@ -34,8 +34,8 @@ export const crashLaw = (speed: number, mass: number): { readonly tier: number; 
   rate: Math.min(1.15, Math.max(0.8, Math.max(0.05, mass) ** -0.12))
 })
 
-/** A noise source through a filter, ready to strike. */
-const filtered = (ctx: BaseAudioContext, buffer: AudioBuffer, options: BiquadFilterOptions): AudioNode => noise(ctx, buffer).connect(new BiquadFilterNode(ctx, options))
+/** A noise source (fresh offset per render) through a filter, ready to strike. */
+const filtered = (ctx: BaseAudioContext, buffer: AudioBuffer, options: BiquadFilterOptions): AudioNode => loop(ctx, buffer).connect(new BiquadFilterNode(ctx, options))
 
 /** A sine sweeping from `from` to `to` Hz over `seconds`. */
 const sweep = (ctx: BaseAudioContext, from: number, to: number, seconds: number): OscillatorNode => {
@@ -169,7 +169,7 @@ export const CRANK = {
   carabinieri: { seconds: 0.6, rpm: 260 }
 } as const satisfies Record<VehicleModel, { readonly seconds: number; readonly rpm: number }>
 
-/** The starter's level against the catch (which plays at the truck's loudness for every model). */
+/** The starter's level against the catch (the model's engine voice at its own nominal level). */
 const STARTER = 0.15
 /** How long the catch is heard before the running engine voice carries on, s. */
 const CATCH = 0.9
@@ -185,15 +185,16 @@ const renderIgnition = (rate: number, kit: Kit, model: VehicleModel) => renderOf
   // The motor's geared whine dips, and the engine lumps, at every compression stroke.
   const motor = new OscillatorNode(ctx, { type: "square", frequency: 140 }), lump = new OscillatorNode(ctx, { frequency: 50 })
   const compression = new OscillatorNode(ctx, { frequency: (crank.rpm / 60) * spec.pulses })
-  const whine = new GainNode(ctx, { gain: 0.6 }), lumps = new GainNode(ctx, { gain: 0 })
+  // Both envelopes stay ≥ 0, so they pulse once per compression (one centred on 0 would ring-modulate at twice the rate).
+  const whine = new GainNode(ctx, { gain: 0.6 }), lumps = new GainNode(ctx, { gain: 0.3 })
   motor.frequency.setTargetAtTime(170, 0, 0.15)
   compression.connect(new GainNode(ctx, { gain: 0.4 })).connect(whine.gain)
-  compression.connect(new GainNode(ctx, { gain: 0.5 })).connect(lumps.gain)
+  compression.connect(new GainNode(ctx, { gain: 0.3 })).connect(lumps.gain)
   motor.connect(new BiquadFilterNode(ctx, { type: "bandpass", frequency: 900, Q: 1 })).connect(whine).connect(starter)
   lump.connect(lumps).connect(starter)
   for (const source of [motor, lump, compression]) source.start()
   // The catch: the engine flares on a blip of throttle and settles toward idle.
-  const cents = new ConstantSourceNode(ctx, { offset: 0 }), caught = new GainNode(ctx, { gain: 1 / spec.loudness })
+  const cents = new ConstantSourceNode(ctx, { offset: 0 }), caught = new GainNode(ctx)
   caught.gain.setTargetAtTime(0, crank.seconds + CATCH * 0.55, 0.12)
   caught.connect(out)
   cents.start()
@@ -227,15 +228,18 @@ export const scrape: VoiceFactory<Extract<Continuous, { readonly kind: "scrape" 
   const white = loop(ctx, kit.white), band = new BiquadFilterNode(ctx, { type: "bandpass", frequency: 1500, Q: 1.2 })
   white.connect(band).connect(grind)
   // The panels ring: noise exciting a steel sheet's bar modes.
-  BAR.forEach((ratio, i) => {
-    white.connect(new BiquadFilterNode(ctx, { type: "bandpass", frequency: 420 * ratio, Q: 30 })).connect(new GainNode(ctx, { gain: [1.5, 1, 0.75, 0.45][i]! })).connect(grind)
+  const modes = BAR.map((ratio, i) => {
+    const mode = new BiquadFilterNode(ctx, { type: "bandpass", frequency: 420 * ratio, Q: 30 })
+    white.connect(mode).connect(new GainNode(ctx, { gain: [1.5, 1, 0.75, 0.45][i]! })).connect(grind)
+    return mode
   })
   const grit = loop(ctx, kit.crackle)
   grit.connect(new BiquadFilterNode(ctx, { type: "highpass", frequency: 2000 })).connect(new GainNode(ctx, { gain: 0.5 })).connect(grind)
   // Stick-slip: the gust signal, sped up 40×, shakes the grinding level at 1–20 Hz.
   const judder = loop(ctx, kit.gust, 40)
   judder.connect(new GainNode(ctx, { gain: 0.5 })).connect(grind.gain)
-  io.cents.connect(white.detune)
+  // White noise has no pitch to shift: Doppler moves the bands it rings through.
+  for (const filter of [band, ...modes]) io.cents.connect(filter.detune)
   io.cents.connect(grit.detune)
   let first = true
   return {

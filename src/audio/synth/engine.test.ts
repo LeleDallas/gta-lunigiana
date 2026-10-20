@@ -20,10 +20,14 @@ test("idle is 11 dB under full load at the redline in gain, overrun in between, 
   assert.ok(idle.lowpass < overrun.lowpass && overrun.lowpass < full.lowpass)
 })
 
-test("the driver's seat trims the own engine 6 dB behind a dull, boomy firewall", () => {
+test("the driver's seat dulls the own engine behind the firewall and leaves its level to the director", () => {
   const outside = engineTargets(ENGINES.carabinieri, at(3000, 0.4, 0.5), false), inside = engineTargets(ENGINES.carabinieri, at(3000, 0.4, 0.5), true)
-  assert.ok(Math.abs(db(inside.gain, outside.gain) + 6) < 0.1)
-  assert.deepEqual([inside.cabinHz, inside.shelf, outside.shelf], [CABIN.lowpass, CABIN.shelf, 0])
+  assert.equal(inside.gain, outside.gain)
+  assert.deepEqual([inside.cabinHz, inside.shelf, outside.cabinHz, outside.shelf], [CABIN.lowpass, CABIN.shelf, 20000, 0])
+})
+
+test("every model peaks at the same nominal level at the redline under full load (the director sets each model's loudness)", () => {
+  for (const spec of Object.values(ENGINES)) assert.equal(engineTargets(spec, at(6000, 1, 1), false).gain, 0.5 * spec.trim)
 })
 
 test("only turbo models whine, and only under load", () => {

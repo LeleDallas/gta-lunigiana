@@ -5,10 +5,10 @@
  * noise gated at the firing rate (diesel clatter, two-stroke rattle). Turbo models add a whine that
  * spools up with lag. Each voice owns a virtual gearbox, so revs follow speed and throttle.
  *
- * Levels: every model's output peaks near 0.5 × its `loudness` at the redline under full load and
- * sits about 20 dB lower at idle. `loudness` is relative to the truck (physics.md §8 pass-by levels,
- * compressed by k = 0.6 like the mix), so the director gives every engine the truck's nominal level.
- * `inside` is the player's seat: the firewall's dull, boomy tone and −6 dB (physics.md §10).
+ * Levels: every model's output peaks near 0.5 at the redline under full load and sits about 20 dB
+ * lower at idle. How loud each model is (physics.md §8) is the director's per-model source level,
+ * and so is the own engine's level inside: `inside` only changes the tone (the firewall's dull,
+ * boomy filter, physics.md §10).
  *
  * @module audio/synth/engine
  */
@@ -18,7 +18,7 @@ import { GEARBOXES, type GearOutput, type GearState, stepGearbox } from "../gear
 import type { Continuous, Voice, VoiceIo } from "../types.ts"
 import { builtOnFirst, fadeOut, glide } from "./patch.ts"
 
-type EngineSound =Extract<Continuous, { readonly kind: "engine" }>
+type EngineSound = Extract<Continuous, { readonly kind: "engine" }>
 
 /** One engine's timbre (TUNED starting points from synthesis.md §2.2). */
 export interface EngineSpec {
@@ -40,8 +40,6 @@ export interface EngineSpec {
   readonly noise: { readonly level: number; readonly band: readonly [number, number]; readonly q: number; readonly pulse: number }
   /** Turbo whine level at full boost; 0 for none. */
   readonly turbo: number
-  /** Loudness relative to the truck at the same revs and load (linear). */
-  readonly loudness: number
   /** 1 / the patch's own peak near the redline under full load (calibrated by rendering it offline). */
   readonly trim: number
 }
@@ -51,27 +49,27 @@ export const ENGINES = {
   // Fiat Panda 1.2 FIRE, 69 CV: a nasal small four.
   panda: {
     pulses: 2, wave: "sawtooth", sub: 0.25, formants: [[330, 2.5, 0.6], [1100, 3, 0.25]], lowpass: [900, 3800], highpass: 40, drive: 2.5,
-    noise: { level: 0.05, band: [700, 2500], q: 1.2, pulse: 0 }, turbo: 0, loudness: 0.48, trim: 0.538
+    noise: { level: 0.05, band: [700, 2500], q: 1.2, pulse: 0 }, turbo: 0, trim: 0.538
   },
   // Piaggio Ape 50 two-stroke single: thin, buzzy, rattly, no bass.
   ape: {
     pulses: 1, wave: 0.12, sub: 0.12, formants: [[1250, 3, 0.7], [2900, 4, 0.35]], lowpass: [2500, 7500], highpass: 250, drive: 4,
-    noise: { level: 0.1, band: [1500, 4500], q: 1, pulse: 0.15 }, turbo: 0, loudness: 0.68, trim: 0.336
+    noise: { level: 0.1, band: [1500, 4500], q: 1, pulse: 0.15 }, turbo: 0, trim: 0.336
   },
   // Marble truck, inline-6 turbo diesel: a low drone with a knock band gated at the firing rate.
   truck: {
     pulses: 3, wave: 0.3, sub: 0.35, formants: [[160, 2, 0.8], [520, 3, 0.35]], lowpass: [350, 1300], highpass: 30, drive: 3,
-    noise: { level: 0.06, band: [1500, 2500], q: 1.5, pulse: 0.6 }, turbo: 0.02, loudness: 1, trim: 0.435
+    noise: { level: 0.06, band: [1500, 2500], q: 1.5, pulse: 0.6 }, turbo: 0.02, trim: 0.435
   },
   // Carabinieri Alfa Romeo Giulia 2.0 turbo, 200 CV: deeper and sportier than the Panda.
   carabinieri: {
     pulses: 2, wave: "sawtooth", sub: 0.3, formants: [[210, 2, 0.8], [780, 2.5, 0.35]], lowpass: [700, 4500], highpass: 35, drive: 3.5,
-    noise: { level: 0.04, band: [900, 3500], q: 1, pulse: 0 }, turbo: 0.015, loudness: 0.55, trim: 0.48
+    noise: { level: 0.04, band: [900, 3500], q: 1, pulse: 0 }, turbo: 0.015, trim: 0.48
   }
 } as const satisfies Record<VehicleModel, EngineSpec>
 
 /** The own engine heard from the driver's seat, behind the firewall (physics.md §10). */
-export const CABIN = { lowpass: 2500, shelf: 4, trim: 0.5 } as const
+export const CABIN = { lowpass: 2500, shelf: 4 } as const
 
 /** Where every param of an engine graph heads for one gearbox step. */
 export interface EngineTargets {
@@ -106,7 +104,7 @@ export const engineTargets = (spec: EngineSpec, gear: GearOutput, inside: boolea
     noise: spec.noise.level * (0.3 + 0.7 * load) * (0.4 + rpmN),
     turboHz: 2500 + 6000 * load * rpmN,
     turbo: spec.turbo * load * rpmN,
-    gain: 0.5 * spec.loudness * spec.trim * 10 ** ((IDLE_DB * (1 - 0.6 * rpmN - 0.4 * load)) / 20) * (inside ? CABIN.trim : 1),
+    gain: 0.5 * spec.trim * 10 ** ((IDLE_DB * (1 - 0.6 * rpmN - 0.4 * load)) / 20),
     cabinHz: inside ? CABIN.lowpass : 20000,
     shelf: inside ? CABIN.shelf : 0
   }
@@ -135,32 +133,33 @@ const build = (io: VoiceIo, first: EngineSound): Voice<EngineSound> => {
     sources.push(osc)
     return osc
   }
-  const output = new GainNode(ctx, { gain: 0 })
+  // Every layer sums into the cabin filters; the output gain is last, so `stop` detaches the whole voice.
   const cabin = new BiquadFilterNode(ctx, { type: "lowpass", frequency: 20000 })
   const shelf = new BiquadFilterNode(ctx, { type: "lowshelf", frequency: 120, gain: 0 })
-  output.connect(cabin).connect(shelf).connect(io.out)
+  const output = new GainNode(ctx, { gain: 0 })
+  cabin.connect(shelf).connect(output).connect(io.out)
 
   const pre = new GainNode(ctx, { gain: 0.4 }), lowpass = new BiquadFilterNode(ctx, { type: "lowpass", frequency: spec.lowpass[0] })
   const shaper = new WaveShaperNode(ctx, { curve: tanhCurve(), oversample: "2x" })
   const main = tone(spec.wave === "sawtooth" ? { type: "sawtooth" } : { periodicWave: pulseWave(ctx, spec.wave) }, 1)
   main.connect(pre)
   tone({ type: "triangle" }, 0.5).connect(new GainNode(ctx, { gain: spec.sub })).connect(pre)
-  pre.connect(shaper).connect(lowpass).connect(new BiquadFilterNode(ctx, { type: "highpass", frequency: spec.highpass })).connect(output)
+  pre.connect(shaper).connect(lowpass).connect(new BiquadFilterNode(ctx, { type: "highpass", frequency: spec.highpass })).connect(cabin)
   for (const [frequency, Q, gain] of spec.formants) {
-    shaper.connect(new BiquadFilterNode(ctx, { type: "bandpass", frequency, Q })).connect(new GainNode(ctx, { gain })).connect(output)
+    shaper.connect(new BiquadFilterNode(ctx, { type: "bandpass", frequency, Q })).connect(new GainNode(ctx, { gain })).connect(cabin)
   }
 
   const hiss = loop(ctx, io.kit.white), band = new BiquadFilterNode(ctx, { type: "bandpass", frequency: spec.noise.band[0], Q: spec.noise.q })
   const hissGain = new GainNode(ctx, { gain: 0 })
   io.cents.connect(hiss.detune)
-  hiss.connect(band).connect(hissGain).connect(output)
+  hiss.connect(band).connect(hissGain).connect(cabin)
   // Firing-synchronous bursts: the diesel's clatter, the two-stroke's rattle.
   if (spec.noise.pulse > 0) tone({ periodicWave: pulseWave(ctx, 0.1) }, 1).connect(new GainNode(ctx, { gain: spec.noise.pulse })).connect(hissGain.gain)
 
   const turbo = spec.turbo > 0 ? { whine: new OscillatorNode(ctx, { frequency: 2500 }), gain: new GainNode(ctx, { gain: 0 }) } : undefined
   if (turbo) {
     io.cents.connect(turbo.whine.detune)
-    turbo.whine.connect(turbo.gain).connect(output)
+    turbo.whine.connect(turbo.gain).connect(cabin)
     sources.push(turbo.whine)
   }
   for (const source of sources) source.start()

@@ -21,12 +21,13 @@ test("a full-throttle run upshifts monotonically, keeps rpm in [idle, redline] a
   }
 })
 
-test("no gear hunting at a steady speed and pedal", () => {
+test("a fresh box heard at speed settles in one step (as an engine voice does), then never hunts at a steady speed and pedal", () => {
   for (const model of VEHICLE_MODELS) {
     const box = GEARBOXES[model]
     for (let v = 0; v <= VEHICLES[model].maxSpeed; v += 0.5) for (const throttle of [0, 0.2, 0.5, 1]) {
       const state = { gear: 0, shiftLeft: 0 }
-      for (let i = 0; i < 120; i++) stepGearbox(box, state, v, throttle, DT)
+      stepGearbox(box, state, v, throttle, 0)
+      state.shiftLeft = 0
       for (let i = 0; i < 180; i++) assert.equal(stepGearbox(box, state, v, throttle, DT).shifted, false, `${model} at ${v} m/s, throttle ${throttle}`)
     }
   }

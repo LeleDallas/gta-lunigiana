@@ -58,13 +58,6 @@ export const strike = (ctx: BaseAudioContext, source: AudioNode, out: AudioNode,
   gain.gain.setTargetAtTime(0, t + 0.003, tau)
 }
 
-/** A started source over `buffer` from a random offset (renders get fresh noise each variant). */
-export const noise = (ctx: BaseAudioContext, buffer: AudioBuffer, t = 0): AudioBufferSourceNode => {
-  const source = new AudioBufferSourceNode(ctx, { buffer, loop: true })
-  source.start(t, Math.random() * buffer.duration)
-  return source
-}
-
 /** Plays `buffer` into `io.out` at `when` with `gain` and playback `rate`; returns the time it ends. */
 export const playBuffer = (io: Omit<VoiceIo, "cents">, buffer: AudioBuffer, gain: number, rate: number, when: number): number => {
   const source = new AudioBufferSourceNode(io.ctx, { buffer, playbackRate: rate }), level = new GainNode(io.ctx, { gain })
