@@ -188,11 +188,11 @@ The pixel pipeline (`src/render/pipeline.ts`):
   toward its target.
 - The sun's shadow box follows the view, snapped to shadow-map texels. The sun turns with the
   view, so the lit and shaded wall faces look the same whichever way the camera looks. The box
-  covers the ground the view shows (`shadowFit`): the rays through the view's corners and edge
-  midpoints are marched down to the terrain, because a slope falling away from the camera shows
-  ground far past the flat rectangle (at most 300 m across the light), and its depth reaches 1.5 km
-  toward the sun for the ridges that shade a valley. The depth bias stays 0.45 m whatever the depth
-  range.
+  covers the ground the view shows (`shadowFit`): a 5 × 5 grid of rays across the view is marched
+  down to the terrain, because a slope falling away from the camera shows ground far past the flat
+  rectangle (at most 300 m across the light) and a valley seen between the view's edges can lie
+  hundreds of metres deeper along the light. Its depth also reaches 1.5 km toward the sun for the
+  ridges that shade a valley. The depth bias stays 0.45 m whatever the depth range.
 - The far plane is 3 km from the camera (2.5 km past the focus): from the Apuan summits the
   deepest ground in view is ≈ 2.45 km from the camera, past the 1 km the plane used to stop at.
 

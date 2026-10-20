@@ -203,12 +203,14 @@ export interface ShadowFit { readonly half: number; readonly above: number; read
 const SHADOW_CAP = 300
 /** Ray-march step down to the ground, m. */
 const MARCH = 4
+/** Rays marched per side of the view: a grid, because a deep valley can show only between the edges. */
+const RAYS = 5
 const ray = new Vector3(), hit = new Vector3()
 
 /**
  * The shadow box that covers the ground a view of `width` × `height` m (screen plane, around
- * `focus`) shows. On flat ground that is the view's ground rectangle; the rays through its corners
- * and edge midpoints are also marched from the camera plane to the first ground they hit, because a
+ * `focus`) shows. On flat ground that is the view's ground rectangle; a RAYS × RAYS grid of rays
+ * across the view is also marched from the camera plane to the first ground each hits, because a
  * slope falling away from the camera shows ground far past that rectangle, and a valley far below
  * lies deep along the light.
  */
@@ -218,8 +220,9 @@ export const shadowFit = (
 ): ShadowFit => {
   lightBasis.lookAt(toSun, origin, Object3D.DEFAULT_UP).extractBasis(lr, lu, lb)
   let half = Math.hypot(width, height / Math.sin(ELEVATION)) / 2, above = 0, below = 0
-  for (const [u, v] of [[-1, -1], [0, -1], [1, -1], [-1, 0], [1, 0], [-1, 1], [0, 1], [1, 1]] as const) {
-    ray.copy(focus).addScaledVector(axes.right, (u * width) / 2).addScaledVector(axes.up, (v * height) / 2).addScaledVector(axes.back, DISTANCE)
+  for (let k = 0; k < RAYS * RAYS; k++) {
+    const u = ((2 * (k % RAYS)) / (RAYS - 1) - 1) * (width / 2), v = ((2 * Math.floor(k / RAYS)) / (RAYS - 1) - 1) * (height / 2)
+    ray.copy(focus).addScaledVector(axes.right, u).addScaledVector(axes.up, v).addScaledVector(axes.back, DISTANCE)
     // The first crossing from above the ground to below it (the camera plane may start inside a hill).
     let wasAbove = false
     for (let t = 0; t < FAR; t += MARCH, ray.addScaledVector(axes.back, -MARCH)) {

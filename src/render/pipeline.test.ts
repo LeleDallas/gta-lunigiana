@@ -53,3 +53,13 @@ test("the shadow box covers the view's ground rectangle on the flat and the far 
   assert.ok(slope.half > flat.half + 20, `half ${slope.half} vs ${flat.half}`)
   assert.ok(slope.below < -10, "the far ground lies away from the sun, deeper than the focus")
 })
+
+// Regression: only the view's corners and edge midpoints were marched, so a valley seen between them
+// (east of Monte Sagro at zoom 5, 600 m deeper along the light) fell past the shadow camera's far plane.
+test("the shadow box reaches ground that shows only between the view's edges", () => {
+  const axes = viewAxes(0), toSun = new Vector3(-0.75, 1, 0.35).normalize(), focus = new Vector3(0, 0, 0)
+  const right = new Vector3(axes.right.x, 0, axes.right.z).normalize(), ahead = new Vector3(axes.up.x, 0, axes.up.z).normalize()
+  // A 6 m wide gully 800 m deep, a quarter of the view's width right of centre, beyond the focus.
+  const gully = (x: number, z: number) => Math.abs(x * right.x + z * right.z - 25) < 3 && x * ahead.x + z * ahead.z > 0 ? -800 : 0
+  assert.ok(shadowFit(focus, axes, 100, 60, toSun, gully).below < -400)
+})
