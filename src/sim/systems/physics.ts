@@ -1,7 +1,7 @@
 import { Ops, Vec2 } from "@typeonce/ritmo-math"
 
 import { forwardSpeed, moveCar, wallsAlong } from "../body.ts"
-import { CarInput, Game, Motion, Pose, Time, Vehicle } from "../schema.ts"
+import { CarInput, Game, Impact, Motion, Pose, Time, Vehicle } from "../schema.ts"
 import { VEHICLES, type VehicleSpec } from "../vehicles.ts"
 
 /** Coasting deceleration: rolling (m/s²) plus air drag (1/s × speed). */
@@ -14,6 +14,8 @@ const HANDBRAKE_YAW = 1.4
 /** Wall hits: share of the impact speed bounced back, and speed lost per m/s of impact. */
 const BOUNCE = 0.2
 const IMPACT_LOSS = 0.04
+/** Hits slower than this (m/s) are float noise; how loud a real one sounds is the audio host's call. */
+const NOISE = 0.05
 
 /** Forward speed after one step of throttle, brake and drag. */
 const longitudinal = (spec: VehicleSpec, v: number, throttle: number, handbrake: boolean, dt: number): number => {
@@ -39,7 +41,7 @@ const yawRate = (spec: VehicleSpec, v: number, steer: number, handbrake: boolean
  * VEHICLES stats: velocity split into forward and sideways parts, sideways
  * slip dying out with grip (handbrake: drifts), and the body circles swept
  * against drive walls; a hit keeps the sliding part, bounces a little and
- * costs speed by how hard it was.
+ * costs speed by how hard it was. Each hit is an Impact event.
  */
 export const VehiclePhysics = Game.System("Lunigiana/VehiclePhysics", {
   queries: {
@@ -47,11 +49,12 @@ export const VehiclePhysics = Game.System("Lunigiana/VehiclePhysics", {
       selection: { pose: Game.Query.write(Pose), motion: Game.Query.write(Motion), vehicle: Game.Query.read(Vehicle), input: Game.Query.read(CarInput) }
     })
   },
-  resources: { time: Game.System.thisTick(Game.System.readResource(Time)) }
-}, ({ queries, resources }) => {
+  resources: { time: Game.System.thisTick(Game.System.readResource(Time)) },
+  events: { impact: Game.System.writeEvent(Impact) }
+}, ({ queries, resources, events }) => {
   const { dt } = resources.time.get()
   if (dt <= 0) return
-  for (const { data } of queries.vehicles.each()) {
+  for (const { entity, data } of queries.vehicles.each()) {
     const { model } = data.vehicle.get()
     const spec = VEHICLES[model]
     const input = data.input.get()
@@ -73,6 +76,8 @@ export const VehiclePhysics = Game.System("Lunigiana/VehiclePhysics", {
     const turned = moveCar(model, pose, angle, delta, walls)
     const moved = turned ?? moveCar(model, pose, pose.angle, delta, walls)
     if (moved === undefined) {
+      const speed = Math.sqrt(vx * vx + vy * vy)
+      if (speed > NOISE) events.impact.emit({ hit: "wall", x: pose.x, y: pose.y, speed, mass: spec.mass, car: entity.id })
       data.motion.set({ vx: 0, vy: 0, spin: 0 })
       continue
     }
@@ -82,6 +87,7 @@ export const VehiclePhysics = Game.System("Lunigiana/VehiclePhysics", {
       const lost = Vec2.subtract({ x: vx, y: vy }, real)
       const impact = Vec2.length(lost)
       const into = Vec2.normalizeOr(lost, Vec2.zero)
+      if (impact > NOISE) events.impact.emit({ hit: "wall", x: moved.position.x, y: moved.position.y, speed: impact, mass: spec.mass, car: entity.id })
       const keep = Math.max(0.2, 1 - IMPACT_LOSS * impact)
       // Never faster than before the hit (push-outs from a rotation can add speed).
       const slideV = Vec2.clampLength(Vec2.scale(real, keep), Math.sqrt(vx * vx + vy * vy) * keep)

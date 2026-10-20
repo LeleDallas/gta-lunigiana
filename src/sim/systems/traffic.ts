@@ -7,7 +7,7 @@ import {
   allowsModel, alongLane, cruiseSpeed, distanceToEdge, edgeIndex, endNode, facesForward, type Lane, laneOf, lanePoint, laneSide, leadsToDeadEnd,
   nextTrafficEdge, roadOf, walkSide
 } from "../route.ts"
-import { Autopilot, CarInput, Driving, Game, Motion, Person, Pose, Rng, Route, STEP, Time, Traffic, Vehicle } from "../schema.ts"
+import { Autopilot, CarInput, Driving, Game, Honk, Motion, Person, Pose, Rng, Route, STEP, Time, Traffic, Vehicle } from "../schema.ts"
 import { PERSON_RADIUS } from "../tuning.ts"
 import { VEHICLES, type VehicleModel } from "../vehicles.ts"
 
@@ -31,6 +31,8 @@ const STUCK_STEPS = Clock.steps(Clock.duration(STEP, 3))
 /** Waiting for a person ahead on the road counts as stuck only every this many steps (12 s instead of 3 s): they usually move on. */
 const PERSON_PATIENCE = 4
 const REVERSE_STEPS = Clock.steps(Clock.duration(STEP, 1.5))
+/** Stuck steps after which the driver sounds the horn, once per stuck episode (half-way to unsticking). */
+export const HONK_STEPS = Clock.steps(Clock.duration(STEP, 1.5))
 /** Heading within this cosine of the lane counts as lined up with it. */
 const LINED_UP = 0.7
 /** Unstick attempts after which a car always turns round (dead end or not), and after which Populate gives up on it. */
@@ -66,7 +68,8 @@ const arrived = (lane: Lane, along: number, at: { readonly x: number; readonly y
  * node, slow for sharp turns and for anything in a cone ahead, and back up
  * along the lane after standing still for 3 s (sometimes turning round, and
  * always from its second time on, dead end or not); waiting for a person
- * ahead on the carriageway counts four times slower.
+ * ahead on the carriageway counts four times slower. Half-way to backing up
+ * it honks, once (a Honk event).
  */
 export const TrafficAI = Game.System("Lunigiana/TrafficAI", {
   queries: {
@@ -84,8 +87,9 @@ export const TrafficAI = Game.System("Lunigiana/TrafficAI", {
     vehicles: Game.Query({ selection: { pose: Game.Query.read(Pose), vehicle: Game.Query.read(Vehicle) } }),
     people: Game.Query({ selection: { pose: Game.Query.read(Pose) }, with: [Person], without: [Driving] })
   },
-  resources: { rng: Game.System.writeResource(Rng), time: Game.System.thisTick(Game.System.readResource(Time)) }
-}, ({ queries, resources }) => {
+  resources: { rng: Game.System.writeResource(Rng), time: Game.System.thisTick(Game.System.readResource(Time)) },
+  events: { honk: Game.System.writeEvent(Honk) }
+}, ({ queries, resources, events }) => {
   const { step } = resources.time.get()
   const random = Random.draw(resources.rng)
   const obstacles = [
@@ -163,6 +167,7 @@ export const TrafficAI = Game.System("Lunigiana/TrafficAI", {
     // Stopped (or grinding along a wall) counts up, waiting for a person in the way only every PERSON_PATIENCE steps; only real progress resets it.
     const counts = !forPerson || step % PERSON_PATIENCE === 0
     const stuck = Math.abs(speed) < STUCK_SPEED ? pilot.stuck + (counts ? 1 : 0) : Math.abs(speed) > MOVING_SPEED ? 0 : pilot.stuck
+    if (stuck >= HONK_STEPS && pilot.stuck < HONK_STEPS) events.honk.emit({ car: entity.id, model, x: pose.x, y: pose.y })
     if (stuck < STUCK_STEPS) pilot = { ...pilot, stuck }
     else {
       pilot = { ...pilot, stuck: 0, reverseUntil: step + REVERSE_STEPS, tries: pilot.tries + 1 }

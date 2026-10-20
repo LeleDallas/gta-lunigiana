@@ -2,7 +2,7 @@ import { Clock, Decode, Descriptor, Schema } from "@typeonce/ritmo"
 import { InputCapture, Keyboard } from "@typeonce/ritmo-browser"
 import { Random } from "@typeonce/ritmo-math"
 
-import { VEHICLE_MODELS } from "./vehicles.ts"
+import { VEHICLE_MODELS, type VehicleModel } from "./vehicles.ts"
 
 /**
  * World conventions: x = east, y = north, metres from the map origin
@@ -93,6 +93,23 @@ export const Score = Descriptor.ConstructedResource(
  */
 export const View = Descriptor.ConstructedResource(Decode.struct({ turns: Decode.integer }))("Lunigiana/View")
 
+/**
+ * A vehicle hit something this step: a wall, another vehicle or a person (`other`, their entity
+ * ids), where, how hard (m/s) and with how much relative mass behind it. Not saved; the audio
+ * schedule plays it.
+ */
+export const Impact = Descriptor.Event<{
+  readonly hit: "wall" | "car" | "person"
+  readonly x: number
+  readonly y: number
+  readonly speed: number
+  readonly mass: number
+  readonly car: number
+  readonly other?: number
+}>()("Lunigiana/Impact")
+/** An AI driver held up for a while sounds the horn, once per stuck episode. Not saved; the audio schedule plays it. */
+export const Honk = Descriptor.Event<{ readonly car: number; readonly model: VehicleModel; readonly x: number; readonly y: number }>()("Lunigiana/Honk")
+
 /** Player controls. Keys are host detail, but they live here so `Controls` has one home. */
 export const bindings = {
   up: ["ArrowUp", Keyboard.code("KeyW")],
@@ -103,7 +120,9 @@ export const bindings = {
   handbrake: [Keyboard.code("Space")],
   action: [Keyboard.code("KeyF"), "Enter"],
   turnLeft: [Keyboard.code("KeyQ")],
-  turnRight: [Keyboard.code("KeyE")]
+  turnRight: [Keyboard.code("KeyE")],
+  // Only the audio host hears it: no gameplay effect.
+  horn: [Keyboard.code("KeyH")]
 } as const
 type Controls = Keyboard.Snapshot<typeof bindings>
 
@@ -116,6 +135,7 @@ export const Game = Schema.bind(
   Schema.fragment({
     components: { Pose, PrevPose, Motion, Player, Person, Pedestrian, Down, Vehicle, CarInput, Traffic, Route, Driving, Autopilot, Stolen },
     resources: { Time, Rng, Score, View, Input },
+    events: { Impact, Honk },
     requires: [
       Schema.requires(Player, Pose, PrevPose, Motion, Person),
       Schema.requires(Pedestrian, Pose, PrevPose, Motion, Person, Route),

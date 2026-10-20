@@ -1,19 +1,20 @@
 /**
  * Headless test kit for the simulation tests: a world inspector, a staging
  * schedule that clears the map and places exactly what a test needs, and a
- * runner over scripted keys.
+ * runner over scripted keys that also collects the events the systems emit.
  *
  * @module testing
  */
 import assert from "node:assert/strict"
 
+import type { Descriptor } from "@typeonce/ritmo"
 import { Keyboard } from "@typeonce/ritmo-browser"
 import { Ops, Random } from "@typeonce/ritmo-math"
 
 import { clearOf, wallsAlong } from "./body.ts"
 import {
-  Autopilot, bindings, CarInput, Down, Game, KeyboardInput, makeRuntime, Motion, Pedestrian, Person, Player, PlayerView, Pose, type PoseValue,
-  PrevPose, Route, Score, setup, Stolen, Traffic, update, Vehicle
+  Autopilot, bindings, CarInput, Down, Game, Honk, Impact, KeyboardInput, makeRuntime, Motion, Pedestrian, Person, Player, PlayerView, Pose,
+  type PoseValue, PrevPose, Route, Score, setup, Stolen, Traffic, update, Vehicle
 } from "./index.ts"
 import { graph } from "./map/index.ts"
 import { edgeIndex, endNode, facesForward, laneOf, lanePoint, laneSide, nextTrafficEdge, roadOf, type Step } from "./route.ts"
@@ -35,7 +36,8 @@ const World = Game.Inspector("Test/World", {
         input: Game.Query.read(CarInput),
         traffic: Game.Query.optional(Traffic),
         stolen: Game.Query.optional(Stolen),
-        route: Game.Query.optional(Route)
+        route: Game.Query.optional(Route),
+        pilot: Game.Query.optional(Autopilot)
       }
     }),
     peds: Game.Query({ selection: { pose: Game.Query.read(Pose), ped: Game.Query.read(Pedestrian), down: Game.Query.optional(Down) } })
@@ -44,7 +46,7 @@ const World = Game.Inspector("Test/World", {
 }, ({ queries, resources }) => ({
   vehicles: queries.vehicles.each().map(({ entity, data }) => ({
     id: entity.id, ...data.pose.get(), ...data.motion.get(), ...data.vehicle.get(), input: data.input.get(), traffic: data.traffic.present,
-    stolen: data.stolen.present, route: data.route.value()
+    stolen: data.stolen.present, route: data.route.value(), pilot: data.pilot.value()
   })),
   peds: queries.peds.each().map(({ entity, data }) => ({ id: entity.id, ...data.pose.get(), ...data.ped.get(), down: data.down.present })),
   score: resources.score.get()
@@ -93,21 +95,31 @@ export const stage = (at: PoseValue, cast: Cast = {}) =>
     Game.Schedule.applyDeferred()
   )
 
-/** A runtime after setup (and `staging`, if given) driven by `timeline`: run frames, inspect the world and the player's view. */
+/**
+ * A runtime after setup (and `staging`, if given) driven by `timeline`: run frames, inspect the world and the player's view,
+ * and read every event emitted so far (`heard`, in emission order).
+ */
 export const start = (timeline: Timeline = [], staging?: readonly [PoseValue, Cast?]) => {
   const made = makeRuntime({ seed: 1, services: Game.Runtime.services(Game.Runtime.service(KeyboardInput, Keyboard.scripted(bindings, timeline))) })
   assert.ok(made.ok)
   const runtime = made.value
   assert.ok(runtime.tick(setup).ok)
   if (staging !== undefined) assert.ok(runtime.tick(stage(...staging)).ok)
+  const heard = { impacts: new Array<Descriptor.Descriptor.Value<typeof Impact>>(), honks: new Array<Descriptor.Descriptor.Value<typeof Honk>>() }
+  const listen = Game.Schedule(Game.System("Test/Listen", {
+    events: { impacts: Game.System.readEvent(Impact), honks: Game.System.readEvent(Honk) }
+  }, ({ events }) => {
+    heard.impacts.push(...events.impacts.all())
+    heard.honks.push(...events.honks.all())
+  }))
   const run = (frames: number, each: (frame: number) => void = () => {}) => {
     for (let i = 0; i < frames; i++) {
-      const ran = runtime.tick(update)
+      const ran = runtime.tick(update, listen)
       assert.ok(ran.ok, JSON.stringify(ran))
       each(i)
     }
   }
-  return { runtime, run, world: () => runtime.inspect(World), view: () => runtime.inspect(PlayerView) }
+  return { runtime, run, heard, world: () => runtime.inspect(World), view: () => runtime.inspect(PlayerView) }
 }
 
 const battisti = graph.trafficEdges.filter((e) => roadOf(e).name === "Via Cesare Battisti")

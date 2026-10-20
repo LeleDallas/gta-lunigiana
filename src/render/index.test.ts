@@ -25,16 +25,20 @@ test("registries: a detached node frees its own geometry, not its vehicle's shar
   assert.equal(car.parent, null)
 })
 
-test("the render schedule reads the world and never writes it", async () => {
-  const { runtime, schedules, describe } = await lintTarget()
+test("the host schedules (render, audio) read the world and never write it", async () => {
+  const { runtime, schedules, describe = {} } = await lintTarget()
   runtime.debug.nameSchedules({ ...schedules, ...describe })
   const described = runtime.debug.describe()
-  const steps = described.schedules.find((s) => s.name === "render")?.steps ?? []
-  const names = steps.flatMap((step) => (step.kind === "system" ? [step.system] : []))
-  const systems = described.systems.filter((s) => names.includes(s.name))
-  assert.equal(systems.length, 5)
-  for (const s of systems) {
-    const writes = [...s.queries.flatMap((q) => q.writes), ...s.resources.writes, ...s.events.writes, ...Object.values(s.commands).flat()]
-    assert.deepEqual(writes, [], `${s.name} writes the world`)
+  assert.deepEqual(Object.keys(describe), ["render", "audio"])
+  for (const name of Object.keys(describe)) {
+    const steps = described.schedules.find((s) => s.name === name)?.steps ?? []
+    const names = steps.flatMap((step) => (step.kind === "system" ? [step.system] : []))
+    const systems = described.systems.filter((s) => names.includes(s.name))
+    if (name === "render") assert.equal(systems.length, 5)
+    assert.ok(systems.length > 0, `${name} has systems`)
+    for (const s of systems) {
+      const writes = [...s.queries.flatMap((q) => q.writes), ...s.resources.writes, ...s.events.writes, ...Object.values(s.commands).flat()]
+      assert.deepEqual(writes, [], `${s.name} writes the world`)
+    }
   }
 })
