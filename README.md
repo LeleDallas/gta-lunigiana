@@ -1,15 +1,41 @@
-# GTA: Lunigiana
+# Grand Theft Auto: Valle del Lucido
 
-A small GTA-like game set in Monzone, a village in the comune of Fivizzano (Massa-Carrara, Italy).
-You walk the streets, steal parked cars, carjack traffic and knock pedestrians over. The view is a
-fixed isometric camera with a low-resolution pixel-art look.
+![Title card](docs/screenshots/title.png)
 
-The map is the real valley, about 5.2 × 4.6 km: Monzone and Aiola, the Lucido down to Gragnola on
-the Aulella, Equi Terme, Codiponte and Casciana, and the hill villages west of the Lucido (Viano,
-Pieve di Viano, Colognola, Campiglione, Vezzanello). Roads (with the SR445 della Garfagnana), the
-Aulella, Lucido and Caldanella, the Lucca–Aulla railway, woods and place names come from
-OpenStreetMap. Buildings (with their surveyed eave heights), road widths and surfaces come from
-Regione Toscana's 1:2000 technical map (2019), and the terrain from its 1 m LiDAR survey (2010).
+A small open-world car-theft game in isometric pixel art, set in the real Valle del Lucido in
+Lunigiana, Tuscany. You walk the village streets, steal parked cars (the Carabinieri's Alfa Romeo
+included, from right outside their station), carjack traffic and knock pedestrians over, all on a
+map built from survey data of the actual valley. The view is a fixed isometric camera with a
+low-resolution pixel-art look.
+
+## The valley
+
+The Valle del Lucido runs down the north-western slope of the Apuan Alps, in the comune of
+Fivizzano (province of Massa-Carrara). Its torrent, the Lucido, has two branches: the Lucido di
+Vinca, coming down from the south, and the Lucido di Equi, coming from the east past the spa
+village of Equi Terme. They meet at Monzone, under the 18th-century humpback bridge of Santa
+Lucia. Monzone has two halves: Ponte di Monzone, the lower village that grew around the
+railway station on the Lucca–Aulla line, and Monzone Alto, the old village perched on a rocky
+spur under the church of San Prospero. Downstream, the Lucido runs north past the hamlets of
+Isolano and Pian del Molino to Gragnola, where it joins the Aulella.
+
+The playable map covers about 5.2 × 4.6 km of it:
+
+- **Monzone**: the station quarter on Via Cesare Battisti, the Carabinieri station, and the
+  stone lanes of Monzone Alto.
+- **Equi Terme**: the spa village up the eastern branch, with its own station.
+- **Gragnola**: the old town at the mouth of the valley, on the SR445 della Garfagnana and the
+  Aulella, with the Castello dell'Aquila on the hill nearby.
+- **The hill villages** west of the Lucido: Viano, Pieve di Viano, Colognola, Campiglione and
+  Vezzanello.
+- Aiola, Mezzana, Codiponte, Casciana and the woods, streams and hairpins in between.
+
+Roads, rivers, the railway, woods and place names come from OpenStreetMap. Buildings (with their
+surveyed eave heights), road widths and surfaces come from Regione Toscana's 1:2000 technical map
+(2019), and the terrain from its 1 m LiDAR survey (2010).
+
+This is a fan project. It is not affiliated with or endorsed by Rockstar Games or Take-Two
+Interactive; "Grand Theft Auto" is their trademark.
 
 ## Requirements
 
