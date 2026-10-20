@@ -6,7 +6,7 @@
  *
  * @module collide
  */
-import { Collide2, Scalar, SpatialGrid, Vec2 } from "@typeonce/ritmo-math"
+import { Collide2, Vec2 } from "@typeonce/ritmo-math"
 
 import type { Segment } from "./map/index.ts"
 
@@ -150,25 +150,65 @@ export const moveCircles = (
   return { position, blocked }
 }
 
+/** An axis-aligned box: minX, minY, maxX, maxY. */
+type Box = readonly [number, number, number, number]
+
 /**
- * Static broad phase over wall segments: a SpatialGrid built once and never
- * cleared. The returned query yields every segment whose grid cells overlap
- * the box (a superset; run the exact test). Its result array is reused by the
- * next call, so copy it if you need to keep it.
+ * Static broad phase for things that never move (walls, trees, road edges): a uniform grid over
+ * `count` boxes, built once, with every cell's item indices packed into one Int32Array (SpatialGrid
+ * is made to be rebuilt every step and keeps an array per cell: ~6x the memory for the map walls).
+ * The query calls `visit` once for every item whose cells overlap the box (a superset: run the
+ * exact test), in a fixed order: cells south to north, west to east, items by index.
  */
-export const indexSegments = (segs: ReadonlyArray<Segment>, cellSize: number) => {
-  const size = Scalar.Positive.result(cellSize)
-  if (!size.ok) throw new Error(`cell size must be > 0, got ${cellSize}`)
-  const grid = SpatialGrid.make(size.value)
-  segs.forEach((s, i) => {
-    const hx = (s.bx - s.ax) / 2
-    const hy = (s.by - s.ay) / 2
-    grid.insert(i, s.ax + hx, s.ay + hy, Math.sqrt(hx * hx + hy * hy))
-  })
-  const found: Array<Segment> = []
-  return (minX: number, minY: number, maxX: number, maxY: number): ReadonlyArray<Segment> => {
-    found.length = 0
-    grid.forEachIn(minX, minY, maxX, maxY, (i) => found.push(segs[i]!))
-    return found
+export const staticGrid = (count: number, boxOf: (item: number) => Box, cellSize: number) => {
+  if (!(cellSize > 0)) throw new Error(`cell size must be > 0, got ${cellSize}`)
+  let x0 = 0, y0 = 0, x1 = 0, y1 = 0
+  for (let i = 0; i < count; i++) {
+    const [ax, ay, bx, by] = boxOf(i)
+    if (i === 0) [x0, y0, x1, y1] = [ax, ay, bx, by]
+    else [x0, y0, x1, y1] = [Math.min(x0, ax), Math.min(y0, ay), Math.max(x1, bx), Math.max(y1, by)]
   }
+  const cols = Math.floor((x1 - x0) / cellSize) + 1, rows = Math.floor((y1 - y0) / cellSize) + 1
+  const col = (x: number) => Math.floor((x - x0) / cellSize), row = (y: number) => Math.floor((y - y0) / cellSize)
+  const cells = (item: number, each: (cell: number) => void) => {
+    const [ax, ay, bx, by] = boxOf(item)
+    for (let r = row(ay); r <= row(by); r++) for (let c = col(ax); c <= col(bx); c++) each(r * cols + c)
+  }
+  // Cell k's items are items[starts[k] .. starts[k + 1]): count them, sum, then fill.
+  const starts = new Int32Array(cols * rows + 1)
+  for (let i = 0; i < count; i++) cells(i, (k) => starts[k + 1]!++)
+  for (let k = 0; k < cols * rows; k++) starts[k + 1]! += starts[k]!
+  const items = new Int32Array(starts[cols * rows]!)
+  const next = starts.slice(0, -1)
+  for (let i = 0; i < count; i++) cells(i, (k) => (items[next[k]!++] = i))
+  // seen[item] === query marks an item already visited by this query (items spanning several cells).
+  const seen = new Int32Array(count)
+  let query = 0
+  return (minX: number, minY: number, maxX: number, maxY: number, visit: (item: number) => void): void => {
+    if (query === 0x7fffffff) {
+      seen.fill(0)
+      query = 0
+    }
+    query++
+    const c0 = Math.max(0, col(minX)), c1 = Math.min(cols - 1, col(maxX))
+    for (let r = Math.max(0, row(minY)), r1 = Math.min(rows - 1, row(maxY)); r <= r1; r++) for (let c = c0; c <= c1; c++) {
+      for (let j = starts[r * cols + c]!, end = starts[r * cols + c + 1]!; j < end; j++) {
+        const item = items[j]!
+        if (seen[item] === query) continue
+        seen[item] = query
+        visit(item)
+      }
+    }
+  }
+}
+
+/** Whether (x, y) is inside a flat ring [x0, y0, x1, y1, ...] (even-odd). */
+export const pointInRing = (x: number, y: number, ring: ReadonlyArray<number>): boolean => {
+  let inside = false
+  const n = ring.length / 2
+  for (let i = 0, j = n - 1; i < n; j = i++) {
+    const xi = ring[2 * i]!, yi = ring[2 * i + 1]!, xj = ring[2 * j]!, yj = ring[2 * j + 1]!
+    if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside
+  }
+  return inside
 }

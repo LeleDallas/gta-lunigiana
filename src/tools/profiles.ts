@@ -116,5 +116,16 @@ export const makeProfiler = (grid: Grid, ground: (x: number, y: number) => numbe
       zOf.set(chain[i]!.item, chain[i]!.rev ? z.reverse() : z)
     })
   }
-  return { profile, nodeZ, zOf, denseOf }
+  /**
+   * Chains in profiling order: next the longest one touching a node an earlier chain set, else the
+   * longest left. Elevations spread along the network from where it is already pinned, so a short
+   * link is not pinned at both ends by chains fitted apart (a lane between two levels would get a
+   * straight line far over its grade limit).
+   */
+  function* grown<T extends Linear>(chains: ReadonlyArray<ReadonlyArray<Link<T>>>): Generator<ReadonlyArray<Link<T>>> {
+    const left = [...chains]
+    const touches = (c: ReadonlyArray<Link<T>>) => c.some(({ item }) => item.pts.some((v) => v.id !== undefined && nodeZ.has(v.id)))
+    while (left.length > 0) yield left.splice(Math.max(0, left.findIndex(touches)), 1)[0]!
+  }
+  return { profile, grown, nodeZ, zOf, denseOf }
 }

@@ -19,7 +19,7 @@ const SPAN = 300
 const AREA_HEX: Partial<Record<AreaKind, number>> = {
   forest: PALETTE.forest, cemetery: PALETTE.plasterGrey, pitch: PALETTE.forestLight, park: PALETTE.forestLight,
   parking: PALETTE.asphaltWorn, vineyard: PALETTE.grassDry, farmland: PALETTE.grassDry, farmyard: PALETTE.dirtTrack,
-  industrial: PALETTE.stoneMid, platform: PALETTE.asphaltWorn, school: PALETTE.grass, ruins: PALETTE.stoneMid
+  industrial: PALETTE.stoneMid, platform: PALETTE.asphaltWorn, school: PALETTE.grass, ruins: PALETTE.stoneMid, paved: PALETTE.asphaltWorn
 }
 
 /**

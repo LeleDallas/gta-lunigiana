@@ -89,6 +89,16 @@ export interface Sink {
 /** The sink of the chunk holding map point (x, y). */
 export type SinkAt = (x: number, y: number) => Sink
 
+/**
+ * A static item drawn chunk by chunk. `pts` is its anchor polyline (one point for a building);
+ * `draw` emits segments k0..k1 of it, reading their neighbours for joints, and puts every
+ * triangle in `at` of the point it belongs to, so a chunk keeps exactly its share.
+ */
+export interface Piece {
+  readonly pts: ReadonlyArray<number>
+  readonly draw: (at: SinkAt, k0: number, k1: number) => void
+}
+
 /** A three primitive (Box, Cylinder, Extrude...) as non-indexed position/normal/color in one colour. */
 export const paint = (source: BufferGeometry, hex: number): BufferGeometry => {
   const g = source.index === null ? source : source.toNonIndexed()

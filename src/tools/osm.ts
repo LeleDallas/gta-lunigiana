@@ -1,6 +1,7 @@
-// OSM API 0.6 XML reader (regex based; the files come from the API, so the layout is fixed)
+// OSM API 0.6 XML reader (regex based; the file comes from the API via fetch-osm.ts, so the layout is fixed)
 // and multipolygon ring assembly. Ported from .research/scratch-osm-monzone/{lib,geo}.ts.
 import { readFileSync } from "node:fs"
+import { gunzipSync } from "node:zlib"
 
 export type Tags = Record<string, string>
 interface OsmNode { readonly id: string; readonly lat: number; readonly lon: number; readonly tags: Tags }
@@ -51,7 +52,11 @@ const parseOsm = (xml: string): Osm => {
   return osm
 }
 
-export const readOsm = (path: string): Osm => parseOsm(readFileSync(path, "utf8"))
+/** Reads an OSM XML file, gzipped when the name ends in .gz. */
+export const readOsm = (path: string): Osm => {
+  const raw = readFileSync(path)
+  return parseOsm((path.endsWith(".gz") ? gunzipSync(raw) : raw).toString("utf8"))
+}
 
 /** Joins a relation's member ways with `role` into closed rings of node ids (first id repeated last). Unclosed chains are dropped. */
 export const assembleRings = (osm: Osm, rel: OsmRelation, role: string): Array<Array<string>> => {

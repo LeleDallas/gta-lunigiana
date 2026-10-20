@@ -6,34 +6,41 @@ import { Keyboard } from "@typeonce/ritmo-browser"
 import { Determinism } from "@typeonce/ritmo-devtools"
 import { Ops, Vec2 } from "@typeonce/ritmo-math"
 
+import { ringBox } from "../tools/geometry.ts"
 import { carClear } from "./body.ts"
 import { graph, MAP } from "./map/index.ts"
-import { distanceToEdge, laneOf, lanePoint, laneSide } from "./route.ts"
+import { pointInRing } from "./collide.ts"
+import { distanceToEdge, laneOf, lanePoint, laneSide, roadOf, walkIndex } from "./route.ts"
 import { bindings, Game, KeyboardInput, makeRuntime, type PoseValue, setup, update } from "./index.ts"
 import { parkedCar, pedestrian } from "./spawning.ts"
-import { PEDESTRIANS, TRAFFIC } from "./systems/populate.ts"
-import { battistiTraffic, door, ON_BATTISTI, press, stage, start, teleport, type Timeline, walkClear } from "./testing.ts"
+import { PEDESTRIANS, PEOPLED, TRAFFIC } from "./systems/populate.ts"
+import { PARKED } from "./systems/spawn.ts"
+import { BATTISTI, battistiTraffic, door, ON_BATTISTI, press, stage, start, straightOn, teleport, type Timeline, walkClear } from "./testing.ts"
 import { SCREEN_UP, VIEW_REACH } from "./view.ts"
 import { VEHICLES } from "./vehicles.ts"
 
-test("setup: the player at the map spawn, 45 parked cars, Carabinieri at the station", () => {
+test("setup: the player at the map spawn, 150 parked cars on random spots, Carabinieri in front of the station", () => {
   const { run, view, world } = start()
   run(1)
   assert.equal(view()?.mode, "foot")
   assert.deepEqual(view()?.pose, MAP.spawns.player)
   const { vehicles } = world()
-  assert.equal(vehicles.length, 45)
+  assert.equal(vehicles.length, Math.min(PARKED, MAP.spawns.parked.length))
+  assert.ok(vehicles.length >= 40, `${vehicles.length} parked cars`)
   assert.ok(vehicles.every((v) => !v.traffic && v.input.handbrake))
+  assert.ok(vehicles.every((v) => MAP.spawns.parked.some((s) => s.x === v.x && s.y === v.y && s.angle === v.angle)), "every car on a parked spot")
   const police = MAP.pois.find((p) => p.kind === "amenity=police")!
+  const nearest = [...MAP.spawns.parked].sort((a, b) => Vec2.distance(a, police) - Vec2.distance(b, police)).slice(0, 2)
   const carabinieri = vehicles.filter((v) => v.model === "carabinieri")
   assert.equal(carabinieri.length, 2)
-  assert.ok(carabinieri.every((v) => v.color === 0x1d2b4f && Vec2.distance(v, police) < 45))
+  assert.ok(carabinieri.every((v) => v.color === 0x1d2b4f && nearest.some((s) => s.x === v.x && s.y === v.y)))
+  assert.ok(carabinieri.every((v) => Vec2.distance(v, police) < 45), "Carabinieri in front of their station")
   assert.ok(vehicles.filter((v) => v.model === "truck").length <= 2)
 })
 
 test("on foot: the up key walks along SCREEN_UP and stops at a building wall", () => {
-  // 6 m north-west of a house wall that faces the camera square on (5.65 m to contact).
-  const from = { x: -508.8, y: 512.2, angle: 0 }
+  // 6 m north-west of a house wall that faces the camera (1.3° off square on), 5.65 m to contact.
+  const from = { x: -59.4926, y: 160.9426, angle: 0 }
   const { run, view } = start([{ frame: 0, press: ["up"] }], [from])
   const along = (p: PoseValue) => (p.x - from.x) * SCREEN_UP.x + (p.y - from.y) * SCREEN_UP.y
   const across = (p: PoseValue) => (p.x - from.x) * SCREEN_UP.y - (p.y - from.y) * SCREEN_UP.x
@@ -64,14 +71,14 @@ test("driving: entering a parked car, the up key accelerates toward maxSpeed and
 })
 
 test("driving into a building: the car stops at the wall without tunnelling and loses its speed", () => {
-  // Square on to a 25 m house wall, 18.14 m to first contact.
-  const car = { x: -429.96, y: 431.93, angle: 1.2732 }
+  // Square on to an 11 m house wall on Via Cesare Battisti, 18.15 m to first contact.
+  const car = { x: -433.525, y: 433.24, angle: 1.386 }
   const { run, view } = start([...press(0, "action"), { frame: 2, press: ["up"] }], [door(car), { cars: [parkedCar("panda", 0xf2efe6, car)] }])
   const progress = (p: PoseValue) => (p.x - car.x) * Ops.cos(car.angle) + (p.y - car.y) * Ops.sin(car.angle)
   const frames: Array<{ pose: PoseValue; speed: number }> = []
   run(240, () => frames.push({ pose: view()!.pose, speed: view()!.vehicle!.speed }))
   assert.ok(frames.every(({ pose }) => carClear("panda", pose, 0.02)), "never inside a wall")
-  assert.ok(frames.every(({ pose }) => progress(pose) < 18.16), `never past the wall: ${Math.max(...frames.map(({ pose }) => progress(pose)))}`)
+  assert.ok(frames.every(({ pose }) => progress(pose) < 18.17), `never past the wall: ${Math.max(...frames.map(({ pose }) => progress(pose)))}`)
   const fastest = Math.max(...frames.map((f) => f.speed))
   const hit = frames.findIndex((f) => f.speed === fastest)
   assert.ok(fastest > 12, `fastest ${fastest}`)
@@ -127,8 +134,11 @@ test("traffic: a car follows the roads for 30 s, never inside walls", () => {
   let last: PoseValue = ON_BATTISTI
   run(1800, () => {
     const car = world().vehicles.find((v) => v.id === id)!
-    const off = Math.min(...graph.trafficEdges.map((e) => distanceToEdge(e, car.x, car.y)))
-    assert.ok(off < 4, `off the road by ${off} at (${car.x}, ${car.y})`)
+    // Within a metre of a traffic road's carriageway (corners get cut): measured from every edge, so a car
+    // turning out of a lane into a wider road is judged by the wider road.
+    let off = Infinity
+    for (const e of graph.trafficEdges) off = Math.min(off, distanceToEdge(e, car.x, car.y) - roadOf(e).w / 2)
+    assert.ok(off < 1, `${off} m beyond the carriageway at (${car.x}, ${car.y})`)
     assert.ok(carClear("panda", car, 0.02), "never inside a wall")
     travelled += Vec2.distance(car, last)
     last = car
@@ -136,11 +146,54 @@ test("traffic: a car follows the roads for 30 s, never inside walls", () => {
   assert.ok(travelled > 60, `travelled ${travelled} m`)
 })
 
+// Regression: waiting 3 s for a walker crossing in front counted as stuck, so cars backed up and turned round on narrow roads, onto the verge.
+test("traffic: a car waits for a person standing in its lane, without backing up or turning round, then drives on", () => {
+  const lane = laneOf(BATTISTI.edge, BATTISTI.forward)
+  const inLane = { ...lanePoint(lane, 12, laneSide(BATTISTI, "panda")), angle: 0 }
+  const { runtime, run, view, world } = start([], [inLane, { traffic: [battistiTraffic(0x74746f)] }])
+  const id = world().vehicles[0]!.id
+  const car = () => world().vehicles.find((v) => v.id === id)!
+  const along = () => (car().x - lane.x) * lane.dx + (car().y - lane.y) * lane.dy
+  let furthest = along()
+  run(480, () => {
+    assert.ok(along() > furthest - 0.05, `backed up from ${furthest} to ${along()}`)
+    assert.equal(car().route?.forward, BATTISTI.forward, "kept its direction")
+    furthest = Math.max(furthest, along())
+  })
+  assert.equal(view()?.mode, "foot", "stopped short of the person")
+  assert.ok(furthest > 3 && furthest < 12 - 2, `waited in front of them: ${furthest}`)
+  assert.ok(runtime.tick(Game.Schedule(teleport(MAP.spawns.player))).ok)
+  run(180)
+  assert.ok(along() > furthest + 5, `drove on: ${along()}`)
+})
+
+// Regression: waiting for a person never counted as stuck, so one who stood still in the lane (or beside the cab, or on
+// the verge inside the braking cone) held the car for good, and the cars queued behind it wedged turning round.
+test("traffic: a person who never moves holds a car ~12 s in its lane, and beside its cab no longer than a parked car would", () => {
+  const lane = laneOf(BATTISTI.edge, BATTISTI.forward)
+  const side = laneSide(BATTISTI, "panda")
+  const along = (p: PoseValue) => (p.x - lane.x) * lane.dx + (p.y - lane.y) * lane.dy
+  for (const [at, from, to] of [[12, 8, 20], [0.5, 2.5, 6]] as const) {
+    // In the lane 12 m ahead; or 1.3 m right of the standing car's axis, beside its cab (on the carriageway, clear of the body).
+    const me = { ...lanePoint(lane, at, at === 12 ? side : side + 1.3), angle: 0 }
+    assert.ok(walkClear(me) && distanceToEdge(BATTISTI.edge, me.x, me.y) < roadOf(BATTISTI.edge).w / 2)
+    const { run, world } = start([], [me, { traffic: [battistiTraffic(0x74746f)] }])
+    const car = () => world().vehicles.find((v) => v.traffic)!
+    let furthest = along(car()), gaveUp = -1
+    run(to * 60, (frame) => {
+      furthest = Math.max(furthest, along(car()))
+      if (gaveUp < 0 && (along(car()) < furthest - 0.5 || car().route?.forward !== BATTISTI.forward)) gaveUp = frame / 60
+    })
+    assert.ok(gaveUp >= from && gaveUp < to, `person at ${at} m: backed up or turned round after ${gaveUp} s`)
+  }
+})
+
 test("knockdown: a fast car knocks a pedestrian down, scores for the player, and the pedestrian gets up and runs", () => {
-  // The pedestrian walks toward the car down its lane line, 24 m ahead on the next edge.
-  const side = laneSide({ edge: 8, forward: true }, "panda")
-  const at = { ...lanePoint(laneOf(8, true), 5, side), angle: ON_BATTISTI.angle + Math.PI }
-  const walker = pedestrian({ skin: 0xc68e6a, hair: 0x2b1d14, shirt: 0xb8312b, pants: 0x1d2b4f }, at, { edge: 8, forward: false, side: -side }, { mood: "walk", until: 0 })
+  // The pedestrian walks toward the car down its lane line, 25 m ahead on the next edge.
+  const next = straightOn(BATTISTI)
+  const side = laneSide(next, "panda")
+  const at = { ...lanePoint(laneOf(next.edge, next.forward), 5, side), angle: ON_BATTISTI.angle + Math.PI }
+  const walker = pedestrian({ skin: 0xc68e6a, hair: 0x2b1d14, shirt: 0xb8312b, pants: 0x1d2b4f }, at, { edge: next.edge, forward: !next.forward, side: -side }, { mood: "walk", until: 0 })
   const timeline: Timeline = [...press(0, "action"), { frame: 2, press: ["up"] }, { frame: 200, release: ["up"] }]
   const { run, world } = start(timeline, [door(ON_BATTISTI), { cars: [parkedCar("panda", 0xb8312b, ON_BATTISTI)], peds: [walker] }])
   let knockedAt = -1
@@ -195,6 +248,30 @@ test("populate: traffic and pedestrians fill in out of view around a moving play
   assert.ok(after.vehicles.filter((v) => v.traffic).every((v) => Vec2.distance(v, away) <= TRAFFIC.despawn))
   assert.ok(after.peds.every((p) => Vec2.distance(p, away) <= PEDESTRIANS.despawn))
   assert.ok(after.vehicles.some((v) => !v.traffic && Vec2.distance(v, away) > TRAFFIC.despawn), "parked cars stay")
+})
+
+// Regression: verges that run into houses spawned pedestrians inside them (stuck under the roof for good).
+test("populate: pedestrians spawn in the villages, never inside a house, and none in the woods", () => {
+  const indoors = (p: { readonly x: number; readonly y: number }) =>
+    MAP.buildings.some((b) => pointInRing(p.x, p.y, b.outer) && !(b.holes ?? []).some((h) => pointInRing(p.x, p.y, h)))
+  // A walk node with walk edges in the spawn band but no building within PEOPLED of any of them.
+  const lonely = (n: { readonly x: number; readonly y: number }) => MAP.buildings.every((b) => {
+    const [x0, y0, x1, y1] = ringBox(b.outer)
+    return Ops.hypot(Math.max(x0 - n.x, 0, n.x - x1), Math.max(y0 - n.y, 0, n.y - y1)) > PEOPLED + PEDESTRIANS.spawn[1]
+  })
+  const woods = graph.nodes.find((n) => walkIndex.around(n.x, n.y, PEDESTRIANS.spawn).length > 0 && lonely(n))!
+  for (const [at, some] of [[{ x: -1751.2, y: 3360.4 }, true], [woods, false]] as const) { // Gragnola's place node, then the woods
+    const { runtime, run, world } = start()
+    assert.ok(runtime.tick(Game.Schedule(teleport({ ...at, angle: 0 }))).ok)
+    const seen = new Set<number>()
+    run(600, () => {
+      for (const p of world().peds) if (!seen.has(p.id)) {
+        seen.add(p.id)
+        assert.ok(!indoors(p), `spawned inside a house at ${p.x.toFixed(1)},${p.y.toFixed(1)}`)
+      }
+    })
+    assert.ok(some ? seen.size >= 10 : seen.size === 0, `${seen.size} pedestrians around ${at.x},${at.y}`)
+  }
 })
 
 /** Walk to a car, drive it hard around Via Cesare Battisti, get out: every system has work to do. */

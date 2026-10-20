@@ -1,8 +1,9 @@
 /// <reference types="vite/client" />
 /**
- * Browser host: builds the world and the pixel view, makes the runtime with the live keyboard and
- * the render registries, and drives everything from one FixedLoop: fixed sim steps, then once per
- * animation frame the render schedule, the camera, the frame and the HUD.
+ * Browser host: makes the streamed world and the pixel view, makes the runtime with the live
+ * keyboard and the render registries, and drives everything from one FixedLoop: fixed sim steps,
+ * then once per animation frame the render schedule, the camera, world streaming, the frame and
+ * the HUD.
  *
  * @module main
  */
@@ -15,8 +16,9 @@ import { dismissTitleOnInput, makeHud } from "./hud/hud.ts"
 import { groundY } from "./render/ground.ts"
 import { blend, makeRegistries, People, render, RenderClock, Vehicles } from "./render/index.ts"
 import { PALETTE } from "./render/palette.ts"
-import { followSun, PixelView, zoomFor } from "./render/pipeline.ts"
-import { buildWorld } from "./render/world.ts"
+import { followSun, PixelView, WIDEST_ZOOM, zoomFor } from "./render/pipeline.ts"
+import { World } from "./render/world.ts"
+import { heightAt } from "./sim/map/index.ts"
 import { bindings, Game, KeyboardInput, makeRuntime, PlayerView, setup, STEP, update } from "./sim/index.ts"
 import { LOOK_AHEAD } from "./sim/view.ts"
 
@@ -41,9 +43,13 @@ sun.shadow.bias = -0.0005
 sun.shadow.normalBias = 0.05
 sun.shadow.camera.far = 900
 scene.add(sun, sun.target)
-buildWorld(scene)
+const world = new World(scene)
 
 const view = new PixelView(renderer)
+/** Screen metres from the view's centre to its corner at the widest zoom: what streaming must cover. */
+const reach = () => Math.hypot(view.view.x, view.view.y) / 2 / WIDEST_ZOOM
+/** Milliseconds per frame spent building chunks (at least one chunk is built when any is missing). */
+const STREAM_BUDGET_MS = 4
 const resize = () => view.resize(innerWidth, innerHeight, devicePixelRatio)
 resize()
 addEventListener("resize", resize)
@@ -74,6 +80,9 @@ if (!made.ok) throw new Error(`runtime: ${JSON.stringify(made.error)}`)
 const runtime = made.value
 const ready = runtime.tick(setup)
 if (!ready.ok) throw new Error(`setup: ${JSON.stringify(ready.error)}`)
+// Build everything the first frame shows now, so nothing pops in at the start.
+const spawn = runtime.inspect(PlayerView)
+if (spawn !== undefined) world.update(new Vector3(spawn.pose.x, groundY(spawn.pose.x, spawn.pose.y), -spawn.pose.y), reach(), Infinity)
 
 const hud = makeHud(document)
 dismissTitleOnInput(window)
@@ -102,6 +111,7 @@ const draw = (frame: FixedLoop.Frame): void => {
   const { width, depth } = view.ground
   // The view's ground rectangle turns against the light: its half-diagonal bounds it in every light direction.
   followSun(sun, view.focus, toSun, Math.hypot(width, depth) / 2 + 10)
+  world.update(view.focus, reach(), STREAM_BUDGET_MS)
   view.render(scene)
   hud.update(player, x, y, angle)
 }
@@ -120,7 +130,7 @@ if (!loop.ok) throw new Error(`loop: ${JSON.stringify(loop.error)}`)
 // Dev only: the Ritmo monitor (backslash toggles it) and a handle for measuring from the console.
 // No HMR hooks: nothing accepts updates, so Vite reloads the page on every edit.
 if (import.meta.env.DEV) {
-  Object.assign(window, { gta: { renderer, view, scene, player: () => runtime.inspect(PlayerView) } })
+  Object.assign(window, { gta: { renderer, view, scene, world, heightAt, player: () => runtime.inspect(PlayerView) } })
   const debug = runtime.debug
   if (debug !== undefined) {
     void import("@typeonce/ritmo-devtools").then(({ Monitor }) => Monitor.attach({ debug }, { schedules: { update, render }, host: window }))

@@ -1,21 +1,18 @@
 // Deterministic tree scatter, the player spawn and parked-car spots.
+import { staticGrid } from "../sim/collide.ts"
 import type { Area, Spawn } from "../sim/map/index.ts"
 import type { BuildingF, RailF, RoadF, WaterF } from "./features.ts"
-import { arcLengths, BOUNDS, fillPolygon, hash01, inBounds, pointAt, pointInRing, r1, segIndex } from "./geometry.ts"
+import { arcLengths, BOUNDS, centroid, fillPolygon, hash01, inBounds, pointAt, pointInRing, r1, ringBox, segIndex } from "./geometry.ts"
 
 const TREE_AREA = 50 // m² per tree
-const TREE_CAP = 40000
 const MASK_RES = 2
 
 /** Raster of the play area at MASK_RES m with every polygon in `polys` filled. */
 const mask = (polys: ReadonlyArray<ReadonlyArray<ReadonlyArray<number>>>) => {
   const cols = Math.ceil((BOUNDS.maxX - BOUNDS.minX) / MASK_RES), rows = Math.ceil((BOUNDS.maxY - BOUNDS.minY) / MASK_RES)
   const m = new Uint8Array(cols * rows)
-  for (const rings of polys) {
-    const fill = new Uint8Array(cols * rows) // per polygon even-odd, then OR
-    fillPolygon(rings, BOUNDS.minX, BOUNDS.minY, MASK_RES, cols, rows, (k) => (fill[k] = 1))
-    for (let k = 0; k < m.length; k++) m[k]! |= fill[k]!
-  }
+  // Even-odd within each polygon (fillPolygon visits a pixel once per polygon), OR across them.
+  for (const rings of polys) fillPolygon(rings, BOUNDS.minX, BOUNDS.minY, MASK_RES, cols, rows, (k) => (m[k] = 1))
   return (x: number, y: number) => {
     const c = Math.floor((x - BOUNDS.minX) / MASK_RES), r = Math.floor((y - BOUNDS.minY) / MASK_RES)
     return c >= 0 && r >= 0 && c < cols && r < rows && m[r * cols + c] === 1
@@ -33,11 +30,18 @@ export const scatterTrees = (areas: ReadonlyArray<Area>, roads: ReadonlyArray<Ro
   for (const w of water) keepOut.addLine(w.pts, w.bed, null)
   for (const r of rail) if (r.tunnel !== true) keepOut.addLine(r.pts, 6, null)
   const free = (x: number, y: number) => inBounds(x, y, 1) && !open(x, y) && !built(x, y) && !keepOut.covers(x, y)
-  const trees: Array<number> = []
+  const trees: Array<number> = [], planted = new Set<number>()
+  /** Rounded to the metre, two jittered lattice points can land on one spot: keep the first. */
+  const plant = (x: number, y: number, scale: number) => {
+    const tx = Math.round(x), ty = Math.round(y), key = tx * 8192 + ty
+    if (planted.has(key)) return
+    planted.add(key)
+    trees.push(tx, ty, r1(scale))
+  }
   const step = Math.sqrt(TREE_AREA)
   for (let gj = 0; gj * step < BOUNDS.maxY - BOUNDS.minY; gj++) for (let gi = 0; gi * step < BOUNDS.maxX - BOUNDS.minX; gi++) {
     const x = BOUNDS.minX + (gi + hash01(gi, gj, 1)) * step, y = BOUNDS.minY + (gj + hash01(gi, gj, 2)) * step
-    if (forest(x, y) && free(x, y)) trees.push(Math.round(x), Math.round(y), r1(0.8 + 0.5 * hash01(gi, gj, 3)))
+    if (forest(x, y) && free(x, y)) plant(x, y, 0.8 + 0.5 * hash01(gi, gj, 3))
   }
   water.forEach((w, wi) => {
     if (w.w < 4) return
@@ -46,10 +50,10 @@ export const scatterTrees = (areas: ReadonlyArray<Area>, roads: ReadonlyArray<Ro
       if (hash01(wi, k, side, 4) > 0.55) continue
       const p = pointAt(w.pts, s, k * 9), off = side * (w.bed + 2 + 3 * hash01(wi, k, side, 5))
       const x = p.x - p.ty * off, y = p.y + p.tx * off
-      if (!forest(x, y) && free(x, y)) trees.push(Math.round(x), Math.round(y), r1(0.8 + 0.5 * hash01(wi, k, side, 6)))
+      if (!forest(x, y) && free(x, y)) plant(x, y, 0.8 + 0.5 * hash01(wi, k, side, 6))
     }
   })
-  return trees.slice(0, TREE_CAP * 3)
+  return trees
 }
 
 /** Wall clearance checks against flat (ax, ay, bx, by) segment lists. */
@@ -119,20 +123,36 @@ interface ParkingInput {
   readonly drive: Clearance
   readonly avoid: { readonly x: number; readonly y: number }
   readonly station: { readonly x: number; readonly y: number }
+  /** The Carabinieri station: its two nearest kerb spots are always kept (the sim parks their cars there). */
+  readonly police: { readonly x: number; readonly y: number }
 }
 
 const KERB_CLASSES = new Set(["tertiary", "unclassified", "residential"])
+/** Kerbside spots kept: one per this many buildings (Monzone's 800 buildings had 100), drawn in hash order so every village gets its share. */
+const BUILDINGS_PER_SPOT = 8
 
-/** Kerbside spots in built-up streets (right kerb, >= 9 m apart, >= 12 m from junctions) plus a few in the station car parks. */
-export const parkedSpots = ({ roads, buildings, areas, junctions, walk, drive, avoid, station }: ParkingInput): Array<Spawn> => {
-  const centroids = buildings.map((b) => {
-    let x = 0, y = 0
-    for (let i = 0; i < b.outer.length; i += 2) [x, y] = [x + b.outer[i]!, y + b.outer[i + 1]!]
-    return [(2 * x) / b.outer.length, (2 * y) / b.outer.length] as const
-  })
-  const insideBuilding = (x: number, y: number) => buildings.some((b) => pointInRing(x, y, b.outer))
+/** Kerbside spots in built-up streets (right kerb, >= 9 m apart, >= 12 m from junctions; the two nearest the Carabinieri first) plus a few in the Monzone station car parks. */
+export const parkedSpots = ({ roads, buildings, areas, junctions, walk, drive, avoid, station, police }: ParkingInput): Array<Spawn> => {
+  // Bucketed lookups: building centroids within 40 m, junctions within 12 m, footprints by bounding box.
+  const centroids = segIndex<null>(), corners = segIndex<null>()
+  for (const b of buildings) {
+    const [x, y] = centroid(b.outer)
+    centroids.add(x, y, x, y, 40, null)
+  }
+  for (const [jx, jy] of junctions) corners.add(jx, jy, jx, jy, 12, null)
+  const footprints = staticGrid(buildings.length, (i) => ringBox(buildings[i]!.outer), 32)
+  const insideBuilding = (x: number, y: number) => {
+    let inside = false
+    footprints(x, y, x, y, (i) => (inside ||= pointInRing(x, y, buildings[i]!.outer)))
+    return inside
+  }
+  const housesNear = (x: number, y: number) => {
+    let n = 0
+    centroids.within(x, y, () => n++)
+    return n
+  }
   const carriage = segIndex<RoadF>(), lanes = segIndex<RoadF>()
-  for (const r of roads) if (r.tunnel !== true) {
+  for (const r of roads) {
     carriage.addLine(r.pts, r.w / 2 + 0.9, r)
     lanes.addLine(r.pts, r.w / 2, r)
   }
@@ -150,17 +170,21 @@ export const parkedSpots = ({ roads, buildings, areas, junctions, walk, drive, a
     const s = arcLengths(r.pts), total = s.at(-1)!
     for (let d = 6; d <= total - 6; d += 3) {
       const p = pointAt(r.pts, s, d), off = r.w / 2 + 1, x = p.x + p.ty * off, y = p.y - p.tx * off, angle = Math.atan2(p.ty, p.tx)
-      if (junctions.some(([jx, jy]) => Math.hypot(jx - p.x, jy - p.y) < 12)) continue
-      if (centroids.filter(([cx, cy]) => Math.hypot(cx - x, cy - y) < 40).length < 2) continue
+      if (corners.covers(p.x, p.y) || housesNear(x, y) < 2) continue
       if (carriage.covers(x, y) || box(x, y, angle, 0).some(([qx, qy]) => lanes.covers(qx, qy))) continue // overlaps a carriageway (another road, or this one on a bend)
       if (fits(x, y, angle)) candidates.push({ x, y, angle, order: hash01(ri, Math.round(d), 11) })
     }
   })
   const spots: Array<Spawn> = []
-  for (const c of candidates.sort((a, b) => a.order - b.order)) {
-    if (spots.length >= 100) break
-    if (spots.every((o) => Math.hypot(o.x - c.x, o.y - c.y) >= 9)) spots.push(c)
+  const take = (list: ReadonlyArray<Spawn>, upTo: number) => {
+    for (const c of list) {
+      if (spots.length >= upTo) break
+      if (spots.every((o) => Math.hypot(o.x - c.x, o.y - c.y) >= 9)) spots.push(c)
+    }
   }
+  const toPolice = (c: Spawn) => Math.hypot(c.x - police.x, c.y - police.y)
+  take([...candidates].sort((a, b) => toPolice(a) - toPolice(b)), 2)
+  take(candidates.sort((a, b) => a.order - b.order), Math.round(buildings.length / BUILDINGS_PER_SPOT))
   // Station car parks: rows across the lot's longest edge, cars nose-in.
   for (const lot of areas.filter((a) => a.kind === "parking")) {
     const ring = lot.rings[0]!

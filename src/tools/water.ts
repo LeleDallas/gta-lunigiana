@@ -85,7 +85,8 @@ export interface Crossed { readonly water: number; readonly at: number; readonly
  * After the roads: bridges keep BRIDGE_CLEAR over the water (settled again downstream, then
  * re-carved outside road cores); at-grade roads pass over an implied culvert (a local dip, hidden
  * under the road and its approaches). Last, water left perched over a road cut (culverted streams
- * end at the road) drops to the terrain, except inside a wider channel it flows into.
+ * end at the road) drops to the terrain, except inside a wider channel it flows into, as long as it
+ * still runs downhill there (a stream dropped into a river's carved bed never steps back up).
  */
 export const fitUnderDecks = (g: Grid, water: ReadonlyArray<WaterF>, wp: ReadonlyArray<Profile>, crossed: ReadonlyArray<Crossed>, keep: (n: number) => boolean, terrain: (x: number, y: number) => number): void => {
   const decks = () => {
@@ -102,7 +103,8 @@ export const fitUnderDecks = (g: Grid, water: ReadonlyArray<WaterF>, wp: Readonl
     const p = wp[i]!
     for (let k = 0; k < p.z.length; k++) {
       const top = terrain(p.x[k]!, p.y[k]!) + w.depth / 2
-      if (p.z[k]! > top + PERCH && !channels.covers(p.x[k]!, p.y[k]!, (j) => j !== i && water[j]!.w > w.w)) p.z[k] = top
+      const joins = (k === 0 || p.z[k]! <= p.z[k - 1]!) && channels.covers(p.x[k]!, p.y[k]!, (j) => j !== i && water[j]!.w > w.w)
+      if (p.z[k]! > top + PERCH && !joins) p.z[k] = top
     }
   })
 }

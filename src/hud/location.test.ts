@@ -10,3 +10,8 @@ test("the Carabinieri station is on Via Cesare Battisti, by the station", () => 
 test("deep in the woods there is no road", () => {
   assert.equal(locationAt(300, -300).road, undefined)
 })
+
+// Regression: only named roads were searched, so on an unnamed road the HUD showed a side street within 15 m.
+test("on an unnamed road, the side street beside it is not named", () => {
+  assert.equal(locationAt(-689, 852).road, undefined)
+})

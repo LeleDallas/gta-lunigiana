@@ -15,7 +15,7 @@ import { wrapAngle } from "../sim/body.ts"
 import { Down, Driving, Game, Person, Player, Pose, type PoseValue, PrevPose, Vehicle } from "../sim/index.ts"
 import { ActorNode, PersonNode, vehicleNode } from "./actors.ts"
 import { solidMaterial } from "./geometry.ts"
-import { groundY } from "./ground.ts"
+import { axleY, groundY } from "./ground.ts"
 
 /** Person nodes, one per entity with a Person. */
 export const People = Descriptor.Service<NodeRegistry.NodeRegistry<PersonNode>>()("Lunigiana/PeopleNodes")
@@ -109,12 +109,11 @@ const PlaceVehicles = RenderSync.interpolate(Game, {
   clock: RenderClock,
   blend,
   place: (node, { x, y, angle }) => {
-    const dx = (Math.cos(angle) * node.length) / 2, dy = (Math.sin(angle) * node.length) / 2
-    const front = groundY(x + dx, y + dy, node.elevation), rear = groundY(x - dx, y - dy, node.elevation)
-    node.elevation = (front + rear) / 2
-    node.position.set(x, node.elevation, -y)
+    const wheels = axleY(x, y, angle, node.length, node.wheels)
+    node.wheels = wheels
+    node.position.set(x, (wheels.front + wheels.rear) / 2, -y)
     node.rotation.y = angle
-    node.rotation.z = Math.atan2(front - rear, node.length)
+    node.rotation.z = Math.atan2(wheels.front - wheels.rear, node.length)
   }
 })
 

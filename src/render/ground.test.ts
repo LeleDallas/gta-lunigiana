@@ -1,8 +1,9 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
 
-import { MAP } from "../sim/map/index.ts"
-import { groundY, ROAD_LIFT, terrainY, yOf } from "./ground.ts"
+import { isDrivable, MAP, roadClassOf } from "../sim/map/index.ts"
+import { VEHICLES } from "../sim/vehicles.ts"
+import { axleY, groundY, ROAD_LIFT, terrainY, yOf } from "./ground.ts"
 
 const hm = MAP.heightmap
 
@@ -32,4 +33,36 @@ test("groundY stands on an at-grade road when arriving from the terrain beside i
   assert.ok(groundY(x, y) > terrainY(x, y), "the road surface floats above the terrain")
   assert.equal(groundY(x, y, terrainY(x, y)), groundY(x, y))
   assert.equal(groundY(-388.6, 429.6, terrainY(-388.6, 429.6)), groundY(-388.6, 429.6), "the reviewer's sunk player")
+})
+
+// Regression: on the steep little bridge on Via Provinciale near Colognola (OSM 810591030) the gully below stayed
+// nearer than the climbing deck, so the car (and walkers) dropped 1.9 m under it.
+test("a car and a walker crossing every drivable bridge, both ways, from 12 m before it, stay on the deck", () => {
+  const length = VEHICLES.carabinieri.length
+  let passes = 0
+  for (const r of MAP.roads) {
+    if (r.bridge !== true || !isDrivable(r.cls)) continue
+    for (const reverse of [false, true]) {
+      const pts = Array.from({ length: r.z.length }, (_, k) => [r.pts[2 * k]!, r.pts[2 * k + 1]!, r.z[k]!] as const)
+      if (reverse) pts.reverse()
+      const [x0, y0] = pts[0]!, [x1, y1] = pts[1]!, d = Math.hypot(x1 - x0, y1 - y0), ux = (x1 - x0) / d, uy = (y1 - y0) / d
+      let wheels: { readonly front: number; readonly rear: number } | undefined, feet: number | undefined
+      const place = (x: number, y: number, angle: number) => {
+        wheels = axleY(x, y, angle, length, wheels)
+        feet = groundY(x, y, feet)
+      }
+      for (let s = -12; s < 0; s += 0.4) place(x0 + ux * s, y0 + uy * s, Math.atan2(uy, ux))
+      for (let i = 0; i + 1 < pts.length; i++) {
+        const [ax, ay, az] = pts[i]!, [bx, by, bz] = pts[i + 1]!, len = Math.hypot(bx - ax, by - ay)
+        for (let s = 0; s < len; s += 0.4) {
+          const x = ax + ((bx - ax) * s) / len, y = ay + ((by - ay) * s) / len
+          place(x, y, Math.atan2(by - ay, bx - ax))
+          const deck = yOf(az + ((bz - az) * s) / len) + ROAD_LIFT[roadClassOf(r)], car = (wheels!.front + wheels!.rear) / 2
+          assert.ok(Math.abs(car - deck) < 0.5 && Math.abs(feet! - deck) < 0.5, `road ${r.id} ${reverse ? "b -> a" : "a -> b"} at ${x.toFixed(1)},${y.toFixed(1)}: deck ${deck.toFixed(2)}, car ${car.toFixed(2)}, walker ${feet!.toFixed(2)}`)
+        }
+      }
+      passes++
+    }
+  }
+  assert.ok(passes >= 40, `${passes} passes`)
 })

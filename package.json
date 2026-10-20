@@ -6,6 +6,8 @@
     "test": "node --test \"src/**/*.test.ts\"",
     "check": "pnpm typecheck && pnpm lint && pnpm test",
     "map": "node src/tools/build-map.ts",
+    "fetch-osm": "node src/tools/fetch-osm.ts",
+    "fetch-rt": "node src/tools/fetch-rt.ts",
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview"

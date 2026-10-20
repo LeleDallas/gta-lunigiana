@@ -1,65 +1,132 @@
 # The map
 
 `pnpm map` runs `src/tools/build-map.ts`. It turns the pinned inputs in `data/raw` into
-`src/sim/map/monzone.json`, the only map file the game loads. The build is deterministic and takes
-about a second. It prints a lap time per stage and a summary: counts, the steepest grade per road
-class, and the size of each section. Inputs and attribution are in the [README](../README.md).
+`src/sim/map/monzone.json`, the only map file the game loads. The build is deterministic (two runs
+give byte-identical files) and takes about 3.5 s. It prints a lap time per stage and a summary:
+counts, the steepest grade per road class, and the size of each section. Inputs and attribution
+are in the [README](../README.md).
 
 `src/sim/map/kinds.ts` holds the vocabulary that the build and the game share: road classes and
-their widths, building styles, area kinds, and the tree-trunk size. It imports no data, so the
+their default widths, building styles, area kinds, and the tree-trunk size. It imports no data, so the
 build can use it before `monzone.json` exists.
 
 ## Pipeline
 
-### 1. OSM parse (`osm.ts`, `features.ts`)
+### 1. Sources (`osm.ts`, `ctr.ts`, `shp.ts`, `crs.ts`)
 
-A regex reader parses the OSM API 0.6 XML into nodes, ways and relations, and assembles
-multipolygon rings from member ways (unclosed chains are dropped). The two forest relations come
-from their own `/full` files, because the main extract lacks most of their members.
+- **OSM**: `data/raw/lunigiana.osm.gz`, written by `pnpm fetch-osm` (`src/tools/fetch-osm.ts`):
+  the play area plus 100 m in 4 × 4 API tiles (the `/map` call stops at 50 000 nodes), then every
+  multipolygon relation with a land-use, natural, building, leisure or amenity tag fetched whole
+  (`/relation/<id>/full`), because most of a forest's member ways lie outside the play area.
+  Elements are merged by id and written sorted. A regex reader parses the XML into nodes, ways
+  and relations, and assembles multipolygon rings from member ways (unclosed chains are dropped).
+  OSM gives the road network and its names, water, rail, land use, barriers, POIs and place names.
+- **CTR**: Regione Toscana's Carta Tecnica Regionale 1:2000, 2019 flight, the 16 sheets over the
+  play area (23D11–13, 23D18–21, 23D26–29, 23D34–37, 23D43). `shp.ts` reads the shapefiles;
+  `crs.ts` converts their EPSG:6707 (RDN2008 / UTM 32N) coordinates. The CTR gives the buildings
+  with their surveyed eave elevations, the road surfaces with their street names, and the area
+  each sheet maps (`ctr.ts`). The 2019 sheets map the settled valleys, about 30% of the play area;
+  the mountains between them are unmapped.
+- **LiDAR**: Regione Toscana's 1 m digital terrain model from the 2010 flight (20 tiles), in
+  EPSG:3003 (Monte Mario / Gauss-Boaga west). `crs.ts` converts with the EPSG:1660 datum shift plus
+  a residual of (−0.4, +0.5) m, fitted by matching the LiDAR surface model to the 2019 CTR building
+  outlines.
+
+`pnpm fetch-rt` (`src/tools/fetch-rt.ts`) downloads the CTR sheets and the LiDAR tiles, copies
+the shapefile layers the build reads (`AED`, `AGE`, `AVI`, `AZR`) to `data/raw/rt/ctr`, and
+mosaics the LiDAR into `data/raw/rt/dtm.bin` + `dtm.json`: cropped to the play area plus 32 m,
+averaged to 2 m cells (the game grid is 4 m), stored as int16 decimetres with each row
+delta-coded and deflated (4.3 MB).
 
 ### 2. Projection and play area (`geometry.ts`)
 
 Equirectangular around `ORIGIN` (lat 44.16175, lon 10.13), with `M_PER_DEG` = 111115.37 m per
 degree of latitude and 79987.94 m per degree of longitude. x = east, y = north, in metres, rounded
-to 0.1 m. The play area `BOUNDS` is lat 44.1555–44.1680, lon 10.1180–10.1420, which is x ±959.9 m
-and y ±694.5 m. Lines are clipped with Liang–Barsky and rings with Sutherland–Hodgman.
+to 0.1 m. The play area `BOUNDS` is x −2900…2300 m, y −694.5…3900 m (5.2 × 4.6 km; lat
+44.1555–44.1968, lon 10.0937–10.1588): Monzone and Aiola, the Lucido valley down to Gragnola on
+the Aulella, Equi Terme, Codiponte, Casciana, and the hill villages west of the Lucido (Viano,
+Pieve di Viano, Colognola, Campiglione, Vezzanello). Lines are clipped with Liang–Barsky and rings
+with Sutherland–Hodgman.
 
 ### 3. Features (`features.ts`)
 
-- **Roads**: highway classes `tertiary`, `unclassified`, `residential`, `service`, `track`,
-  `path` and `steps`. Other highway values are skipped. The width comes from the class (6.5, 5,
-  4.5, 3.5, 3, 1.5 and 2 m). The ways keep `oneway`, `bridge`, `tunnel`, `layer`, `maxheight` and
-  private access. Unnamed roads take a street name from `addr:street` votes (the nearest road to
-  most addresses with that name). This is how Via Cesare Battisti gets its name.
-- **Water**: every `waterway` except culverts. Torrente Lucido (river part) is 14 m wide, Lucido
-  and Caldanella are 8 m, other named streams 4 m, unnamed ones 2 m. Each gets a bed width and a
-  depth (2.5 m for rivers, 1.5 m for the two main streams, 1 m for the rest).
+- **Roads**: OSM highway classes `tertiary`, `unclassified`, `residential`, `service`, `track`,
+  `path` and `steps`, plus four values folded into them: `primary` (the SR445 della Garfagnana
+  through Gragnola and Codiponte, a two-lane valley road) is `tertiary`, `living_street` is
+  `residential`, `footway` and `pedestrian` are `path`. A highway way tagged `area=yes` is a
+  square, not a road (a pedestrian square becomes a `paved` area). Other highway values are
+  skipped. The ways keep `oneway`, `bridge`, `tunnel`, `layer`, `maxheight` and private access.
+  - Width, surface and name come from the CTR road surfaces (`fitRoads` in `ctr.ts`). Every 4 m
+    along a drivable road (skipping 6 m at each end), a station on a surface measures the surface
+    across the centreline. Stations with more than 10 m on either side (squares, car parks) are
+    skipped. A road with at least half its stations, and three or more, on a surface takes the
+    median width (clamped to 3–12 m), asphalt or dirt by most stations, and the street name most
+    stations share (the CTR's upper-case toponym, cased like "Via Castel dell'Aquila" and "Via
+    XX Settembre"). OSM names stay, and so do specific OSM surfaces (cobblestone, gravel). Roads
+    the CTR does not cover keep their class width (6.5, 5, 4.5, 3.5, 3, 1.5 and 2 m).
+  - Roads still unnamed take a street name from `addr:street` votes (the nearest road to most
+    addresses with that name).
+- **Water**: every `waterway` except culverts, with a water width, a gravel-bed half-width and a
+  depth. The two rivers are measured on the 2010 orthophoto:
+
+  | Water | Width | Bed half-width | Depth |
+  |---|---|---|---|
+  | Torrente Aulella (25–35 m gravel bed at Gragnola, a wooded 10 m channel at Codiponte) | 12 m | 13 m | 2.5 m |
+  | Torrente Lucido, river part (Monzone to Gragnola) | 14 m | 11 m | 2.5 m |
+  | Torrente Lucido above Monzone (Vinca branch), Torrente Caldanella (from Equi) | 8 m | 5 m | 1.5 m |
+  | other named streams | 4 m | 3 m | 1 m |
+  | unnamed streams | 2 m | 3 m | 1 m |
+
+  Other rivers would be 2.5 m deep with the stream widths.
 - **Rail**: `railway=rail` (the Lucca–Aulla line), with bridges and tunnels.
-- **Buildings**: closed ways and multipolygon relations. Height is the `height` tag clamped to
-  2.5–22 m, otherwise 6 m (ruins 2.5 m); the bell tower and a church on a spur have hand-set
-  heights. Style, in this order: `ruin`, `church`, `tower`, `station`, `industrial`, then `stone`
-  inside the three hill-village cores (Monzone Alto, Aiola, Castellaccio) and `plaster`
-  elsewhere. Plaster and stone buildings within 25 m of each other take their cluster's majority
-  style, so a hamlet never splits at a core radius. `tint` 0–3 comes from a hash of the id.
+- **Buildings**: the CTR's wherever its sheets map the ground, OSM's elsewhere (an OSM building
+  is dropped when its centroid lies in a mapped area).
+  - CTR buildings are the `AED` volumetric units plus garages and ruins from `AGE`. Each unit is
+    one building: a terrace of houses becomes one building per house, each with its own height
+    and roof. Not buildings here: overhangs, canopies, tents, porticoes, loggias and
+    semi-basements. The CTR code gives a kind and, for churches, towers, the station and
+    industrial buildings, a fixed style.
+  - Height: the surveyed eave elevation (`Qt_grmax`) minus the lowest ground under the footprint
+    (see `z0` below), when that comes to 1.5–45 m. Otherwise, and for garages and ruins (no
+    elevations), a default by kind (house 6 m, shed 2.5 m, garage 2.6 m, ruin 2.5 m...). The
+    CTR's ground elevation is not used: it disagrees with the LiDAR on a quarter of the units.
+  - A CTR building inside an OSM footprint takes that building's name, and its style when the
+    CTR only says "building" (the bell tower of San Prospero is an OSM tower).
+  - OSM buildings (outside the CTR's area, about 290 of them): height is the `height` tag clamped
+    to 2.5–22 m, otherwise 6 m (ruins 2.5 m). Style comes from the tags: `ruin`, `church`,
+    `tower`, `station`, `industrial`.
+  - Generic buildings are `stone` inside the historic cores (`STONE_CORES`, discs traced on the
+    2010 orthophoto: the dense blocks around the church or castle) and `plaster` elsewhere. The
+    cores are Monzone Alto, Aiola, the Castellaccio, Gragnola's borgo by the Lucido and the
+    Castello dell'Aquila, Equi Terme's old village under the church, Viano, Pieve di Viano,
+    Campiglione, Vezzanello, Colognola, Terma, Isolano, La Rocca di Monzone, Monte dei Bianchi,
+    Mezzana, Fazzano, La Giunca-Mozzano, Folegnano, the borgo west of Pian del Molino, Cortila,
+    La Traggiara, Codiponte's borgo south of the Aulella and Casciana. The newer houses along the
+    main roads (Molina di Equi, Pian del Molino, the SR445 in Gragnola) are plaster.
+  - Plaster and stone buildings within 25 m of each other form a hamlet; a hamlet of up to 200
+    buildings takes its majority style, so it never splits at a core radius. Bigger clusters
+    (Gragnola, Codiponte, Mezzana, Equi Terme) keep the core split, but each terrace block
+    (buildings within 6 m) takes its own majority style. `tint` 0–3 comes from a hash of the id.
 - **Areas**: landuse, leisure, amenity, railway platform, historic ruins, grassland and wood
-  polygons, mapped to `AREA_KINDS`, plus the two forest relations.
+  polygons, mapped to `AREA_KINDS`, plus pedestrian squares as `paved`. The CTR's asphalt road
+  surfaces are added as `paved` areas: squares, lay-bys and station forecourts.
 - **Barriers**: `barrier=wall`, `barrier=guard_rail` and `natural=cliff` lines.
 - **POIs**: tagged nodes (minus guideposts, level crossings, benches and most highway nodes),
   plus named polygons as centroid POIs with kind `area:<kind>`.
 
-### 4. Heightmap (`terrain.ts`, `png.ts`)
+### 4. Heightmap (`terrain.ts`)
 
-The 16 Terrarium tiles (z15) are decoded with a small PNG decoder on `node:zlib`. Elevation is
-`R × 256 + G + B / 256 − 32768` m, sampled bilinearly in local metres onto a 4 m grid over the
-bounds (481 × 349 nodes) and 3 × 3 box-blurred. Within 12 m of a tile seam, a 7-tap blur across
-the seam irons out the ~1 m creases the tiles have there. This blurred, uncarved grid is the
-"ground" every profile below samples.
+The LiDAR terrain is sampled through the projection (computed exactly on a 50 m lattice,
+bilinear in between). Each node of the 4 m grid over the bounds (1301 × 1150 nodes) is the mean
+of a 5 × 5 m square of samples. This grid is carved and flattened by the next steps; profiles and
+water sample the untouched terrain (the "ground"). Elevations run from 147 m (the Aulella below
+Gragnola) to 979 m.
 
 ### 5. River carving (`water.ts`)
 
 - The water surface is sampled every 2 m at ground − depth/2. It is made monotone downstream and
   continuous at confluences: a tributary's tail is lowered (by at most 0.25 extra slope) or ponded
-  up to the level of the water it joins.
+  up to the level of the water it joins. The Lucido meets the Aulella below Gragnola.
 - The bed is carved into the grid: depth/2 below the surface inside w/2, a gravel slope out to the
   bed width, then a one-cell bank back to the terrain.
 
@@ -68,6 +135,10 @@ the seam irons out the ~1 m creases the tiles have there. This blurred, uncarved
 - Pieces are chained through nodes where exactly two ends meet. Each chain is resampled every 4 m
   from the ground and smoothed with a moving average. Bridges and tunnels are straight between
   their ends.
+- Within each pass, the next chain profiled is the longest one that touches a node an earlier
+  chain already set, else the longest left. Elevations spread along the network from where it is
+  pinned, so a short link is not pinned at both ends by chains fitted apart (a lane in Codiponte
+  between two levels got a 93% straight line that way).
 - The profile is then fitted to a grade limit through hard pins: elevations already set at
   shared nodes by earlier chains, and rail clearance bounds. The fit is the midpoint of the two
   grade envelopes, so cut and fill split evenly.
@@ -77,9 +148,9 @@ the seam irons out the ~1 m creases the tiles have there. This blurred, uncarved
 | Pass (in order) | Grade limit | Smoothing half-window | Rank |
 |---|---|---|---|
 | rail | 2.5% | 100 m | 1 |
-| tertiary | 10% | 35 m | 0 |
-| unclassified, residential | 15% | 35 m | 2 |
-| service, track | 20% | 35 m | 3 |
+| tertiary (with the SR445) | 10% | 20 m | 0 |
+| unclassified, residential | 15% | 20 m | 2 |
+| service, track | 20% | 20 m | 3 |
 
 - Each profile is written into the grid: the core (max(w/2 + 0.5, 3) m) takes the road
   elevation, and the next 8 m blend back to the terrain. At junctions the lower rank keeps the
@@ -89,21 +160,26 @@ the seam irons out the ~1 m creases the tiles have there. This blurred, uncarved
 - Rail: level crossings meet the road at its natural level. A road under the rail keeps
   `maxheight` (4 m when untagged) plus a 1.5 m deck below it. The rail stays at least 3 m above
   the water it bridges.
+- A bridge or tunnel no profiled chain covers (paths, steps) is a straight line between its ends.
+  Under the rail both ends keep the road clearance, as in a profiled tunnel (the pedestrian
+  underpass at Equi Terme station).
 
 ### 7. Water under decks (`water.ts`)
 
 Bridges keep 2.5 m of clearance over the water: the surface is capped there, settled again
 downstream, and re-carved outside road cores. At-grade road crossings imply a culvert, where the
-water dips 0.3 m below the road. Water left perched more than 1 m above the terrain (streams that
-end at a road cut) drops to the terrain, except inside a wider channel it flows into. The grid is
-then rounded to 0.1 m and stored as integer decimetres.
+water dips 0.3 m below the road (the two fords over the Aulella, at and below Codiponte, are
+such crossings). Water left perched more than 1 m above the terrain (streams that end at a road cut)
+drops to the terrain, except inside a wider channel it flows into, and there only while it still
+runs downhill: a stream dropped into a river's carved bed never steps back up. The grid is then
+rounded to 0.1 m and stored as integer decimetres.
 
 ### 8. Collision walls (`walls.ts`)
 
 Walls are segments of at most 16 m. Blocked 4 m cells are traced with marching squares and
-simplified (Douglas–Peucker, 1.5 m tolerance). Slopes use a 12 m baseline, because the DEM
-resolves about 30 m. Steep cells are majority-filtered (3 × 3) so the walls follow real slopes,
-not DEM noise.
+simplified (Douglas–Peucker, 1.5 m tolerance). Slopes use a 12 m baseline, so shorter steps
+(terrace walls, road cuts) stop no one. Steep cells are majority-filtered (3 × 3) so the walls
+follow slopes, not single-cell bumps.
 
 | Wall source | `walk` | `drive` |
 |---|---|---|
@@ -117,47 +193,66 @@ not DEM noise.
 
 - Road buffers are padded by half a cell plus the simplification tolerance, so no traced wall
   comes within w/2 of a centreline. The carved banks of the wider streams skip the slope test.
-- Where a road centreline runs through a footprint (lanes under arches, steps), the building wall
-  is the footprint minus a corridor of min(w/2, 1.2) m half-width, rasterised at 0.2 m. The lane
-  stays open and the interior stays closed.
-- Tree trunks are not stored as walls. At load, `wallsNear` adds a 0.5 m square around each tree.
+- Where a drivable road (not a tunnel) runs through or along a footprint, the house gives way:
+  OSM centrelines and CTR footprints disagree by a metre or two, and none of these roads is
+  tagged as a passage. `clipBuildings` cuts a corridor of min(w/2, 1.2) m half-width out of the
+  footprint (rasterised at 0.2 m and traced like the walls), so the house drawn and its walls are
+  one outline. A footprint cut in two becomes two buildings with the same id; slivers under
+  4 m² are dropped. Clipped houses lose their hip roof.
+- Tunnels, paths and steps under arches only open such a corridor in the walls: the house is
+  drawn whole, the passage stays open and the interior stays closed.
+- Tree trunks are not stored as walls. `wallsNear` indexes the trees as points and adds a 0.5 m
+  square (`pushTrunk`, `TRUNK` in `kinds.ts`) around each tree a query reaches.
 
 ### 9. Road graph (`graph.ts`)
 
 Nodes come from shared OSM node ids (clip points get their own), and edges are split to at most
 25 m. Where a road leaves the play area, its end is pulled back 8 m, past the exit cap. `traffic`
 is the largest connected component of `tertiary`, `unclassified`, `residential` and `service`
-edges, minus private roads and dead-end tunnel spurs; tracks are drivable by the player but get no
-AI traffic. `walk` is the largest connected component of every edge except tunnels.
+edges (the SR445 and living streets included), minus private roads, dead-end tunnel spurs, and
+dead-end tips with no room for a car to turn (a 2.3 m circle clear of drive walls and trunks:
+lanes that end between houses); tracks are drivable by the player but get no AI traffic. `walk`
+is the largest connected component of every edge except tunnels.
 
-### 10. Trees, spawns, districts (`spawns.ts`, `build-map.ts`)
+### 10. Trees, spawns, districts (`spawns.ts`, `districts.ts`)
 
 - **Trees**: a jittered lattice at one tree per 50 m² inside forest areas. Trees stay out of other
   areas, buildings (plus 2 m), roads (w/2 + 2 m), stream beds and the rail (6 m). Sparse trees
-  also line the banks of the wider streams. Capped at 40000, with positions rounded to 1 m and a
-  scale of 0.8–1.3. Placement uses a fixed hash, not a random generator.
+  also line the banks of the wider streams. No cap: about 317 000 trees, positions rounded to 1 m
+  (at most one tree per spot) and a scale of 0.8–1.3 (2.5 MB packed). Placement uses a fixed hash, not a random generator.
 - **Player spawn**: the Via Cesare Battisti sidewalk nearest the Carabinieri station, with 1.3 m
   clear of walk and drive walls.
-- **Parked spots**: up to 100 on the right kerb of tertiary, unclassified and residential roads
-  (not bridges or tunnels), at least 12 m from junctions and 9 m from each other, with two or more
-  buildings within 40 m, off every carriageway and clear of walls. Car parks within 150 m of the
-  station add up to 6 nose-in spots each.
-- **Districts**: 14 hand-placed discs (name, centre, radius) in `build-map.ts`. `districtAt`
+- **Parked spots**: one per 8 buildings (607) on the right kerb of tertiary, unclassified and
+  residential roads (not bridges or tunnels), at least 12 m from junctions and 9 m from each
+  other, with two or more buildings within 40 m, off every carriageway (tunnels included) and
+  clear of walls. The two nearest the Carabinieri station come first (the sim parks their cars
+  there); the rest are drawn in hash order from every village's candidates, so each village gets
+  its share. Car parks within 150 m of Monzone station add up to 6 nose-in spots each (615
+  spots in all). The sim decides how many cars to park on them.
+- **Districts** (`districts.ts`): 14 hand-placed discs (name, centre, radius) for Monzone's
+  station, streets and hill clusters, then a disc per OSM `village` and `hamlet` node outside
+  them (20: Gragnola, Equi Terme, Viano, Colognola, Campiglione...). A `locality` (a named
+  hillside or field, like I Pianelli above Equi Terme) gets none: it would claim the village's
+  station and spa. Each building
+  outside Monzone's discs goes to the nearest place node within 600 m; the place's disc is centred
+  on its node and covers 90% of those buildings plus 10 m, clamped to 80–400 m. `districtAt`
   picks the disc the point is relatively closest to, or the nearest rim outside every disc.
 
 ## JSON format
 
-`MonzoneMap` in `src/sim/map/index.ts` is the schema. Polylines and rings are flat
-`[x0, y0, x1, y1, ...]` arrays. Rings are open: outer rings counter-clockwise, holes clockwise.
+`MonzoneMapJson` in `src/sim/map/index.ts` is the schema of the file, `MonzoneMap` the decoded
+map the game reads. Polylines and rings are flat `[x0, y0, x1, y1, ...]` arrays. Rings are open:
+outer rings counter-clockwise, holes clockwise. About 10.6 MB: heightmap 3.9 MB, trees 2.5 MB,
+walls 2.0 MB, buildings 0.8 MB.
 
 | Field | Contents |
 |---|---|
 | `version` | `1` |
 | `origin`, `mPerDeg` | projection origin (lat, lon) and metres per degree |
 | `bounds` | play area `minX`, `minY`, `maxX`, `maxY` (m) |
-| `heightmap` | `cell` (4 m), `cols`, `rows`, `x0`, `y0`, `data`: integer decimetres, row-major, row 0 = south |
+| `heightmap` | `cell` (4 m), `cols`, `rows`, `x0`, `y0`, `data`: packed integer decimetres, row-major, row 0 = south |
 | `roads` | `id`, `cls`, `name?`, `ref?`, `w`, `surface`, `oneway?`, `bridge?`, `tunnel?`, `layer?`, `pts`, `z` (surface elevation per vertex) |
-| `buildings` | `id`, `kind`, `name?`, `h` (wall height), `z0` (lowest ground under the footprint), `style`, `ruins?`, `tint`, `outer`, `holes?` |
+| `buildings` | `id` (OSM id, or negative for the CTR), `kind`, `name?`, `h` (wall height above `z0`), `z0` (lowest ground under the footprint), `style`, `ruins?`, `tint`, `outer`, `holes?` |
 | `water` | `id`, `kind` (`river` or `stream`), `name?`, `w`, `pts`, `z` (water surface per vertex) |
 | `rail` | `id`, `bridge?`, `tunnel?`, `pts`, `z` (rail top per vertex) |
 | `areas` | `kind` (one of `AREA_KINDS`), `name?`, `rings` (outer first, then holes) |
@@ -165,9 +260,15 @@ AI traffic. `walk` is the largest connected component of every edge except tunne
 | `pois` | `id`, `kind` (`key=value` or `area:<kind>`), `name?`, `x`, `y` |
 | `districts` | `name`, `x`, `y`, `r` |
 | `graph` | `xy` (node coordinates), `edges` (flat `a, b, roadIndex` triples), `traffic`, `walk` (edge indices) |
-| `walls` | `walk`, `drive`: flat `ax, ay, bx, by` segments |
-| `trees` | flat `x, y, scale` triples |
+| `walls` | `walk`, `drive`: packed `ax, ay, bx, by` segments |
+| `trees` | packed `x, y, scale` triples |
 | `spawns` | `player` and `parked`: `{ x, y, angle }` |
+
+The packed sections are base64 strings of little-endian 16-bit integers (`src/tools/pack.ts`
+encodes, `src/sim/map/packed.ts` decodes; the build throws if a value does not fit). The
+heightmap is int16 decimetres with each row delta-coded from its first node. Walls and trees are
+uint16 decimetres from a point 100 m south-west of the bounds' corner; a tree's scale is in
+hundredths. Decoding is exact: the same numbers a one-decimal JSON array would give.
 
 Profiled roads and rail carry extra points where the elevation bends between OSM vertices (dips
 under the rail, crests). Graph edges run a → b in the OSM way direction, so a `oneway` road may
@@ -177,32 +278,44 @@ reads the raw JSON.
 
 ## Checks and tools
 
-`src/sim/map/map.test.ts` checks the built map: heightmap coverage, spawns clear of walls and
-off traffic lanes, no walls on roads, closed building interiors, one traffic component reaching
-the station and Monzone Alto, grades within 1.5× the class limits, bridge and underpass
-clearances, no perched water, and valid names, classes, styles, area kinds and districts. Run
-`pnpm test` after every `pnpm map`.
+`src/sim/map/map.test.ts` checks the built map in about 2.5 s: heightmap coverage, spawns clear
+of walls and off traffic lanes (with parking in each of the five new villages), no walls on
+roads, no drivable road inside a footprint, closed building interiors, one traffic component
+reaching the station, Monzone Alto, Equi Terme, Gragnola, Colognola, Campiglione and Viano,
+grades within 1.5× the class limits, bridge and underpass clearances, no perched water, and
+valid names, classes, styles, area kinds and districts (each of those five villages is its own
+HUD name, Equi Terme's station and spa included; CTR street names cased like "Via XX Settembre"
+and "Via Castel dell'Aquila"). Run `pnpm test` after every `pnpm map`.
 
 `node src/tools/preview-map.ts [pxPerM=1] [minX,minY,maxX,maxY] [out.png]` draws a top-down PNG of
 the built map. It writes `.research/map-preview.png` by default.
 
 ## Known data limitations
 
-- **Elevation is coarse.** The Terrarium data resolves about 30 m (consistent with a 1″ source
-  such as SRTM or EU-DEM), and zoom 15 is the highest level available. The 4 m grid oversamples
-  it, the blur hides the facets, and slopes come from a 12 m baseline. Cliffs and terraces
-  smaller than that are missing.
-- **Roads and rivers are not in the DEM.** Along SP10 the raw DEM gives local grades of 17–33%
-  where the road really climbs about 5% (cross-slope noise from a hillside cut narrower than the
-  DEM resolution), and the river's raw profile goes up and down. Profiles and carving synthesise
-  both. Where the terrain forces it, a road's grade is relaxed up to 1.5× its class limit.
-- **Paths and steps follow the raw terrain.** They can be very steep (the summary prints the
-  worst grade per class).
-- **Building data is sparse.** Most buildings have no `height` tag (default 6 m) and none have
-  roof tags, so roofs are procedural (`src/render/roof.ts`: hip roof when the footprint nearly
-  fills its minimum-area rectangle, flat otherwise).
-- **Some names only exist on addresses** (Via Cesare Battisti). The vote can pick the wrong piece
-  of road. Culverted waterways are dropped; at-grade crossings imply a culvert instead.
-- **The extract ends at 44.168 N and 10.118 E.** The hamlets just beyond (Monte dei Bianchi,
-  Mezzana, Isolano) are not in the map. Re-downloading pulls newer OSM edits and changes the map;
-  `data/raw` is the source of truth.
+- **The terrain is 4 m.** The LiDAR resolves 1 m (stored at 2 m), but the game grid averages it
+  over 4 m cells: terrace walls, steps and narrow road benches are smoothed into slopes. Slopes
+  come from a 12 m baseline. The LiDAR is from 2010, so earthworks since then are missing.
+- **Roads are profiled, not copied.** Road surfaces follow the LiDAR within 0.5 m on Monzone's
+  provincial roads (90th percentile), but the steep lanes of the hill villages are steeper than
+  the 15% class limit and are fitted up to 3 m off the terrain there. Bridges come from the OSM
+  tags: the LiDAR terrain has no decks.
+- **Paths and steps follow the terrain.** They can be very steep (the summary prints the worst
+  grade per class). Footways and pedestrian lanes are paths, so the HUD does not name them (Via
+  Buca in Equi Terme).
+- **Roofs are procedural** (`src/render/roof.ts`: hip roof when the footprint nearly fills its
+  minimum-area rectangle, flat otherwise): the CTR gives eave heights, not roof shapes. Small
+  units (stairwells, extensions) are separate buildings, so roofs step where the real ones do,
+  but every unit gets its own roof.
+- **The CTR is from 2019** and maps only the settled valleys; OSM fills the rest (about 290
+  buildings). Road widths fall back to the class width where the CTR has no road surface (parts
+  of the SR445 keep 6.5 m), and a surface that spans several streets lends its name to all of them.
+- **Facade styles are a judgement.** The stone cores are discs traced by eye on the orthophoto;
+  many old houses in the cores are plastered in reality, and a whole hamlet of up to 200
+  buildings takes one style.
+- **River widths are one value per river.** The Aulella's 12 m water and 26 m bed fit Gragnola
+  better than the wooded channel at Codiponte; the gravel bars of the Lucido at Pian del Molino
+  are wider than its 22 m bed. The LiDAR still shapes the banks.
+- **Some names only exist on addresses.** The vote can pick the wrong piece of road. Culverted
+  waterways are dropped; at-grade crossings imply a culvert instead.
+- **Re-downloading changes the map.** `pnpm fetch-osm` pulls current OSM edits; `data/raw` is the
+  source of truth.

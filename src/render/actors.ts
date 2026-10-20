@@ -116,8 +116,8 @@ export class ActorNode extends Group {
   readonly xray: Mesh
   /** Body length along local +X, metres (vehicles pitch over it). */
   readonly length: number
-  /** Render height last frame (keeps the actor on the deck or lane it was on). */
-  elevation: number | undefined = undefined
+  /** A vehicle's render heights under its front and rear last frame (each wheel stays on the deck or lane it was on). */
+  wheels: { readonly front: number; readonly rear: number } | undefined = undefined
   constructor(geometry: BufferGeometry, material: Material, proxy: Mesh, length: number) {
     super()
     this.length = length
@@ -136,6 +136,8 @@ export class ActorNode extends Group {
 /** A person node: walk frames swap as it covers ground. */
 export class PersonNode extends ActorNode {
   readonly frames: readonly [BufferGeometry, BufferGeometry, BufferGeometry]
+  /** Render height last frame (keeps the person on the deck or lane they were on). */
+  elevation: number | undefined = undefined
   /** Metres walked (drives the frame) and where it was last frame. */
   walked = 0
   last: { x: number; y: number } | undefined = undefined

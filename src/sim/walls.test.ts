@@ -4,17 +4,42 @@ import { test } from "node:test"
 import { Ops, Vec2 } from "@typeonce/ritmo-math"
 
 import { carClear, crossesAny, wallsAlong } from "./body.ts"
-import { graph } from "./map/index.ts"
-import { laneOf, lanePoint, laneSide, nearestEdge, roadOf, walkSide } from "./route.ts"
+import { graph, MAP, wallsNear } from "./map/index.ts"
+import { pushTrunk } from "./map/kinds.ts"
+import { edgeIndex, facesForward, laneOf, lanePoint, laneSide, roadOf, walkIndex, walkSide } from "./route.ts"
 import { parkedCar, pedestrian } from "./spawning.ts"
-import { battistiTraffic, door, ON_BATTISTI, press, rolling, start, walkClear } from "./testing.ts"
+import { BATTISTI, battistiTraffic, door, ON_BATTISTI, press, rolling, start, walkClear } from "./testing.ts"
 import { PERSON_RADIUS } from "./tuning.ts"
 import { VEHICLES } from "./vehicles.ts"
 
+// Trees are indexed as points and their trunk squares made on query: the broad phase must still return them.
+test("wallsNear: a box touching only the corner of a tree's trunk square returns its four edges", () => {
+  const trees = MAP.trees.length / 3
+  assert.ok(trees > 1000, `${trees} trees`)
+  const square: Array<number> = []
+  pushTrunk(square, 0, 0)
+  const reach = Math.max(...square)
+  // Every tenth tree: hundreds of them have a corner box in a grid cell the tree is not in.
+  for (let i = 0; i < trees; i += 10) {
+    const x = MAP.trees[3 * i]!, y = MAP.trees[3 * i + 1]!
+    square.length = 0
+    pushTrunk(square, x, y)
+    for (const [minX, minY, maxX, maxY] of [[x + reach, y + reach, x + reach + 0.5, y + reach + 0.5], [x - reach - 0.5, y - reach - 0.5, x - reach, y - reach]] as const) {
+      for (const kind of ["walk", "drive"] as const) {
+        let edges = 0 // one bit per edge of the square
+        for (const s of wallsNear(kind, minX, minY, maxX, maxY)) {
+          for (let k = 0; k < 16; k += 4) if (s.ax === square[k] && s.ay === square[k + 1] && s.bx === square[k + 2] && s.by === square[k + 3]) edges |= 1 << (k / 4)
+        }
+        assert.equal(edges, 0b1111, `${kind}: tree ${i} at ${x},${y}`)
+      }
+    }
+  }
+})
+
 // Regressions: nothing (pushed, thrown, shoved, getting out, turning) ends up inside a building.
 
-/** A house wall, (-429.5, 452.8) -> (-420.3, 449.8), the house to its north. */
-const A = { x: -429.5, y: 452.8 }, B = { x: -420.3, y: 449.8 }
+/** A house wall on Via Cesare Battisti, (-435.2, 453.9) -> (-424.5, 451.9), the house to its north. */
+const A = { x: -435.2, y: 453.9 }, B = { x: -424.5, y: 451.9 }
 const LENGTH = Vec2.distance(A, B)
 const ALONG = { x: (B.x - A.x) / LENGTH, y: (B.y - A.y) / LENGTH }
 const INTO = { x: -ALONG.y, y: ALONG.x }
@@ -32,7 +57,7 @@ const LOOK = { skin: 0xc68e6a, hair: 0x2b1d14, shirt: 0xb8312b, pants: 0x1d2b4f 
 test("contacts: a car pushing or knocking a pedestrian against a house wall never puts them through it", () => {
   for (const speed of [2.5, 8]) {
     const at = { ...facing(0.4), angle: 0 }
-    const walker = pedestrian(LOOK, at, { edge: nearestEdge(graph.walkEdges, at.x, at.y), forward: true, side: 0 }, { mood: "walk", until: 0 })
+    const walker = pedestrian(LOOK, at, { edge: walkIndex.nearest(at.x, at.y), forward: true, side: 0 }, { mood: "walk", until: 0 })
     const { run, world } = start([], [FAR, { cars: [rolling("panda", { ...facing(4), angle: TOWARD }, speed, speed > 5 ? 1 : 0.3)], peds: [walker] }])
     const { peds: [{ id: pedId }], vehicles: [{ id: carId }] } = world()
     const ped = () => world().peds.find((p) => p.id === pedId)!
@@ -95,8 +120,8 @@ test("enter: a car on the other side of a wall cannot be entered, and the HUD of
 })
 
 test("traffic: a car held up by a car parked in its lane turns round by its second try", () => {
-  const lane = laneOf(7, true)
-  const blocker = { ...lanePoint(lane, 15, laneSide({ edge: 7, forward: true }, "panda")), angle: ON_BATTISTI.angle }
+  const lane = laneOf(BATTISTI.edge, BATTISTI.forward)
+  const blocker = { ...lanePoint(lane, 15, laneSide(BATTISTI, "panda")), angle: ON_BATTISTI.angle }
   const { run, world } = start([], [FAR, { cars: [parkedCar("panda", 0x3d6155, blocker)], traffic: [battistiTraffic(0xd4a85e)] }])
   const id = world().vehicles.find((v) => v.traffic)!.id
   // Routed and pointing back down the lane; how far it gets then depends on the traffic Populate sends the other way.
@@ -110,13 +135,13 @@ test("traffic: a car held up by a car parked in its lane turns round by its seco
 
 test("pedestrians: a walker whose verge is blocked by a parked car gets past it", () => {
   // Via Cesare Battisti by the Carabinieri: both verges clear for 20 m.
-  const lane = laneOf(9, true)
-  const side = walkSide(roadOf(9))
+  const lane = laneOf(BATTISTI.edge, BATTISTI.forward)
+  const side = walkSide(roadOf(BATTISTI.edge))
   const heading = Ops.atan2(lane.dy, lane.dx)
   const at = { ...lanePoint(lane, 2, side), angle: heading }
   const blocker = { ...lanePoint(lane, 8, side), angle: heading }
   assert.ok(walkClear(at) && carClear("panda", blocker), "a clear verge to stage on")
-  const walker = pedestrian(LOOK, at, { edge: 9, forward: true, side }, { mood: "walk", until: 0 })
+  const walker = pedestrian(LOOK, at, { ...BATTISTI, side }, { mood: "walk", until: 0 })
   const { run, world } = start([], [FAR, { cars: [parkedCar("panda", 0x3d6155, blocker)], peds: [walker] }])
   const id = world().peds[0]!.id
   let progress = 0
@@ -125,4 +150,24 @@ test("pedestrians: a walker whose verge is blocked by a parked car gets past it"
     progress = Math.max(progress, (ped.x - lane.x) * lane.dx + (ped.y - lane.y) * lane.dy)
   })
   assert.ok(progress > 11, `walked ${progress} m along`)
+})
+
+// Regression: the sideways step after trying the other verge counted as progress, so a walker wedged in a house corner
+// switched verge every 0.5 s on the spot for good, never turning back (and never stranded enough for Populate to take it).
+test("pedestrians: a walker wedged in a house corner on its verge turns back", () => {
+  // Via della Vittoria in Campiglione, southbound on the east verge: a house corner stops it 1.7 m on.
+  const edge = edgeIndex(graph.walkEdges.filter((e) => roadOf(e).name === "Via della Vittoria")).nearest(-2202, 1574)
+  const forward = !facesForward(edge, Math.PI / 2)
+  const lane = laneOf(edge, forward), side = -walkSide(roadOf(edge))
+  const at = { ...lanePoint(lane, 17, side), angle: Ops.atan2(lane.dy, lane.dx) }
+  assert.ok(walkClear(at))
+  // The player 100 m away: out of view, so nothing but the walls moves the walker.
+  const { run, world } = start([], [{ x: at.x + 100, y: at.y, angle: 0 }, { peds: [pedestrian(LOOK, at, { edge, forward, side }, { mood: "walk", until: 0 })] }])
+  const id = world().peds[0]!.id
+  let away = 0
+  run(600, () => {
+    const ped = world().peds.find((p) => p.id === id)
+    if (ped !== undefined) away = Math.max(away, Vec2.distance(ped, at))
+  })
+  assert.ok(away > 3, `stayed within ${away.toFixed(2)} m`)
 })

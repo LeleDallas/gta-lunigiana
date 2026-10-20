@@ -2,8 +2,7 @@ import { Clock } from "@typeonce/ritmo"
 import { Ops, Random, Vec2 } from "@typeonce/ritmo-math"
 
 import { clearOf, vehicleInReach, walkBy, wallsAlong } from "../body.ts"
-import { graph } from "../map/index.ts"
-import { facesForward, laneOf, nearestEdge, roadOf, walkSide } from "../route.ts"
+import { facesForward, laneOf, roadOf, walkIndex, walkSide } from "../route.ts"
 import {
   Autopilot, CarInput, Down, Driving, Game, Input, Motion, Pedestrian, Person, Player, Pose, type PoseValue, PrevPose, Rng, Route, Score, Stolen,
   Time, Traffic, Vehicle
@@ -101,7 +100,7 @@ export const EnterExit = Game.System("Lunigiana/EnterExit", {
     const pose = near.data.pose.get()
     const door = freeDoor(pose, near.data.vehicle.get().model)
     if (door === undefined) continue
-    const edge = nearestEdge(graph.walkEdges, door.x, door.y)
+    const edge = walkIndex.nearest(door.x, door.y)
     const forward = facesForward(edge, pose.angle)
     const lane = laneOf(edge, forward)
     // The verge on the door's side of the car, so the driver does not run back through it.

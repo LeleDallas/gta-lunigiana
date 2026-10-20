@@ -7,11 +7,13 @@ export interface V { readonly x: number; readonly y: number; readonly id?: strin
 
 export const ORIGIN = { lat: 44.16175, lon: 10.13 }
 export const M_PER_DEG = { lat: 111115.37, lon: 79987.94 }
-/** Play area lat 44.1555-44.1680, lon 10.1180-10.1420 in local metres (rounded to 0.1 m). */
-export const BOUNDS = { minX: -959.9, minY: -694.5, maxX: 959.9, maxY: 694.5 }
+/** Play area, local metres: lat 44.1555–44.1969, lon 10.0937–10.1588 (Monzone, Equi Terme, Gragnola, Viano...). */
+export const BOUNDS = { minX: -2900, minY: -694.5, maxX: 2300, maxY: 3900 }
 
 export const r1 = (v: number): number => Math.round(v * 10) / 10
 export const toLocal = (lat: number, lon: number): P => [(lon - ORIGIN.lon) * M_PER_DEG.lon, (lat - ORIGIN.lat) * M_PER_DEG.lat]
+/** Inverse of `toLocal`: [lat, lon]. */
+export const fromLocal = (x: number, y: number): [number, number] => [ORIGIN.lat + y / M_PER_DEG.lat, ORIGIN.lon + x / M_PER_DEG.lon]
 export const inBounds = (x: number, y: number, margin = 0): boolean =>
   x >= BOUNDS.minX + margin && x <= BOUNDS.maxX - margin && y >= BOUNDS.minY + margin && y <= BOUNDS.maxY - margin
 
@@ -74,7 +76,7 @@ export const clipRing = (ring: ReadonlyArray<P>): Array<P> => {
   return [...poly]
 }
 
-const signedArea = (r: ReadonlyArray<P>): number => {
+export const signedArea = (r: ReadonlyArray<P>): number => {
   let s = 0
   for (let i = 0; i < r.length; i++) {
     const p = r[i]!, q = r[(i + 1) % r.length]!
@@ -100,15 +102,21 @@ export const flatRing = (ring: ReadonlyArray<P>, ccw: boolean): Array<number> | 
 
 export const flatLine = (pts: ReadonlyArray<V>): Array<number> => pts.flatMap((p) => [r1(p.x), r1(p.y)])
 
-export const pointInRing = (x: number, y: number, ring: ReadonlyArray<number>): boolean => {
-  let inside = false
-  const n = ring.length / 2
-  for (let i = 0, j = n - 1; i < n; j = i++) {
-    const xi = ring[2 * i]!, yi = ring[2 * i + 1]!, xj = ring[2 * j]!, yj = ring[2 * j + 1]!
-    if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside
-  }
-  return inside
+/** Vertex mean of a flat ring. */
+export const centroid = (ring: ReadonlyArray<number>): P => {
+  let cx = 0, cy = 0
+  for (let i = 0; i < ring.length; i += 2) [cx, cy] = [cx + (2 * ring[i]!) / ring.length, cy + (2 * ring[i + 1]!) / ring.length]
+  return [cx, cy]
 }
+
+/** Bounding box [x0, y0, x1, y1] of a flat ring or polyline. */
+export const ringBox = (ring: ReadonlyArray<number>): [number, number, number, number] => {
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity
+  for (let i = 0; i + 1 < ring.length; i += 2) [x0, y0, x1, y1] = [Math.min(x0, ring[i]!), Math.min(y0, ring[i + 1]!), Math.max(x1, ring[i]!), Math.max(y1, ring[i + 1]!)]
+  return [x0, y0, x1, y1]
+}
+
+export { pointInRing } from "../sim/collide.ts"
 
 /** Squared distance from (px,py) to segment a-b and the projection parameter t in [0,1]. */
 export const segDist2 = (px: number, py: number, ax: number, ay: number, bx: number, by: number): { d2: number; t: number } => {

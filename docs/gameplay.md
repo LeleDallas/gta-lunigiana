@@ -6,10 +6,11 @@ All rules are simulation systems in `src/sim/systems`. The step order is in
 ## Start
 
 `SpawnWorld` puts the player on the Via Cesare Battisti sidewalk in front of the Carabinieri
-station. The two parked spots nearest the station get Carabinieri cars. 43 more cars fill
-randomly chosen parked spots, about 80% Pandas and 20% Apes. On a tertiary-road spot where it
-fits, a roll under 10% makes a marble truck instead, at most two of them. The world's `Rng` makes
-every choice, so `?seed=N` replays the same start.
+station. 150 of the map's parked spots (`PARKED`) get a car, picked at random, so the cars spread
+over the villages as the spots do. The two spots nearest the station get Carabinieri cars. The rest
+are randomly chosen spots, about 80% Pandas and 20% Apes. On a tertiary-road spot where it fits,
+a roll under 10% makes a marble truck instead, at most two of them. The world's `Rng` makes every
+choice, so `?seed=N` replays the same start.
 
 ## On foot
 
@@ -86,9 +87,12 @@ the lane helpers in `src/sim/route.ts`.
 
 - **Keep right.** The lane offset is w/4 + 0.2 m on roads at least 5 m wide, otherwise 0.5 m. It
   shrinks in 0.25 m steps where houses crowd the road, until the body clears the walls. Each model
-  has its own lane table. A model only uses edges where it fits, and only the largest connected
-  part of them. Trucks keep to tertiary and unclassified roads and to the loops of that network,
-  because they cannot turn round.
+  has its own lane table. A model only uses edges where it fits, and where the drive walls across
+  the road leave room for it and an oncoming Panda plus 0.3 m (`PASS_MARGIN`): in single-file
+  lanes between houses two cars met head-on with no room to back out or turn round. It only uses
+  the largest connected part of those edges, so villages reached only by such lanes (Terma, Monte
+  dei Bianchi, Vezzanello) get no AI traffic; the player can still drive there. Trucks keep to
+  tertiary and unclassified roads and to the loops of that network, because they cannot turn round.
 - **Steering.** The car aims at a point 6 m + 0.6 s × speed ahead along this edge and the next.
 - **Route choice.** At each node the car picks a random legal edge. Oneways are driven a → b only.
   It avoids dead-end spurs, then hairpins, while another way exists, and makes a U-turn only at a
@@ -99,7 +103,10 @@ the lane helpers in `src/sim/route.ts`.
   person, slows the car to keep a 2 m gap. Standing still, it holds the handbrake.
 - **Unsticking.** A car stuck below 1 m/s for 3 s reverses for 1.5 s at 3 m/s. If it is lined up
   with its lane, it may turn round: half the time when the way back is not a dead end, always
-  from its second try, never on a oneway.
+  from its second try, never on a oneway. Waiting for a person in the way (ahead of the bumper,
+  on the carriageway) counts four times slower: the car holds about 12 s for them to move on,
+  then backs up and turns round like for anything else. A person beside the car or off the road
+  counts like any other obstacle.
 - **Lost.** A car more than 12 m from its edge joins the nearest usable road.
 
 ## Pedestrians
@@ -111,8 +118,9 @@ the lane helpers in `src/sim/route.ts`.
   ends.
 - A vehicle faster than 10 m/s passing within 5 m scares a walker. The walker then runs at
   4.5 m/s along its route, away from the car, for 4 s.
-- When blocked (making less than half the wanted progress), they try the other verge after 0.5 s,
-  then turn back, alternating.
+- When blocked (making less than half the wanted progress along the lane), they try the other
+  verge after 0.5 s, then turn back, alternating. Stepping across to the other verge is progress;
+  sliding sideways along a wall that blocks the way is not.
 - Knocked down, they slide to a stop.
 
 ## Knockdowns and score
@@ -148,6 +156,9 @@ farther than `VIEW_REACH` (90 m, the farthest ground the camera shows).
 | Despawn beyond | 320 m | 140 m |
 | Also despawned, once beyond 90 m | more than 12 m off its road, or 4 unstick tries | blocked for more than 5 s |
 
+- Pedestrians only spawn on walk edges with a building within 50 m of the edge's midpoint
+  (`PEOPLED`): the villages and hamlets, not the woods and fields between them. They never spawn
+  inside a building, where a verge runs into houses that crowd the road.
 - New traffic is 75% Pandas, 15% Apes and 10% trucks, falling back to a smaller model where one
   does not fit. It spawns at least 15 m from any vehicle and clear of walls, heads out of dead-end
   spurs, and starts at 0.6 × cruising speed.
@@ -161,13 +172,15 @@ farther than `VIEW_REACH` (90 m, the farthest ground the camera shows).
 | `src/sim/tuning.ts` | `ENTER_GAP`, `PERSON_RADIUS`, `WALK_SPEED`, `SPRINT_SPEED`, `KNOCK_SPEED` |
 | `src/sim/vehicles.ts` | `VEHICLES` handling table, `CAR_COLORS` |
 | `src/sim/view.ts` | `SCREEN_UP`, `SCREEN_RIGHT`, `LOOK_AHEAD`, `VIEW_REACH` |
-| `src/sim/route.ts` | lane offsets, pedestrian verge, `cruiseSpeed`, truck road classes, hairpin limit |
-| `src/sim/systems/populate.ts` | `TRAFFIC`, `PEDESTRIANS` population limits, spawn model mix |
-| `src/sim/systems/spawn.ts` | parked car count (`PARKED`), trucks (`TRUCKS`) |
+| `src/sim/route.ts` | lane offsets, passing room (`PASS_MARGIN`), pedestrian verge, `cruiseSpeed`, truck road classes, hairpin limit |
+| `src/sim/systems/populate.ts` | `TRAFFIC`, `PEDESTRIANS` population limits, `PEOPLED` (where pedestrians spawn), spawn model mix |
+| `src/sim/systems/spawn.ts` | parked cars (`PARKED`), trucks (`TRUCKS`) |
 | `src/sim/systems/*.ts` | each system's own constants at the top of its file (physics, traffic, pedestrians, contacts, foot, enter/exit) |
 | `src/sim/map/kinds.ts` | road widths and which classes carry traffic, the player's car, or only people |
 | `src/render/pipeline.ts` | `zoomFor` zoom levels |
 
 Gameplay changes need a test: the scenario tests in `src/sim/index.test.ts` and
-`src/sim/walls.test.ts` stage exact situations with `src/sim/testing.ts`. Re-run `pnpm check`
+`src/sim/walls.test.ts` stage exact situations with `src/sim/testing.ts`. Fixtures find map
+features by geometry, never by index (`BATTISTI` is the Via Cesare Battisti traffic edge nearest
+(-412, 438), eastbound), so they survive map rebuilds. Re-run `pnpm check`
 after any change.

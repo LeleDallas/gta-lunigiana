@@ -1,12 +1,16 @@
 import { Random, Vec2 } from "@typeonce/ritmo-math"
 
 import { carClear } from "../body.ts"
-import { graph, MAP, roadClassOf } from "../map/index.ts"
-import { nearestEdge, roadOf } from "../route.ts"
+import { MAP, roadClassOf } from "../map/index.ts"
+import { roadOf, trafficIndex } from "../route.ts"
 import { CarInput, Game, Motion, Person, Player, Pose, PrevPose, Rng, Vehicle } from "../schema.ts"
 import { parkedCar, randomColor } from "../spawning.ts"
 
-const PARKED = 45
+/**
+ * Parked cars at setup, Carabinieri included: this many of the map's parked spots, picked at random so they
+ * spread over the villages as the spots do (every vehicle costs a little in Contacts and TrafficAI each step).
+ */
+export const PARKED = 150
 const TRUCKS = 2
 const CARABINIERI_BLUE = 0x1d2b4f
 
@@ -15,8 +19,8 @@ const byPolice = police === undefined ? [] : [...MAP.spawns.parked]
   .sort((a, b) => Vec2.distanceSquared(a, police) - Vec2.distanceSquared(b, police))
   .slice(0, 2)
 const civilian = MAP.spawns.parked.filter((s) => !byPolice.includes(s))
-const onTertiary = (s: Vec2.Vec2) =>
-  roadClassOf(roadOf(nearestEdge(graph.trafficEdges, s.x, s.y))) === "tertiary"
+const parkedCount = Math.min(PARKED, MAP.spawns.parked.length)
+const onTertiary = (s: Vec2.Vec2) => roadClassOf(roadOf(trafficIndex.nearest(s.x, s.y))) === "tertiary"
 
 /** Setup: the player at the map spawn, the Carabinieri at their station, and parked cars picked with the world's Rng. */
 export const SpawnWorld = Game.System("Lunigiana/SpawnWorld", {
@@ -34,7 +38,7 @@ export const SpawnWorld = Game.System("Lunigiana/SpawnWorld", {
   ))
   for (const spot of byPolice) commands.spawn(parkedCar("carabinieri", CARABINIERI_BLUE, spot))
   let trucks = 0
-  for (const spot of random.shuffle(civilian).slice(0, PARKED - byPolice.length)) {
+  for (const spot of random.shuffle(civilian).slice(0, parkedCount - byPolice.length)) {
     const roll = random.next()
     const truck = trucks < TRUCKS && roll < 0.1 && onTertiary(spot) && carClear("truck", spot)
     if (truck) trucks++

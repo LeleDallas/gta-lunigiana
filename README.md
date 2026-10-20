@@ -4,9 +4,12 @@ A small GTA-like game set in Monzone, a village in the comune of Fivizzano (Mass
 You walk the streets, steal parked cars, carjack traffic and knock pedestrians over. The view is a
 fixed isometric camera with a low-resolution pixel-art look.
 
-The map is the real village. It is generated from OpenStreetMap and an elevation model: roads,
-buildings, the Lucido and Caldanella streams, the Lucca–Aulla railway, woods and terrain are all in
-their real places, about 1.9 × 1.4 km around the station and Monzone Alto.
+The map is the real valley, about 5.2 × 4.6 km: Monzone and Aiola, the Lucido down to Gragnola on
+the Aulella, Equi Terme, Codiponte and Casciana, and the hill villages west of the Lucido (Viano,
+Pieve di Viano, Colognola, Campiglione, Vezzanello). Roads (with the SR445 della Garfagnana), the
+Aulella, Lucido and Caldanella, the Lucca–Aulla railway, woods and place names come from
+OpenStreetMap. Buildings (with their surveyed eave heights), road widths and surfaces come from
+Regione Toscana's 1:2000 technical map (2019), and the terrain from its 1 m LiDAR survey (2010).
 
 ## Requirements
 
@@ -52,6 +55,8 @@ a minimap.
 | `pnpm lint` | `oxlint` with the Ritmo plugin, then `ritmo-devtools lint src/sim/index.ts` |
 | `pnpm test` | `node --test` over `src/**/*.test.ts` |
 | `pnpm map` | rebuilds `src/sim/map/monzone.json` from `data/raw` |
+| `pnpm fetch-osm` | downloads the OpenStreetMap extract again into `data/raw/lunigiana.osm.gz` |
+| `pnpm fetch-rt` | downloads the Regione Toscana sources again into `data/raw/rt` |
 
 ## Layout
 
@@ -62,10 +67,10 @@ a minimap.
 | `src/sim/map/` | the generated map (`monzone.json`), its types and lookups (heights, walls, road graph) |
 | `src/render/` | Three.js host code: pixel pipeline, static world meshes, actor meshes, the render schedule |
 | `src/hud/` | DOM HUD: location names, score, prompt, speedometer, minimap |
-| `src/tools/` | the map pipeline (`build-map.ts`) and a top-down preview renderer |
+| `src/tools/` | the map pipeline (`build-map.ts`), the downloaders (`fetch-osm.ts`, `fetch-rt.ts`) and a top-down preview renderer |
 | `src/main.ts` | browser host: builds the scene, makes the runtime, runs the fixed loop |
 | `index.html` | canvas, HUD markup and title card |
-| `data/raw/` | pinned map inputs: OSM extract, forest relations, elevation tiles |
+| `data/raw/` | pinned map inputs: OSM extract, Regione Toscana CTR and LiDAR |
 | `docs/` | architecture, map pipeline and gameplay notes |
 
 ## Rebuilding the map
@@ -74,21 +79,29 @@ a minimap.
 pnpm map
 ```
 
-The build reads only `data/raw` and takes about a second. Its output is deterministic: with the
-same inputs, `monzone.json` comes out byte-identical. Never edit `monzone.json` by hand.
+The build reads only `data/raw` and takes about 3.5 s. Its output is deterministic: with the
+same inputs, `monzone.json` (about 10.6 MB) comes out byte-identical. Never edit `monzone.json`
+by hand.
 
 Inputs in `data/raw`:
 
-- `monzone.osm`: an OpenStreetMap API 0.6 extract for lat 44.150–44.168, lon 10.118–10.142
-  (`https://api.openstreetmap.org/api/0.6/map?bbox=10.118,44.150,10.142,44.168`).
-- `rel/3009596.osm` (`landuse=forest`) and `rel/9736893.osm` (`natural=wood`): the two forest
-  multipolygons, fetched whole with `https://api.openstreetmap.org/api/0.6/relation/<id>/full`.
-  Most of their member ways lie outside the extract, so they cannot be assembled from it.
-- `terrarium/15_<x>_<y>.png`: 16 Terrarium elevation tiles at zoom 15, x 17304–17307 and
-  y 11893–11896, from `https://s3.amazonaws.com/elevation-tiles-prod/terrarium/15/<x>/<y>.png`.
-  Zoom 16 does not exist in that bucket.
+- `lunigiana.osm.gz`: an OpenStreetMap API 0.6 extract of the play area plus 100 m (lat
+  44.1546–44.1977, lon 10.0925–10.1600), written by `pnpm fetch-osm` (`src/tools/fetch-osm.ts`)
+  from 4 × 4 `https://api.openstreetmap.org/api/0.6/map?bbox=...` tiles. Every land-use, natural,
+  building, leisure or amenity multipolygon is fetched whole with
+  `https://api.openstreetmap.org/api/0.6/relation/<id>/full`, because most of a forest's member
+  ways lie outside the play area. Elements are merged by id and sorted, so the same OSM data
+  always gives the same file.
+- `rt/`: Regione Toscana data from the Geoscopio cartoteca, written by `pnpm fetch-rt`
+  (`src/tools/fetch-rt.ts`, which needs `unzip`; the download URLs are pinned there):
+  - `ctr/<sheet>_<layer>.shp.gz` + `.dbf.gz`: CTR 1:2000 (2019), the 16 sheets over the play
+    area (23D11–13, 23D18–21, 23D26–29, 23D34–37, 23D43), layers `AED` (buildings with eave
+    elevations), `AGE` (garages, ruins), `AVI` (road surfaces with street names) and `AZR` (the
+    area each sheet maps).
+  - `dtm.bin` + `dtm.json`: the 1 m LiDAR terrain model (2010) of the 20 tiles over the play
+    area, mosaicked, cropped to the play area plus 32 m and averaged to 2 m cells.
 
-Downloading the data again pulls current OSM edits, so the map changes. The files in `data/raw`
+Downloading the OSM data again pulls current edits, so the map changes. The files in `data/raw`
 are what pins it. `node src/tools/preview-map.ts` draws a top-down PNG of the built map (see
 [docs/map.md](docs/map.md)).
 
@@ -97,11 +110,10 @@ are what pins it. `node src/tools/preview-map.ts` draws a top-down PNG of the bu
 - Map data © OpenStreetMap contributors, available under the Open Database License (ODbL) 1.0:
   https://www.openstreetmap.org/copyright. `monzone.json` is a derived database and stays under
   the ODbL.
-- Elevation: AWS Terrain Tiles (Terrarium format, built by Mapzen's Joerd). The tiles combine
-  several open sources, each with its own required attribution; for Europe that includes
-  "produced using Copernicus data and information funded by the European Union - EU-DEM layers"
-  and SRTM / GMTED2010 "courtesy of the U.S. Geological Survey". Full list:
-  https://github.com/tilezen/joerd/blob/master/docs/attribution.md.
+- Buildings, road surfaces and elevation: "Fonte dei dati: Regione Toscana – Rilievi LIDAR" and
+  the Carta Tecnica Regionale 1:2000, both under Creative Commons Attribution 4.0
+  (https://creativecommons.org/licenses/by/4.0/), from the Geoscopio cartoteca:
+  https://www502.regione.toscana.it/geoscopio/cartoteca.html.
 
 The game shows both credits on the title card and in the HUD.
 

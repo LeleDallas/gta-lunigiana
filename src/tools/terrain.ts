@@ -1,9 +1,11 @@
-// Terrain for the map build: terrarium DEM -> 4 m node grid, 3x3 blur, river carving,
-// road flattening along smoothed, grade-clamped profiles.
+// Terrain for the map build: LiDAR DTM -> 4 m node grid, river carving, road flattening along
+// smoothed, grade-clamped profiles.
 import { readFileSync } from "node:fs"
+import { join } from "node:path"
+import { inflateSync } from "node:zlib"
 
-import { arcLengths, BOUNDS, M_PER_DEG, ORIGIN, segDist2, type V } from "./geometry.ts"
-import { decodePng } from "./png.ts"
+import { latLonToGaussBoaga } from "./crs.ts"
+import { arcLengths, BOUNDS, fromLocal, segDist2, type V } from "./geometry.ts"
 
 export interface Grid {
   readonly cell: number
@@ -15,63 +17,51 @@ export interface Grid {
   readonly z: Float64Array
 }
 
-const Z = 15, TX0 = 17304, TX1 = 17307, TY0 = 11893, TY1 = 11896
+/** Lattice step, m, on which local -> Gauss-Boaga is computed exactly; bilinear in between is exact to well under 1 mm. */
+const PROJ_STEP = 50
 
-/** Bilinear terrarium sampler in local metres (pixel centres at +0.5). */
-export const loadDem = (dir: string): ((x: number, y: number) => number) => {
-  const W = (TX1 - TX0 + 1) * 256, H = (TY1 - TY0 + 1) * 256
-  const elev = new Float64Array(W * H)
-  for (let tx = TX0; tx <= TX1; tx++) for (let ty = TY0; ty <= TY1; ty++) {
-    const png = decodePng(readFileSync(`${dir}/${Z}_${tx}_${ty}.png`))
-    if (png.width !== 256 || png.height !== 256) throw new Error(`unexpected terrarium tile ${tx}/${ty}`)
-    for (let y = 0; y < 256; y++) for (let x = 0; x < 256; x++) {
-      const i = (y * 256 + x) * 3
-      elev[((ty - TY0) * 256 + y) * W + (tx - TX0) * 256 + x] = png.data[i]! * 256 + png.data[i + 1]! + png.data[i + 2]! / 256 - 32768
-    }
+/**
+ * Bilinear sampler in local metres of the LiDAR DTM that `fetch-rt.ts` writes to `dir`
+ * (dtm.json + dtm.bin, EPSG:3003, 2 m cells). Outside the crop it holds the edge value.
+ */
+export const loadDtm = (dir: string): ((x: number, y: number) => number) => {
+  const meta = JSON.parse(readFileSync(join(dir, "dtm.json"), "utf8")) as { e0: number; n0: number; cols: number; rows: number; cell: number }
+  const raw = inflateSync(readFileSync(join(dir, "dtm.bin")))
+  const z = new Float32Array(meta.cols * meta.rows)
+  for (let k = 0, acc = 0; k < z.length; k++) {
+    acc = (k % meta.cols === 0 ? 0 : acc) + raw.readInt16LE(2 * k)
+    z[k] = acc / 10
   }
-  const n = 2 ** Z
+  const margin = 2 * PROJ_STEP
+  const lx0 = BOUNDS.minX - margin, ly0 = BOUNDS.minY - margin
+  const lcols = Math.ceil((BOUNDS.maxX - BOUNDS.minX + 2 * margin) / PROJ_STEP) + 1, lrows = Math.ceil((BOUNDS.maxY - BOUNDS.minY + 2 * margin) / PROJ_STEP) + 1
+  const lattice = new Float64Array(lcols * lrows * 2)
+  for (let j = 0; j < lrows; j++) for (let i = 0; i < lcols; i++) lattice.set(latLonToGaussBoaga(...fromLocal(lx0 + i * PROJ_STEP, ly0 + j * PROJ_STEP)), 2 * (j * lcols + i))
+  const at = (a: Float32Array | Float64Array, cols: number, rows: number, fx: number, fy: number, stride: number, c: number) => {
+    const i = Math.min(cols - 2, Math.max(0, Math.floor(fx))), j = Math.min(rows - 2, Math.max(0, Math.floor(fy)))
+    const tx = Math.min(1, Math.max(0, fx - i)), ty = Math.min(1, Math.max(0, fy - j))
+    const v = (di: number, dj: number) => a[((j + dj) * cols + i + di) * stride + c]!
+    return (v(0, 0) * (1 - tx) + v(1, 0) * tx) * (1 - ty) + (v(0, 1) * (1 - tx) + v(1, 1) * tx) * ty
+  }
   return (x, y) => {
-    const lon = ORIGIN.lon + x / M_PER_DEG.lon, lat = ORIGIN.lat + y / M_PER_DEG.lat
-    const r = (lat * Math.PI) / 180
-    const px = (((lon + 180) / 360) * n - TX0) * 256 - 0.5
-    const py = (((1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2) * n - TY0) * 256 - 0.5
-    const ix = Math.floor(px), iy = Math.floor(py), fx = px - ix, fy = py - iy
-    const g = (gx: number, gy: number) => elev[Math.min(H - 1, Math.max(0, gy)) * W + Math.min(W - 1, Math.max(0, gx))]!
-    return g(ix, iy) * (1 - fx) * (1 - fy) + g(ix + 1, iy) * fx * (1 - fy) + g(ix, iy + 1) * (1 - fx) * fy + g(ix + 1, iy + 1) * fx * fy
+    const fx = (x - lx0) / PROJ_STEP, fy = (y - ly0) / PROJ_STEP
+    const e = at(lattice, lcols, lrows, fx, fy, 2, 0), n = at(lattice, lcols, lrows, fx, fy, 2, 1)
+    return at(z, meta.cols, meta.rows, (e - meta.e0) / meta.cell, (n - meta.n0) / meta.cell, 1, 0)
   }
 }
 
-const tileLon = (tx: number) => (tx / 2 ** Z) * 360 - 180
-const tileLat = (ty: number) => (Math.atan(Math.sinh(Math.PI * (1 - (2 * ty) / 2 ** Z))) * 180) / Math.PI
+/** Half-width of the box each node averages, m: a 5 m square of 1 m samples, about one cell. */
+const BOX = 2
 
-/**
- * Node grid covering BOUNDS (the last row/col reaches maxX/maxY), sampled from `dem` and 3x3
- * box-blurred. Within 12 m of a tile seam a further 7-tap blur across the seam irons out the
- * ~1 m creases the terrarium tiles have there.
- */
+/** Node grid covering BOUNDS (the last row/col reaches maxX/maxY); each node is the mean of `dem` over a (2 BOX + 1) m square. */
 export const makeGrid = (dem: (x: number, y: number) => number, cell = 4): Grid => {
   const cols = Math.ceil((BOUNDS.maxX - BOUNDS.minX) / cell) + 1, rows = Math.ceil((BOUNDS.maxY - BOUNDS.minY) / cell) + 1
   const x0 = BOUNDS.minX, y0 = BOUNDS.minY
-  const at = (a: Float64Array, i: number, j: number) => a[Math.min(rows - 1, Math.max(0, j)) * cols + Math.min(cols - 1, Math.max(0, i))]!
-  const src = new Float64Array(cols * rows)
-  for (let j = 0; j < rows; j++) for (let i = 0; i < cols; i++) src[j * cols + i] = dem(x0 + i * cell, y0 + j * cell)
   const z = new Float64Array(cols * rows)
   for (let j = 0; j < rows; j++) for (let i = 0; i < cols; i++) {
     let s = 0
-    for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) s += at(src, i + di, j + dj)
-    z[j * cols + i] = s / 9
-  }
-  const blurred = Float64Array.from(z)
-  const seamsX: Array<number> = [], seamsY: Array<number> = []
-  for (let tx = TX0 + 1; tx <= TX1; tx++) seamsX.push((tileLon(tx) - ORIGIN.lon) * M_PER_DEG.lon)
-  for (let ty = TY0 + 1; ty <= TY1; ty++) seamsY.push((tileLat(ty) - ORIGIN.lat) * M_PER_DEG.lat)
-  for (let j = 0; j < rows; j++) for (let i = 0; i < cols; i++) {
-    const x = x0 + i * cell, y = y0 + j * cell
-    const acrossX = seamsX.some((sx) => Math.abs(x - sx) <= 12), acrossY = seamsY.some((sy) => Math.abs(y - sy) <= 12)
-    if (!acrossX && !acrossY) continue
-    let s = 0
-    for (let d = -3; d <= 3; d++) s += acrossX ? at(blurred, i + d, j) : at(blurred, i, j + d)
-    z[j * cols + i] = s / 7
+    for (let dy = -BOX; dy <= BOX; dy++) for (let dx = -BOX; dx <= BOX; dx++) s += dem(x0 + i * cell + dx, y0 + j * cell + dy)
+    z[j * cols + i] = s / (2 * BOX + 1) ** 2
   }
   return { cell, cols, rows, x0, y0, z }
 }
@@ -85,7 +75,7 @@ export const sampleGrid = (g: Grid, x: number, y: number): number => {
   return s + (n - s) * ty
 }
 
-/** Slope in degrees of cell (i, j) (between nodes (i, j) and (i+1, j+1)), from a 3-cell (12 m) baseline: the DEM resolves ~30 m, finer slopes are noise. */
+/** Slope in degrees of cell (i, j) (between nodes (i, j) and (i+1, j+1)), over a 3-cell (12 m) baseline: shorter steps (terrace walls, road cuts) are not slopes the player is stopped by. */
 export const cellSlope = (g: Grid, i: number, j: number): number => {
   const z = (a: number, b: number) => g.z[Math.min(g.rows - 1, Math.max(0, b)) * g.cols + Math.min(g.cols - 1, Math.max(0, a))]!
   const dx = (z(i + 2, j) + z(i + 2, j + 1) - z(i - 1, j) - z(i - 1, j + 1)) / (6 * g.cell)

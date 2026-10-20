@@ -22,7 +22,8 @@ keyboard ──► KeyboardInput service ──► CaptureInput ──► Input 
 
 `setup` runs once after the runtime is made:
 
-1. `SpawnWorld` (`systems/spawn.ts`): the player, the two Carabinieri cars, 45 parked cars.
+1. `SpawnWorld` (`systems/spawn.ts`): the player and the parked cars on 150 of the map's parked
+   spots (`PARKED`), the two Carabinieri cars included.
 2. `applyDeferred`
 
 `update` is one fixed step (`STEP = Clock.hz(60)`):
@@ -75,12 +76,20 @@ Saved world state (in snapshots), declared in `src/sim/schema.ts`:
 Resources: `Time`, `Rng` and `Score` (`stolen`, `knocked`) are saved. `Input` is transient: it is
 rebuilt every step and never saved.
 
-Static data is module content, not state. `MAP` and `graph` (`src/sim/map/index.ts`), the wall
-indexes, and the per-model lane tables in `src/sim/route.ts` are built once at load and never
-change, so they are safe to share between runtimes.
+Static data is module content, not state. `MAP` and `graph` (`src/sim/map/index.ts`), the wall,
+tree and edge lookups, and the per-model lane tables in `src/sim/route.ts` are built once at load
+and never change, so they are safe to share between runtimes. The lookups are compact static
+grids (`staticGrid` in `src/sim/collide.ts`, item indices packed into one `Int32Array`):
 
-Host state stays in the host: the camera, the render clock, the three.js scene and nodes, and the
-HUD's DOM.
+- `wallsNear` indexes the walls straight from the decoded flat arrays and the trees as points,
+  making each trunk's square (`pushTrunk` in `src/sim/map/kinds.ts`) only when a query reaches it.
+  It reuses its answer array and the segment objects in it until the next call of the same kind:
+  copy the coordinates to keep them.
+- `edgeIndex`, `trafficIndex` and `walkIndex` (`src/sim/route.ts`) answer nearest-edge and
+  spawn-band lookups without scanning the whole graph.
+
+Host state stays in the host: the camera, the render clock, the three.js scene and nodes, the
+streamed world's chunks, and the HUD's DOM.
 
 ## Input
 
@@ -102,7 +111,8 @@ frames clamped to 0.25 s. Each animation frame it:
 1. writes the loop's `alpha` (fraction of a step since the last one) into `RenderClock`;
 2. ticks the `render` schedule;
 3. reads `PlayerView` and moves the camera;
-4. renders the pixel view, then updates the HUD.
+4. streams the static world around the camera focus (see below);
+5. renders the pixel view, then updates the HUD.
 
 The seed comes from `?seed=N`, or a random 32-bit number.
 
@@ -119,9 +129,36 @@ The render schedule (`src/render/index.ts`) uses `@typeonce/ritmo-render`:
   render alpha and stand nodes on the ground or road under them (`groundY` in
   `src/render/ground.ts`). Vehicles pitch to the slope; people swap between three walk frames.
 
-The static world (`src/render/world.ts`) is built once from `MAP`. Each 128 m chunk gets a terrain
-mesh, a solid mesh (buildings, roofs, bridges, platforms) and a decal mesh (roads, water, rail).
-Trees are instanced. A 96 m apron continues the terrain beyond the map bounds.
+The static world (`src/render/world.ts`) is cut into 128 m chunks (`src/render/chunks.ts`), and
+only the chunks around the camera exist as meshes. A built chunk has a terrain mesh, a solid mesh
+(buildings, roofs, bridges, platforms), a decal mesh (roads, water, rail) and one `InstancedMesh`
+per tree kind. A 96 m apron of extra chunks continues the terrain, lines and trees beyond the map
+bounds. Terrain cells take their colours from the land cover (`src/render/landcover.ts`): the
+map's areas, meadow where none covers a cell, paving where open ground lies within 3 m of both a
+wall and a road's edge (house fronts, sidewalks, alleys), and pebble beds along the wide streams.
+
+Streaming:
+
+- `new World(scene)` prepares, once (≈ 65 ms in Chrome): the land-cover raster for the whole map
+  (≈ 40 ms and 1.5 MB, cheaper than clipping areas per chunk), every static item as a `Piece`
+  (an anchor polyline plus a `draw` function), the pieces bucketed per chunk with the range of
+  segments that reach it, and the trees bucketed per chunk and kind. A chunk build reads only its
+  own bucket; it draws each piece's segments plus one neighbour on each side (for ribbon mitres)
+  and keeps exactly the triangles that fall in the chunk, so the result is the same as cutting a
+  whole-map build.
+- Distances are measured on the screen plane, from the focus to each chunk's box projected along
+  the camera's right and up axes, terrain relief included. A valley far below a ridge counts as
+  near when the camera shows it beside the focus.
+- `world.update(focus, reach, budgetMs)` runs every frame. `reach` is the half-diagonal of the view
+  at the widest zoom (`WIDEST_ZOOM`, 5 texels/m), so zooming out never shows a missing chunk.
+  Chunks within reach + 64 m are built, nearest first, until 4 ms of the frame are spent (at least
+  one per frame). Chunks beyond reach + 64 + 128 m are dropped: removed from the scene, their
+  geometry and instance buffers disposed (the tree shapes are shared and stay).
+- Before the first frame, `main.ts` builds every chunk the spawn view needs, so nothing pops in.
+- Measured (1280×720 and 2560×1440, focus swept at 40 m/s through Monzone, Equi Terme, Gragnola,
+  Colognola, Campiglione and Viano): 20–37 chunks loaded, chunk builds ≈ 0.25 ms on average and
+  under 3 ms at worst, first frame after ≈ 0.6–0.85 s, JS heap ≈ 185 MB (was ≈ 550 MB building the
+  whole map), no frame over 30 ms, 60 fps.
 
 The pixel pipeline (`src/render/pipeline.ts`):
 
@@ -150,10 +187,12 @@ the `PlayerView` inspector (`src/sim/views.ts`) and the map:
   occupied, stolen), and the score.
 - `vehicleInReach` (`src/sim/body.ts`) answers both the HUD prompt and the `EnterExit` action, so
   the prompt never offers something the key will not do.
-- Location: the nearest named road within 15 m (tracks and paths skipped) and the district disc
-  from `districtAt`. Looked up again only after moving 2 m.
+- Location: the name of the nearest road within 15 m, if it has one (tracks and paths skipped,
+  so an unnamed road never borrows a side street's name), and the district disc from `districtAt`. Looked up again only after moving 2 m.
 - The minimap is drawn once to an offscreen canvas and then blitted around the player, 300 m
-  across, rotated so that screen-up is up.
+  across, rotated so that screen-up is up. At 0.5 px/m the whole map is 2600 × 2298 px (6 MP,
+  24 MB): under every browser's canvas limit (the strictest, Safari's, is 16.7 MP). Drawing it
+  takes ≈ 10 ms at load; the per-frame blit ≈ 1 ms.
 
 ## Checks
 

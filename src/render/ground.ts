@@ -8,7 +8,7 @@
 import { MAP, roadClassOf, type RoadClass } from "../sim/map/index.ts"
 import { segDist2 } from "../tools/geometry.ts"
 
-/** Metres a.s.l. subtracted from every elevation before it reaches the GPU (the map spans ≈205–855 m). */
+/** Metres a.s.l. subtracted from every elevation before it reaches the GPU (the map spans ≈150–980 m). */
 const ELEVATION_BASE = 200
 
 /** Render y of a map elevation (m a.s.l.). */
@@ -83,10 +83,15 @@ const onSegment = (s: RoadSegment, x: number, y: number): number | undefined => 
   return d2 > s.half * s.half ? undefined : surfaceY(s.za + (s.zb - s.za) * t, x, y, s.lift, s.lifted)
 }
 
+/** A bridge deck or tunnel within this height (m) of where an actor was is the one it is on. */
+const ON_DECK = 0.5
+
 /**
  * Where an actor at (x, y) stands. At-grade roads are part of the ground: the highest of them and
  * the terrain. Bridge decks and tunnels compete with that ground for the one nearest `near`, the
  * actor's previous height, so it stays on the level it was on; without `near`, the highest wins.
+ * A deck within ON_DECK of `near` wins outright: on a ramp over a gully the ground below can be
+ * nearer than the climbing deck, and the actor must not drop onto it.
  */
 export const groundY = (x: number, y: number, near?: number): number => {
   const segments = buckets.get(keyOf(Math.floor(x / BUCKET) + 2048, Math.floor(y / BUCKET) + 2048)) ?? []
@@ -99,8 +104,15 @@ export const groundY = (x: number, y: number, near?: number): number => {
   for (const s of segments) {
     const h = s.lifted ? onSegment(s, x, y) : undefined
     if (h === undefined) continue
-    const sc = near === undefined ? -h : Math.abs(h - near)
+    const off = near === undefined ? 0 : Math.abs(h - near)
+    const sc = near === undefined ? -h : off < ON_DECK ? off - ON_DECK : off
     if (sc < score) [best, score] = [h, sc]
   }
   return best
+}
+
+/** Render heights under the front and rear of a vehicle `length` long at (x, y) heading `angle`, each wheel kept on the level it was on (`near`). */
+export const axleY = (x: number, y: number, angle: number, length: number, near?: { readonly front: number; readonly rear: number }) => {
+  const dx = (Math.cos(angle) * length) / 2, dy = (Math.sin(angle) * length) / 2
+  return { front: groundY(x + dx, y + dy, near?.front), rear: groundY(x - dx, y - dy, near?.rear) }
 }

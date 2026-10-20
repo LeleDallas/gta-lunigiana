@@ -4,7 +4,7 @@ import { Ops, Random, Vec2 } from "@typeonce/ritmo-math"
 import { forwardSpeed, wrapAngle } from "../body.ts"
 import { graph } from "../map/index.ts"
 import {
-  allowsModel, alongLane, cruiseSpeed, distanceToEdge, endNode, facesForward, type Lane, laneOf, lanePoint, laneSide, leadsToDeadEnd, nearestEdge,
+  allowsModel, alongLane, cruiseSpeed, distanceToEdge, edgeIndex, endNode, facesForward, type Lane, laneOf, lanePoint, laneSide, leadsToDeadEnd,
   nextTrafficEdge, roadOf
 } from "../route.ts"
 import { Autopilot, CarInput, Driving, Game, Motion, Person, Pose, Rng, Route, STEP, Time, Traffic, Vehicle } from "../schema.ts"
@@ -28,6 +28,8 @@ const STUCK_SPEED = 1
 const MOVING_SPEED = 2.5
 /** Steps stuck before unsticking, and steps reversing then. */
 const STUCK_STEPS = Clock.steps(Clock.duration(STEP, 3))
+/** Waiting for a person ahead on the road counts as stuck only every this many steps (12 s instead of 3 s): they usually move on. */
+const PERSON_PATIENCE = 4
 const REVERSE_STEPS = Clock.steps(Clock.duration(STEP, 1.5))
 /** Heading within this cosine of the lane counts as lined up with it. */
 const LINED_UP = 0.7
@@ -41,8 +43,9 @@ const ARRIVE = 4
 /** Farther than this from its edge, a car finds the nearest road again, m. */
 export const LOST = 12
 
-const usable = (model: VehicleModel) => graph.trafficEdges.filter((e) => allowsModel(e, model))
-const usableByModel = { panda: usable("panda"), ape: usable("ape"), truck: usable("truck"), carabinieri: usable("carabinieri") } satisfies Record<VehicleModel, ReadonlyArray<number>>
+const usable = (model: VehicleModel) => edgeIndex(graph.trafficEdges.filter((e) => allowsModel(e, model)))
+/** Per model, the traffic edges it may drive, for finding the road again. */
+const usableByModel = { panda: usable("panda"), ape: usable("ape"), truck: usable("truck"), carabinieri: usable("carabinieri") } satisfies Record<VehicleModel, ReturnType<typeof edgeIndex>>
 
 /** Throttle (or brake) toward a wanted speed. */
 const throttleFor = (want: number, speed: number): number => Math.max(-1, Math.min(1, (want - speed) * 0.4))
@@ -62,7 +65,8 @@ const arrived = (lane: Lane, along: number, at: { readonly x: number; readonly y
  * ahead along this edge and the next, pick the next edge at random at each
  * node, slow for sharp turns and for anything in a cone ahead, and back up
  * along the lane after standing still for 3 s (sometimes turning round, and
- * always from its second time on, dead end or not).
+ * always from its second time on, dead end or not); waiting for a person
+ * ahead on the carriageway counts four times slower.
  */
 export const TrafficAI = Game.System("Lunigiana/TrafficAI", {
   queries: {
@@ -85,8 +89,8 @@ export const TrafficAI = Game.System("Lunigiana/TrafficAI", {
   const { step } = resources.time.get()
   const random = Random.draw(resources.rng)
   const obstacles = [
-    ...queries.vehicles.each().map(({ entity, data }) => ({ id: entity.id, ...data.pose.get(), half: VEHICLES[data.vehicle.get().model].length / 2 })),
-    ...queries.people.each().map(({ entity, data }) => ({ id: entity.id, ...data.pose.get(), half: PERSON_RADIUS }))
+    ...queries.vehicles.each().map(({ entity, data }) => ({ id: entity.id, ...data.pose.get(), half: VEHICLES[data.vehicle.get().model].length / 2, person: false })),
+    ...queries.people.each().map(({ entity, data }) => ({ id: entity.id, ...data.pose.get(), half: PERSON_RADIUS, person: true }))
   ]
   for (const { entity, data } of queries.cars.each()) {
     const pose = data.pose.get()
@@ -96,7 +100,7 @@ export const TrafficAI = Game.System("Lunigiana/TrafficAI", {
     let route = data.route.get()
     let pilot = data.pilot.get()
     if (distanceToEdge(route.edge, pose.x, pose.y) > LOST) {
-      const edge = nearestEdge(usableByModel[model], pose.x, pose.y)
+      const edge = usableByModel[model].nearest(pose.x, pose.y)
       const forward = roadOf(edge).oneway === true || facesForward(edge, pose.angle)
       const after = nextTrafficEdge(endNode(edge, forward), edge, model, random)
       route = { edge, forward, side: laneSide({ edge, forward }, model) }
@@ -136,12 +140,17 @@ export const TrafficAI = Game.System("Lunigiana/TrafficAI", {
     want = Math.min(want, CORNER_MIN + (cruise - CORNER_MIN) * Math.max(0, Ops.cos(error)))
     const fx = Ops.cos(pose.angle), fy = Ops.sin(pose.angle)
     const range = CONE_BASE + Math.max(0, speed) * CONE_TIME
+    const onRoad = (p: { readonly x: number; readonly y: number }) =>
+      distanceToEdge(route.edge, p.x, p.y) < roadOf(route.edge).w / 2 + PERSON_RADIUS || distanceToEdge(pilot.next, p.x, p.y) < roadOf(pilot.next).w / 2 + PERSON_RADIUS
+    // Whether the nearest thing held back for is a person in the way (ahead of the bumper, on the carriageway), who moves on.
+    let forPerson = false
     for (const other of obstacles) {
       if (other.id === entity.id) continue
       const rx = other.x - pose.x, ry = other.y - pose.y
       const front = rx * fx + ry * fy
       if (front <= 0 || front > range + other.half || Math.abs(ry * fx - rx * fy) >= CONE_HALF_WIDTH) continue
-      want = Math.min(want, Math.max(0, (front - spec.length / 2 - other.half - GAP) * 0.8))
+      const limit = Math.max(0, (front - spec.length / 2 - other.half - GAP) * 0.8)
+      if (limit < want) [want, forPerson] = [limit, other.person && front > spec.length / 2 && onRoad(other)]
     }
 
     const holding = want < 0.5 && Math.abs(speed) < 0.5
@@ -149,8 +158,9 @@ export const TrafficAI = Game.System("Lunigiana/TrafficAI", {
       ? { throttle: 0, steer, handbrake: true }
       : { throttle: throttleFor(want, speed), steer, handbrake: false })
 
-    // Stopped (or grinding along a wall) counts up; only real progress resets it.
-    const stuck = Math.abs(speed) < STUCK_SPEED ? pilot.stuck + 1 : Math.abs(speed) > MOVING_SPEED ? 0 : pilot.stuck
+    // Stopped (or grinding along a wall) counts up, waiting for a person in the way only every PERSON_PATIENCE steps; only real progress resets it.
+    const counts = !forPerson || step % PERSON_PATIENCE === 0
+    const stuck = Math.abs(speed) < STUCK_SPEED ? pilot.stuck + (counts ? 1 : 0) : Math.abs(speed) > MOVING_SPEED ? 0 : pilot.stuck
     if (stuck < STUCK_STEPS) pilot = { ...pilot, stuck }
     else {
       pilot = { ...pilot, stuck: 0, reverseUntil: step + REVERSE_STEPS, tries: pilot.tries + 1 }

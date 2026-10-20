@@ -4,7 +4,7 @@
 import type { Barrier } from "../sim/map/index.ts"
 import { isDrivable } from "../sim/map/kinds.ts"
 import type { BuildingF, RoadF, WaterF } from "./features.ts"
-import { BOUNDS, pointInRing, r1, segDist2, segIndex } from "./geometry.ts"
+import { BOUNDS, flatRing, pointInRing, r1, ringBox, segDist2, segIndex, signedArea } from "./geometry.ts"
 import { cellSlope, type Grid } from "./terrain.ts"
 
 const RUN = 16 // max wall segment length, m
@@ -102,35 +102,75 @@ const boundary = (g: Pick<Grid, "cell" | "cols" | "rows" | "x0" | "y0">, blocked
   }
 }
 
-/** Half-width of the corridor kept open where a road centreline runs through or along a footprint (OSM lanes and steps under arches). */
+/** Half-width of the corridor kept open where a road centreline runs through or along a footprint. */
 const ARCH = 1.2
 /** Raster cell for footprints cut by such a corridor, m. */
 const FOOTPRINT_RES = 0.2
+/** Smallest piece of a clipped footprint kept, m². */
+const MIN_PIECE = 4
 
 /**
- * Building edges into every list in `outs`. Where a road centreline comes within min(w/2, ARCH)
- * of the footprint, the walls are instead the outline of footprint minus those corridors
- * (rasterised at FOOTPRINT_RES m): lanes under arches and along walls stay open, the interior stays closed.
+ * Roads that clip the footprints they cross (`clipBuildings`): drivable, not tunnels. OSM and the
+ * CTR disagree by a metre or two, and none of these is tagged as a passage, so the house gives way.
+ * The rest (tunnels, paths and steps under arches) only open a corridor in the walls.
  */
-const pushBuilding = (outs: ReadonlyArray<Array<number>>, b: BuildingF, roads: ReadonlyArray<RoadF>) => {
-  let x0 = Number.MAX_VALUE, y0 = Number.MAX_VALUE, x1 = -Number.MAX_VALUE, y1 = -Number.MAX_VALUE
-  for (let i = 0; i < b.outer.length; i += 2) [x0, y0, x1, y1] = [Math.min(x0, b.outer[i]!), Math.min(y0, b.outer[i + 1]!), Math.max(x1, b.outer[i]!), Math.max(y1, b.outer[i + 1]!)]
+const clips = (r: RoadF) => isDrivable(r.cls) && r.tunnel !== true
+
+/**
+ * Footprint `b` rasterised at FOOTPRINT_RES m minus the corridors where a centreline of `roads`
+ * comes within min(w/2, ARCH), or undefined when no corridor reaches inside it.
+ */
+const carved = (b: BuildingF, roads: ReadonlyArray<RoadF>) => {
+  const [x0, y0, x1, y1] = ringBox(b.outer)
   const cuts: Array<readonly [number, number, number, number, number]> = []
   for (const r of roads) for (let i = 0; i + 1 < r.pts.length; i++) {
     const p = r.pts[i]!, q = r.pts[i + 1]!, h = Math.min(r.w / 2, ARCH)
     if (Math.max(p.x, q.x) > x0 - h && Math.min(p.x, q.x) < x1 + h && Math.max(p.y, q.y) > y0 - h && Math.min(p.y, q.y) < y1 + h) cuts.push([p.x, p.y, q.x, q.y, h])
   }
+  if (cuts.length === 0) return undefined
   const res = FOOTPRINT_RES, gx = x0 - res, gy = y0 - res
   const cw = Math.ceil((x1 - x0) / res) + 2, ch = Math.ceil((y1 - y0) / res) + 2
   const blocked = new Uint8Array(cw * ch)
   let cut = false
-  if (cuts.length > 0) for (let j = 0; j < ch; j++) for (let i = 0; i < cw; i++) {
+  for (let j = 0; j < ch; j++) for (let i = 0; i < cw; i++) {
     const x = gx + (i + 0.5) * res, y = gy + (j + 0.5) * res
     if (!pointInRing(x, y, b.outer) || (b.holes ?? []).some((h) => pointInRing(x, y, h))) continue
     if (cuts.some(([ax, ay, bx, by, h]) => segDist2(x, y, ax, ay, bx, by).d2 < h * h)) cut = true
     else blocked[j * cw + i] = 1
   }
-  if (cut) return boundary({ cell: res, cols: cw + 1, rows: ch + 1, x0: gx, y0: gy }, blocked, outs, 0.15)
+  return cut ? { grid: { cell: res, cols: cw + 1, rows: ch + 1, x0: gx, y0: gy }, blocked } : undefined
+}
+
+/**
+ * Buildings with every corridor of a road that `clips` cut out of the footprint: one building per
+ * piece left (same id, style and height; slivers under MIN_PIECE m² dropped), traced like the
+ * walls, so the house drawn and the house collided with are one outline.
+ */
+export const clipBuildings = (buildings: ReadonlyArray<BuildingF>, roads: ReadonlyArray<RoadF>): Array<BuildingF> => {
+  const clipping = roads.filter(clips)
+  return buildings.flatMap((b) => {
+    const c = carved(b, clipping)
+    if (c === undefined) return [b]
+    const rings = traceLoops(c.grid, c.blocked).map((loop) => simplifyLoop(loop, 0.15).slice(0, -1))
+    const holes = rings.filter((r) => signedArea(r) < 0).map((r) => flatRing(r, false)).filter((r) => r !== undefined)
+    const { holes: _, ...rest } = b
+    return rings.flatMap((r) => {
+      const outer = signedArea(r) >= MIN_PIECE ? flatRing(r, true) : undefined
+      if (outer === undefined) return []
+      const inside = holes.filter((h) => pointInRing(h[0]!, h[1]!, outer))
+      return [{ ...rest, outer, ...(inside.length > 0 ? { holes: inside } : {}) }]
+    })
+  })
+}
+
+/**
+ * Building edges into every list in `outs`. Where a tunnel, path or steps centreline comes within
+ * min(w/2, ARCH) of the footprint, the walls are instead the outline of the footprint minus those
+ * corridors: passages and steps under arches stay open, the interior stays closed.
+ */
+const pushBuilding = (outs: ReadonlyArray<Array<number>>, b: BuildingF, arches: ReadonlyArray<RoadF>) => {
+  const c = carved(b, arches)
+  if (c !== undefined) return boundary(c.grid, c.blocked, outs, 0.15)
   for (const ring of [b.outer, ...(b.holes ?? [])]) for (const out of outs) pushPolyline(out, ring, true)
 }
 
@@ -149,7 +189,7 @@ export const buildWalls = (g: Grid, roads: ReadonlyArray<RoadF>, water: Readonly
   const near = segIndex<RoadF>()
   for (const r of roads) near.addLine(r.pts, Math.max(r.w / 2, 1.5) + 1.5 + pad, r) // tunnels too: they are short underpasses here
   const cw = g.cols - 1, ch = g.rows - 1
-  // Steep cells, majority-filtered (3x3) so the walls follow slopes, not DEM noise.
+  // Steep cells, majority-filtered (3x3) so the walls follow slopes, not single-cell bumps.
   const steep = (limit: number) => {
     const raw = new Uint8Array(cw * ch)
     for (let j = 0; j < ch; j++) for (let i = 0; i < cw; i++)
@@ -183,7 +223,8 @@ export const buildWalls = (g: Grid, roads: ReadonlyArray<RoadF>, water: Readonly
   const walk: Array<number> = [], drive: Array<number> = []
   boundary(g, walkBlocked, [walk])
   boundary(g, driveBlocked, [drive])
-  for (const b of buildings) pushBuilding([walk, drive], b, roads)
+  const arches = roads.filter((r) => !clips(r))
+  for (const b of buildings) pushBuilding([walk, drive], b, arches)
   for (const b of barriers) {
     if (b.kind !== "guard_rail") pushPolyline(walk, b.pts, false)
     pushPolyline(drive, b.pts, false)

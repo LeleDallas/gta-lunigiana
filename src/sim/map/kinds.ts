@@ -7,7 +7,10 @@
  * @module map/kinds
  */
 
-/** Highway classes the build emits, widest first. */
+/**
+ * Highway classes the build emits, widest first. The build folds OSM `primary` (the SR445) into
+ * tertiary, `living_street` into residential, `footway` and `pedestrian` into path.
+ */
 export const ROAD_CLASSES = ["tertiary", "unclassified", "residential", "service", "track", "path", "steps"] as const
 export type RoadClass = (typeof ROAD_CLASSES)[number]
 
@@ -42,7 +45,7 @@ export type BuildingStyle = (typeof BUILDING_STYLES)[number]
 /** Land-use kinds the build emits. */
 export const AREA_KINDS = [
   "forest", "cemetery", "pitch", "park", "parking", "vineyard", "farmland", "farmyard", "industrial", "residential", "platform", "school", "ruins",
-  "grassland"
+  "grassland", "paved"
 ] as const
 export type AreaKind = (typeof AREA_KINDS)[number]
 
@@ -51,7 +54,7 @@ const areaKinds: ReadonlySet<string> = new Set(AREA_KINDS)
 export const isAreaKind = (kind: string): kind is AreaKind => areaKinds.has(kind)
 
 /** Side of the square wall around every tree trunk, m. */
-const TRUNK = 0.5
+export const TRUNK = 0.5
 
 /** Appends the four edges (ax, ay, bx, by) of the TRUNK square centred on (x, y) to `out`. */
 export const pushTrunk = (out: Array<number>, x: number, y: number): void => {

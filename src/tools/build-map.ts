@@ -1,18 +1,22 @@
-// Builds src/sim/map/monzone.json from data/raw (OSM + full forest relations + z15 terrarium).
+// Builds src/sim/map/monzone.json from data/raw: OSM (fetch-osm.ts) and the Regione
+// Toscana CTR 1:2000 and LiDAR DTM (data/raw/rt, written by fetch-rt.ts).
 // Run: node src/tools/build-map.ts  (pnpm map), from any directory. Output is deterministic.
 import { writeFileSync } from "node:fs"
 import { join } from "node:path"
 
-import type { District, MonzoneMap } from "../sim/map/index.ts"
+import type { MonzoneMapJson } from "../sim/map/index.ts"
 import { pushTrunk } from "../sim/map/kinds.ts"
-import { extractAreas, extractBarriers, extractBuildings, extractPois, extractRail, extractRoads, extractWater, type RoadF } from "./features.ts"
+import { fitRoads, readCtr } from "./ctr.ts"
+import { fitDistricts } from "./districts.ts"
+import { extractAreas, extractBarriers, extractBuildings, extractPois, extractRail, extractRoads, extractWater, nameFromAddresses, type RoadF } from "./features.ts"
 import { along, arcLengths, BOUNDS, crossings, flatLine, M_PER_DEG, ORIGIN, r1, segIndex, type V } from "./geometry.ts"
 import { buildGraph } from "./graph.ts"
+import { packPoints, packRows } from "./pack.ts"
 import { readOsm } from "./osm.ts"
 import { chainsOf, lifted, makeProfiler, type Bound, type Linear } from "./profiles.ts"
 import { clearance, parkedSpots, playerSpawn, scatterTrees } from "./spawns.ts"
-import { loadDem, makeGrid, sampleGrid } from "./terrain.ts"
-import { buildWalls } from "./walls.ts"
+import { loadDtm, makeGrid, sampleGrid } from "./terrain.ts"
+import { buildWalls, clipBuildings } from "./walls.ts"
 import { carveAll, fitUnderDecks, waterLine, waterProfiles, type Crossed } from "./water.ts"
 
 const ROOT = join(import.meta.dirname, "../..")
@@ -20,16 +24,18 @@ const OUT = join(ROOT, "src/sim/map/monzone.json")
 const t0 = performance.now()
 const lap = (label: string) => console.log(`${label.padEnd(10)} ${((performance.now() - t0) / 1000).toFixed(2)} s`)
 
-const osm = readOsm(join(ROOT, "data/raw/monzone.osm"))
-const full = ["3009596", "9736893"].map((id) => ({ id, osm: readOsm(join(ROOT, `data/raw/rel/${id}.osm`)) }))
+const osm = readOsm(join(ROOT, "data/raw/lunigiana.osm.gz"))
+const ctr = readCtr(join(ROOT, "data/raw/rt/ctr"))
 const roads = extractRoads(osm), water = extractWater(osm), rail = extractRail(osm)
-const buildings = extractBuildings(osm), areas = extractAreas(osm, full), barriers = extractBarriers(osm), pois = extractPois(osm)
-lap("osm")
+fitRoads(roads, ctr.roadAreas)
+nameFromAddresses(osm, roads)
+const buildings = clipBuildings(extractBuildings(osm, ctr), roads), barriers = extractBarriers(osm), pois = extractPois(osm)
+const areas = [...extractAreas(osm), ...ctr.roadAreas.filter((a) => a.paved).map((a) => ({ kind: "paved", rings: a.rings }))] // squares, lay-bys
+lap("features")
 
-// ---- terrain: DEM -> blurred 4 m grid -> carved water -> roads and rail -> water kept under the decks ----
-const grid = makeGrid(loadDem(join(ROOT, "data/raw/terrarium")))
-const dem = { ...grid, z: Float64Array.from(grid.z) } // the untouched blurred DEM every profile samples
-const ground = (x: number, y: number) => sampleGrid(dem, x, y)
+// ---- terrain: LiDAR -> 4 m grid -> carved water -> roads and rail -> water kept under the decks ----
+const ground = loadDtm(join(ROOT, "data/raw/rt")) // the untouched 1 m terrain every profile samples
+const grid = makeGrid(ground)
 const at = (x: number, y: number) => sampleGrid(grid, x, y)
 const wp = waterProfiles(water, ground)
 carveAll(grid, water, wp)
@@ -43,7 +49,7 @@ const owner = new Uint8Array(grid.cols * grid.rows).fill(255)
   for (const w of water) if (w.w >= 4) wet.addLine(w.pts, w.w / 2 + 1, null)
   for (let k = 0; k < protect.length; k++) protect[k] = wet.covers(grid.x0 + (k % grid.cols) * grid.cell, grid.y0 + Math.floor(k / grid.cols) * grid.cell) ? 1 : 0
 }
-const { profile, nodeZ, zOf, denseOf } = makeProfiler(grid, ground, owner, protect)
+const { profile, grown, nodeZ, zOf, denseOf } = makeProfiler(grid, ground, owner, protect)
 const zAt = (l: Linear, s: number) => along(arcLengths(l.pts), zOf.get(l)!, s)
 
 const RAIL_DECK = 1.5 // rail bridge structure above an underpass's clear height, m
@@ -82,15 +88,19 @@ const widest = (chain: ReadonlyArray<{ readonly item: RoadF }>) => Math.max(...c
 const ofClass = (...cls: ReadonlyArray<string>) => roads.filter((r) => cls.includes(r.cls))
 // The rail goes first (its grade limit is the strictest; roads dip under it and meet it at level
 // crossings), then roads by class. Ranks decide grid cells: tertiary 0 beats rail 1 beats the rest.
-for (const ch of chainsOf(rail)) profile(ch, { w: 4, rank: 1, grade: 0.025, half: 100 }, railBounds(ch))
-for (const ch of chainsOf(ofClass("tertiary"))) profile(ch, { w: widest(ch), rank: 0, grade: 0.1, half: 35 }, roadBounds(ch))
-for (const ch of chainsOf(ofClass("unclassified", "residential"))) profile(ch, { w: widest(ch), rank: 2, grade: 0.15, half: 35 }, roadBounds(ch))
-for (const ch of chainsOf(ofClass("service", "track"))) profile(ch, { w: widest(ch), rank: 3, grade: 0.2, half: 35 }, roadBounds(ch))
+for (const ch of grown(chainsOf(rail))) profile(ch, { w: 4, rank: 1, grade: 0.025, half: 100 }, railBounds(ch))
+for (const ch of grown(chainsOf(ofClass("tertiary")))) profile(ch, { w: widest(ch), rank: 0, grade: 0.1, half: 20 }, roadBounds(ch))
+for (const ch of grown(chainsOf(ofClass("unclassified", "residential")))) profile(ch, { w: widest(ch), rank: 2, grade: 0.15, half: 20 }, roadBounds(ch))
+for (const ch of grown(chainsOf(ofClass("service", "track")))) profile(ch, { w: widest(ch), rank: 3, grade: 0.2, half: 20 }, roadBounds(ch))
 lap("roads")
 
-/** A bridge or tunnel no profiled chain covers (paths, steps): the line between its ends, from the uncarved ground. */
+/**
+ * A bridge or tunnel no profiled chain covers (paths, steps): the line between its ends, from the
+ * uncarved ground. Under the rail both ends keep the road's clearance, as in a profiled tunnel.
+ */
 const lone = (l: Linear): Array<number> => {
-  const end = (v: V) => (v.id !== undefined ? nodeZ.get(v.id) : undefined) ?? ground(v.x, v.y)
+  const cap = Math.min(...railRoad.filter((x) => x.rd === l).map((x) => zAt(x.rl, x.c.sa) - x.clear))
+  const end = (v: V) => Math.min(cap, (v.id !== undefined ? nodeZ.get(v.id) : undefined) ?? ground(v.x, v.y))
   const za = end(l.pts[0]!), zb = end(l.pts.at(-1)!), s = arcLengths(l.pts)
   return s.map((d) => za + ((zb - za) * d) / (s.at(-1)! || 1))
 }
@@ -118,12 +128,14 @@ const lineOut = (l: Linear) => {
 // ---- collision, graph, trees, spawns ----
 const walls = buildWalls(grid, roads, water, buildings, barriers)
 lap("walls")
-const graph = buildGraph(roads)
 const trees = scatterTrees(areas, roads, buildings, water, rail)
 lap("trees")
 const trunks: Array<number> = []
 for (let i = 0; i < trees.length; i += 3) pushTrunk(trunks, trees[i]!, trees[i + 1]!)
 const walkClear = clearance([walls.walk, trunks]), driveClear = clearance([walls.drive, trunks])
+/** Room for a car to stop and turn (map.test.ts asks the same of every traffic dead end). */
+const TURN = 2.3
+const graph = buildGraph(roads, (x, y) => driveClear.circle(x, y, TURN))
 const poi = (id: number) => {
   const p = pois.find((q) => q.id === id)
   if (p === undefined) throw new Error(`poi ${id} missing`)
@@ -132,45 +144,32 @@ const poi = (id: number) => {
 const station = poi(1813987803), carabinieri = poi(14183344901)
 const player = playerSpawn(roads, walkClear, driveClear, carabinieri)
 const junctions = graph.degree.flatMap((d, n) => (d >= 3 ? [[graph.xy[2 * n]!, graph.xy[2 * n + 1]!] as const] : []))
-const parked = parkedSpots({ roads, buildings, areas, junctions, walk: walkClear, drive: driveClear, avoid: player, station })
+const parked = parkedSpots({ roads, buildings, areas, junctions, walk: walkClear, drive: driveClear, avoid: player, station, police: carabinieri })
 lap("spawns")
 
-// HUD names (`districtAt` in src/sim/map/index.ts): OSM places plus the village's named clusters;
-// isolated farmhouses fall back to the nearest disc.
-const districts: Array<District> = [
-  { name: "Monzone (Stazione)", x: -500, y: 480, r: 250 },
-  { name: "Via Riolo", x: -200, y: 310, r: 160 },
-  { name: "Immacolata", x: -90, y: 120, r: 120 },
-  { name: "Santa Lucia", x: 44.6, y: 223.8, r: 130 },
-  { name: "Via per Equi", x: 260, y: 370, r: 190 },
-  { name: "Caldanella", x: 570, y: 510, r: 110 },
-  { name: "Cimitero", x: -45, y: -70, r: 70 },
-  { name: "Monzone Alto", x: -34.4, y: -300.3, r: 170 },
-  { name: "Collecchia", x: -140, y: -480, r: 100 },
-  { name: "Torrignana", x: -398.7, y: -99.1, r: 200 },
-  { name: "Aiola", x: 720, y: 190, r: 240 },
-  { name: "Castello di Aiola", x: 420, y: -260, r: 110 },
-  { name: "Novicchia", x: -924.1, y: -397.1, r: 220 },
-  { name: "Acquanera", x: 117.2, y: -95.6, r: 120 }
-]
+const districts = fitDistricts(osm, buildings)
 
+/** Surveyed eave over a building's lowest ground, m, outside which the eave is a survey slip and the default height stands. */
+const EAVE = { min: 1.5, max: 45 }
 const roadOut = (r: RoadF) => ({
   id: r.id, cls: r.cls, ...(r.name !== undefined ? { name: r.name } : {}), ...(r.ref !== undefined ? { ref: r.ref } : {}), w: r.w, surface: r.surface,
   ...(r.oneway ? { oneway: true } : {}), ...(r.bridge ? { bridge: true } : {}), ...(r.tunnel ? { tunnel: true } : {}), ...(r.layer !== undefined ? { layer: r.layer } : {}),
   ...lineOut(r)
 })
-const map: MonzoneMap = {
+const map: MonzoneMapJson = {
   version: 1,
   origin: ORIGIN,
   mPerDeg: M_PER_DEG,
   bounds: BOUNDS,
-  heightmap: { cell: grid.cell, cols: grid.cols, rows: grid.rows, x0: grid.x0, y0: grid.y0, data: Array.from(grid.z, (z) => Math.round(z * 10)) },
+  heightmap: { cell: grid.cell, cols: grid.cols, rows: grid.rows, x0: grid.x0, y0: grid.y0, data: packRows(Array.from(grid.z, (z) => Math.round(z * 10)), grid.cols) },
   roads: roads.map(roadOut),
   buildings: buildings.map((b) => {
     let z0 = Number.MAX_VALUE
     for (const ring of [b.outer, ...(b.holes ?? [])]) for (let i = 0; i < ring.length; i += 2) z0 = Math.min(z0, at(ring[i]!, ring[i + 1]!))
-    const { id, kind, name, h, style, ruins, tint, outer, holes } = b
-    return { id, kind, ...(name !== undefined ? { name } : {}), h, z0: r1(z0), style, ...(ruins ? { ruins } : {}), tint, outer, ...(holes ? { holes } : {}) }
+    const { id, kind, name, eave, style, ruins, tint, outer, holes } = b
+    const rise = eave === undefined ? Number.NaN : eave - z0
+    const h = rise >= EAVE.min && rise <= EAVE.max ? rise : b.h
+    return { id, kind, ...(name !== undefined ? { name } : {}), h: r1(h), z0: r1(z0), style, ...(ruins ? { ruins } : {}), tint, outer, ...(holes ? { holes } : {}) }
   }),
   water: water.map((w, i) => {
     const line = waterLine(w.pts, wp[i]!)
@@ -182,8 +181,8 @@ const map: MonzoneMap = {
   pois,
   districts,
   graph: { xy: graph.xy, edges: graph.edges, traffic: graph.traffic, walk: graph.walk },
-  walls: { walk: walls.walk, drive: walls.drive },
-  trees,
+  walls: { walk: packPoints(walls.walk, BOUNDS, 4, 4, "walk walls"), drive: packPoints(walls.drive, BOUNDS, 4, 4, "drive walls") },
+  trees: packPoints(trees, BOUNDS, 3, 2, "trees"),
   spawns: { player, parked }
 }
 const json = JSON.stringify(map)
@@ -205,5 +204,5 @@ console.log({
   wallsWalk: walls.walk.length / 4, wallsDrive: walls.drive.length / 4, blockedCells: { walk: walls.walkCells, drive: walls.driveCells },
   nodes: graph.xy.length / 2, edges: graph.edges.length / 3, traffic: graph.traffic.length, walk: graph.walk.length, trees: trees.length / 3, parked: parked.length, player,
   grades,
-  sizes: { heightmap: kb(map.heightmap), trees: kb(trees), walls: kb(map.walls), graph: kb(map.graph), roads: kb(map.roads), buildings: kb(map.buildings), areas: kb(areas) }
+  sizes: { heightmap: kb(map.heightmap), trees: kb(map.trees), walls: kb(map.walls), graph: kb(map.graph), roads: kb(map.roads), buildings: kb(map.buildings), areas: kb(areas) }
 })

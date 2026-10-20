@@ -15,7 +15,8 @@ import {
   Autopilot, bindings, CarInput, Down, Game, KeyboardInput, makeRuntime, Motion, Pedestrian, Person, Player, PlayerView, Pose, type PoseValue,
   PrevPose, Route, Score, setup, Stolen, Traffic, update, Vehicle
 } from "./index.ts"
-import { endNode, laneOf, lanePoint, laneSide, nextTrafficEdge } from "./route.ts"
+import { graph } from "./map/index.ts"
+import { edgeIndex, endNode, facesForward, laneOf, lanePoint, laneSide, nextTrafficEdge, roadOf, type Step } from "./route.ts"
 import { type parkedCar, type pedestrian, trafficCar } from "./spawning.ts"
 import { PERSON_RADIUS } from "./tuning.ts"
 import { VEHICLES, type VehicleModel } from "./vehicles.ts"
@@ -109,9 +110,28 @@ export const start = (timeline: Timeline = [], staging?: readonly [PoseValue, Ca
   return { runtime, run, world: () => runtime.inspect(World), view: () => runtime.inspect(PlayerView) }
 }
 
-const BATTISTI = laneOf(7, true)
-/** Via Cesare Battisti, eastbound lane: ~55 m of straight, clear road ahead. */
-export const ON_BATTISTI = { ...lanePoint(BATTISTI, 0, laneSide({ edge: 7, forward: true }, "panda")), angle: Ops.atan2(BATTISTI.dy, BATTISTI.dx) }
+const battisti = graph.trafficEdges.filter((e) => roadOf(e).name === "Via Cesare Battisti")
+const inFront = edgeIndex(battisti).nearest(-412, 438)
+/**
+ * Via Cesare Battisti eastbound in front of the Carabinieri: the traffic edge of that road nearest
+ * (-412, 438), found by geometry so the fixtures survive map rebuilds. ~40 m of straight, clear road
+ * with the next edge (`straightOn`), both verges walkable.
+ */
+export const BATTISTI: Step = { edge: inFront, forward: facesForward(inFront, 0) }
+const lane = laneOf(BATTISTI.edge, BATTISTI.forward)
+/** The start of the BATTISTI lane, heading along it. */
+export const ON_BATTISTI = { ...lanePoint(lane, 0, laneSide(BATTISTI, "panda")), angle: Ops.atan2(lane.dy, lane.dx) }
+
+/** The traffic edge leaving the end of `step` that carries on most nearly straight. */
+export const straightOn = (step: Step): Step => {
+  const node = endNode(step.edge, step.forward), here = laneOf(step.edge, step.forward)
+  const along = (next: Step) => {
+    const there = laneOf(next.edge, next.forward)
+    return here.dx * there.dx + here.dy * there.dy
+  }
+  const options = graph.adjacency[node]!.filter((e) => e !== step.edge && graph.trafficEdges.includes(e)).map((e) => ({ edge: e, forward: graph.edges[e]!.a === node }))
+  return options.reduce((best, next) => (along(next) > along(best) ? next : best))
+}
 
 /** The point beside a panda's left (driver's) or right door. */
 export const door = (car: PoseValue, side: 1 | -1 = 1): PoseValue => {
@@ -137,5 +157,5 @@ export const rolling = (model: VehicleModel, pose: PoseValue, speed: number, thr
 
 /** A traffic car on Via Cesare Battisti, eastbound, standing. */
 export const battistiTraffic = (color: number) => trafficCar("panda", color, ON_BATTISTI, 0,
-  { edge: 7, forward: true, side: laneSide({ edge: 7, forward: true }, "panda") },
-  nextTrafficEdge(endNode(7, true), 7, "panda", Random.make(1)))
+  { ...BATTISTI, side: laneSide(BATTISTI, "panda") },
+  nextTrafficEdge(endNode(BATTISTI.edge, BATTISTI.forward), BATTISTI.edge, "panda", Random.make(1)))

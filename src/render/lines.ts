@@ -1,6 +1,7 @@
 /**
- * Ribbons along map polylines (roads, water, rail) and the bridge decks under them. Ribbons are
- * densified so they follow the terrain facets, split per chunk, and go in the decal layer.
+ * Ribbons along map polylines (roads, water, rail), the bridge decks under them and station
+ * platforms, as pieces the streamed world draws chunk by chunk. Ribbons are densified so they
+ * follow the terrain facets and go in the decal layer.
  *
  * @module render/lines
  */
@@ -8,9 +9,9 @@ import { ExtrudeGeometry, Shape, Vector2 } from "three"
 
 import { MAP, roadClassOf, type Road } from "../sim/map/index.ts"
 import { ROAD_LIFT, surfaceY, terrainY, yOf } from "./ground.ts"
-import { paint, type SinkAt, type Triangles } from "./geometry.ts"
+import { APRON } from "./chunks.ts"
+import { paint, type Piece, type SinkAt, type Triangles } from "./geometry.ts"
 import { PALETTE } from "./palette.ts"
-import { APRON } from "./terrain.ts"
 
 /** A strip along a polyline. `y` gives the render height of an edge point from the centreline elevation there. */
 interface RibbonSpec {
@@ -44,12 +45,18 @@ const throughApron = (pts: ReadonlyArray<number>, z: ReadonlyArray<number>): { p
   }
 }
 
-/** Adds a ribbon to the decal layer of the chunks it crosses. */
-const ribbon = (at: SinkAt, spec: RibbonSpec): void => {
+/**
+ * Adds segments k0..k1 of a ribbon to the decal layer of the chunks they cross. Their neighbours
+ * are densified too, for the mitres, and their quads go wherever `at` puts them; the arc length
+ * (dashes) still counts from the start of the line.
+ */
+const ribbon = (at: SinkAt, spec: RibbonSpec, k0: number, k1: number): void => {
   const step = spec.dash === undefined ? 2 : Math.min(1, spec.dash / 2)
   const xs: Array<number> = [], ys: Array<number> = [], zs: Array<number> = [], ss: Array<number> = []
+  const first = Math.max(0, k0 - 1), last = Math.min(spec.z.length - 2, k1 + 1)
   let s = 0
-  for (let k = 0; k + 1 < spec.z.length; k++) {
+  for (let k = 0; k < first; k++) s += Math.hypot(spec.pts[2 * k + 2]! - spec.pts[2 * k]!, spec.pts[2 * k + 3]! - spec.pts[2 * k + 1]!)
+  for (let k = first; k <= last; k++) {
     const ax = spec.pts[2 * k]!, ay = spec.pts[2 * k + 1]!, bx = spec.pts[2 * k + 2]!, by = spec.pts[2 * k + 3]!
     const len = Math.hypot(bx - ax, by - ay), n = Math.max(1, Math.ceil(len / step))
     for (let j = 0; j < n; j++) {
@@ -60,9 +67,9 @@ const ribbon = (at: SinkAt, spec: RibbonSpec): void => {
     }
     s += len
   }
-  xs.push(spec.pts.at(-2)!)
-  ys.push(spec.pts.at(-1)!)
-  zs.push(spec.z.at(-1)!)
+  xs.push(spec.pts[2 * last + 2]!)
+  ys.push(spec.pts[2 * last + 3]!)
+  zs.push(spec.z[last + 1]!)
   ss.push(s)
   const count = xs.length
   if (count < 2) return
@@ -113,9 +120,9 @@ const prism = (tris: Triangles, ax: number, ay: number, ya: number, bx: number, 
   tris.face(p(1, -1, bottom), p(1, 1, bottom), p(1, 1, top), p(1, -1, top), [dx, 0, -dy], hex)
 }
 
-/** Deck slab under a bridge and a low parapet along each side. */
-const bridge = (at: SinkAt, pts: ReadonlyArray<number>, y: (k: number) => number, width: number, hex: number): void => {
-  for (let k = 0; k + 3 < pts.length; k += 2) {
+/** Deck slab under segments k0..k1 of a bridge and a low parapet along each side. */
+const bridge = (at: SinkAt, pts: ReadonlyArray<number>, y: (k: number) => number, width: number, hex: number, k0: number, k1: number): void => {
+  for (let k = 2 * k0; k <= 2 * k1 && k + 3 < pts.length; k += 2) {
     const ax = pts[k]!, ay = pts[k + 1]!, bx = pts[k + 2]!, by = pts[k + 3]!
     const tris = at((ax + bx) / 2, (ay + by) / 2).solid
     const ya = y(k / 2), yb = y(k / 2 + 1)
@@ -143,58 +150,70 @@ const bridgeHex = (road: Road): number => {
   return cls === "tertiary" || cls === "unclassified" ? PALETTE.plasterGrey : PALETTE.stoneMid
 }
 
+/** A piece drawing every ribbon in `specs` along `line`. */
+const strips = (line: { readonly pts: ReadonlyArray<number> }, specs: ReadonlyArray<RibbonSpec>): Piece =>
+  ({ pts: line.pts, draw: (at, k0, k1) => { for (const spec of specs) ribbon(at, spec, k0, k1) } })
+
+/** A piece drawing the deck under a bridge whose deck top is `y(k)` at vertex k. */
+const deck = (pts: ReadonlyArray<number>, y: (k: number) => number, width: number, hex: number): Piece =>
+  ({ pts, draw: (at, k0, k1) => bridge(at, pts, y, width, hex, k0, k1) })
+
 /** Roads (with centre dashes on the provincial roads and decks on bridges); tunnels are not drawn. */
-export const buildRoads = (at: SinkAt): void => {
-  for (const road of MAP.roads) {
-    if (road.tunnel === true) continue
-    const cls = roadClassOf(road), lift = ROAD_LIFT[cls], lifted = road.bridge === true
-    const line = throughApron(road.pts, road.z)
-    ribbon(at, { ...line, width: road.w, hex: roadHex(road), y: (x, y, z) => surfaceY(z, x, y, lift, lifted) })
-    if (cls === "tertiary") {
-      ribbon(at, { ...line, width: 0.25, hex: PALETTE.marbleWhite, dash: 3, y: (x, y, z) => surfaceY(z, x, y, lift + 0.02, lifted) })
-    }
-    if (lifted) bridge(at, road.pts, (k) => yOf(road.z[k]!) + lift, road.w, bridgeHex(road))
+const roads = (): Array<Piece> => MAP.roads.flatMap((road) => {
+  if (road.tunnel === true) return []
+  const cls = roadClassOf(road), lift = ROAD_LIFT[cls], lifted = road.bridge === true
+  const line = throughApron(road.pts, road.z)
+  const specs: Array<RibbonSpec> = [{ ...line, width: road.w, hex: roadHex(road), y: (x, y, z) => surfaceY(z, x, y, lift, lifted) }]
+  if (cls === "tertiary") {
+    specs.push({ ...line, width: 0.25, hex: PALETTE.marbleWhite, dash: 3, y: (x, y, z) => surfaceY(z, x, y, lift + 0.02, lifted) })
   }
-}
+  return [strips(line, specs), ...(lifted ? [deck(road.pts, (k) => yOf(road.z[k]!) + lift, road.w, bridgeHex(road))] : [])]
+})
 
 /** Rivers and streams: a shallow ribbon with a deeper channel down the middle of the wide ones. */
-export const buildWater = (at: SinkAt): void => {
-  for (const water of MAP.water) {
-    const line = throughApron(water.pts, water.z)
-    ribbon(at, { ...line, width: water.w, hex: PALETTE.waterShallow, y: (_x, _y, z) => yOf(z) + 0.02 })
-    if (water.w >= 8) ribbon(at, { ...line, width: water.w * 0.45, hex: PALETTE.waterDeep, y: (_x, _y, z) => yOf(z) + 0.04 })
-  }
-}
+const water = (): Array<Piece> => MAP.water.map((w) => {
+  const line = throughApron(w.pts, w.z)
+  return strips(line, [
+    { ...line, width: w.w, hex: PALETTE.waterShallow, y: (_x, _y, z) => yOf(z) + 0.02 },
+    ...(w.w >= 8 ? [{ ...line, width: w.w * 0.45, hex: PALETTE.waterDeep, y: (_x: number, _y: number, z: number) => yOf(z) + 0.04 }] : [])
+  ])
+})
 
 const GAUGE = 1.435
 /** The Lucca–Aulla line: ballast, sleepers and two rails; bridges get decks, tunnels are skipped. */
-export const buildRail = (at: SinkAt): void => {
-  for (const rail of MAP.rail) {
-    if (rail.tunnel === true) continue
-    const lifted = rail.bridge === true
-    const y = (lift: number) => (x: number, y: number, z: number) => surfaceY(z, x, y, lift, lifted)
-    const line = throughApron(rail.pts, rail.z)
-    ribbon(at, { ...line, width: 3.2, hex: PALETTE.stoneMid, y: y(0.04) })
-    ribbon(at, { ...line, width: 2.4, hex: PALETTE.woodBrown, dash: 0.6, y: y(0.07) })
-    for (const side of [-1, 1]) ribbon(at, { ...line, width: 0.18, hex: PALETTE.stoneDark, offset: (side * GAUGE) / 2, y: y(0.12) })
-    if (lifted) bridge(at, rail.pts, (k) => yOf(rail.z[k]!) + 0.04, 3.2, PALETTE.stoneMid)
-  }
-}
+const rail = (): Array<Piece> => MAP.rail.flatMap((r) => {
+  if (r.tunnel === true) return []
+  const lifted = r.bridge === true
+  const y = (lift: number) => (x: number, y: number, z: number) => surfaceY(z, x, y, lift, lifted)
+  const line = throughApron(r.pts, r.z)
+  const ribbons = strips(line, [
+    { ...line, width: 3.2, hex: PALETTE.stoneMid, y: y(0.04) },
+    { ...line, width: 2.4, hex: PALETTE.woodBrown, dash: 0.6, y: y(0.07) },
+    ...[-1, 1].map((side) => ({ ...line, width: 0.18, hex: PALETTE.stoneDark, offset: (side * GAUGE) / 2, y: y(0.12) }))
+  ])
+  return [ribbons, ...(lifted ? [deck(r.pts, (k) => yOf(r.z[k]!) + 0.04, 3.2, PALETTE.stoneMid)] : [])]
+})
 
 /** Station platforms: a slab half a metre above the highest ground under it. */
-export const buildPlatforms = (at: SinkAt): void => {
-  for (const area of MAP.areas) {
-    if (area.kind !== "platform") continue
-    const outer = area.rings[0]!
-    const points: Array<Vector2> = []
-    let top = -Number.MAX_VALUE
-    for (let k = 0; k + 1 < outer.length; k += 2) {
-      points.push(new Vector2(outer[k]!, outer[k + 1]!))
-      top = Math.max(top, terrainY(outer[k]!, outer[k + 1]!))
+const platforms = (): Array<Piece> => MAP.areas.flatMap((area) => {
+  if (area.kind !== "platform") return []
+  const outer = area.rings[0]!
+  return [{
+    pts: [outer[0]!, outer[1]!],
+    draw: (at) => {
+      const points: Array<Vector2> = []
+      let top = -Number.MAX_VALUE
+      for (let k = 0; k + 1 < outer.length; k += 2) {
+        points.push(new Vector2(outer[k]!, outer[k + 1]!))
+        top = Math.max(top, terrainY(outer[k]!, outer[k + 1]!))
+      }
+      const slab = new ExtrudeGeometry(new Shape(points), { depth: 2, bevelEnabled: false })
+      slab.rotateX(-Math.PI / 2)
+      slab.translate(0, top + 0.5 - 2, 0)
+      at(outer[0]!, outer[1]!).pieces.push(paint(slab, PALETTE.asphaltWorn))
     }
-    const slab = new ExtrudeGeometry(new Shape(points), { depth: 2, bevelEnabled: false })
-    slab.rotateX(-Math.PI / 2)
-    slab.translate(0, top + 0.5 - 2, 0)
-    at(outer[0]!, outer[1]!).pieces.push(paint(slab, PALETTE.asphaltWorn))
-  }
-}
+  }]
+})
+
+/** Every line piece of the map (roads, water, rail) and the platforms, in draw order. */
+export const linePieces = (): Array<Piece> => [...roads(), ...water(), ...rail(), ...platforms()]

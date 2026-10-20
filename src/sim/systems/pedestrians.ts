@@ -16,7 +16,7 @@ const SCARY_SPEED = 10
 const SCARY_RANGE = 5
 /** Walkers aim this far ahead along their lane, m. */
 const LOOK = 1.5
-/** Making less than this share of the wanted velocity counts as blocked. */
+/** Making less than this share of the wanted speed along the lane counts as blocked. */
 const PROGRESS = 0.5
 /** Every this long blocked, a walker tries the other verge, then turns back. */
 const BLOCKED_STEPS = Clock.steps(Clock.duration(STEP, 0.5))
@@ -89,8 +89,9 @@ export const Pedestrians = Game.System("Lunigiana/Pedestrians", {
     const target = lanePoint(lane, Math.min(lane.length, Math.max(0, along) + LOOK), route.side)
     const velocity = Vec2.scale(Vec2.normalizeOr(Vec2.subtract(target, pose), Vec2.zero), mood.mood === "flee" ? RUN : WALK)
 
-    // Motion is last step's real velocity (walls and Contacts' shoves included).
-    const progress = (motion.vx * velocity.x + motion.vy * velocity.y) / Math.max(1e-9, Vec2.lengthSquared(velocity))
+    // Motion is last step's real velocity (walls and Contacts' shoves included). Progress is measured along the lane:
+    // crossing to the other verge counts, sliding sideways along a wall that blocks the way does not.
+    const progress = (motion.vx * lane.dx + motion.vy * lane.dy) / Math.max(1e-9, velocity.x * lane.dx + velocity.y * lane.dy)
     const blocked = progress < PROGRESS ? mood.blocked + 1 : 0
     if (blocked > 0 && blocked % BLOCKED_STEPS === 0) route = (blocked / BLOCKED_STEPS) % 2 === 1 ? { ...route, side: -route.side } : turnBack(route)
     mood = { ...mood, blocked }

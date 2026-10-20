@@ -1,19 +1,24 @@
 /**
- * The static world, built once from MAP: per 128 m chunk one terrain mesh, one solid mesh
- * (buildings, roofs, bridges, platforms) and one decal mesh (roads, water, rail), plus instanced
- * trees. Dynamic actors are not here (see render/index.ts).
+ * The static world, streamed around the camera focus in the chunks of render/chunks. A built
+ * chunk is one terrain mesh, one solid mesh (buildings, roofs, bridges, platforms), one decal
+ * mesh (roads, water, rail) and an InstancedMesh per tree kind. Pieces and trees are bucketed
+ * per chunk once, so a build reads only its own; the land cover is rasterised once for the whole
+ * map (≈ 40 ms, 1.5 MB, cheaper than clipping areas per chunk). Dynamic actors are not here
+ * (see render/index.ts).
  *
  * @module render/world
  */
-import { Mesh, type BufferGeometry, type Material, type Object3D } from "three"
+import { InstancedMesh, Mesh, type BufferGeometry, type Material, type Object3D, type Vector3 } from "three"
 
 import { MAP } from "../sim/map/index.ts"
-import { buildBuildings } from "./buildings.ts"
-import { decalMaterial, merge, solidMaterial, Triangles, type Sink } from "./geometry.ts"
+import { buildingPieces } from "./buildings.ts"
+import { CHUNKS, chunkOf, plan, radiiFor, screenDistances, screenRects } from "./chunks.ts"
+import { decalMaterial, merge, solidMaterial, Triangles, type Piece, type Sink } from "./geometry.ts"
 import { rasterCover } from "./landcover.ts"
-import { buildPlatforms, buildRail, buildRoads, buildWater } from "./lines.ts"
-import { CHUNKS, chunkOf, terrainChunk } from "./terrain.ts"
-import { buildTrees } from "./trees.ts"
+import { linePieces } from "./lines.ts"
+import { isoCamera } from "./pipeline.ts"
+import { terrainChunk } from "./terrain.ts"
+import { bucketTrees, treeMeshes } from "./trees.ts"
 
 const staticMesh = (geometry: BufferGeometry, material: Material, cast: boolean): Mesh => {
   const mesh = new Mesh(geometry, material)
@@ -24,29 +29,87 @@ const staticMesh = (geometry: BufferGeometry, material: Material, cast: boolean)
   return mesh
 }
 
-/** Builds the world into `parent`, once (a dev edit reloads the page, so it is never torn down). */
-export const buildWorld = (parent: Object3D): void => {
-  const sinks = new Map<number, Sink>()
-  const at = (x: number, y: number): Sink => {
-    const key = chunkOf(x, y)
-    let sink = sinks.get(key)
-    if (sink === undefined) sinks.set(key, (sink = { solid: new Triangles(), decal: new Triangles(), pieces: [] }))
-    return sink
-  }
-  buildBuildings(at)
-  buildRoads(at)
-  buildWater(at)
-  buildRail(at)
-  buildPlatforms(at)
+const emptySink = (): Sink => ({ solid: new Triangles(), decal: new Triangles(), pieces: [] })
 
-  const meshes: Array<Mesh> = []
-  const cover = rasterCover(MAP)
-  for (let key = 0; key < CHUNKS.x * CHUNKS.y; key++) meshes.push(staticMesh(terrainChunk(key, cover), solidMaterial, false))
-  for (const sink of sinks.values()) {
+/**
+ * Pieces per chunk key: flat (piece, k0, k1) triples, k0..k1 being the piece's segments whose
+ * bounding box reaches the chunk (a one-point piece has the one segment 0).
+ */
+const bucketPieces = (pieces: ReadonlyArray<Piece>): Array<Array<number>> => {
+  const chunks = Array.from({ length: CHUNKS.x * CHUNKS.y }, (): Array<number> => [])
+  const range = new Map<number, [number, number]>()
+  pieces.forEach((piece, p) => {
+    range.clear()
+    const pts = piece.pts, n = pts.length / 2
+    for (let k = 0; k < Math.max(1, n - 1); k++) {
+      const ax = pts[2 * k]!, ay = pts[2 * k + 1]!, b = Math.min(k + 1, n - 1), bx = pts[2 * b]!, by = pts[2 * b + 1]!
+      const lo = chunkOf(Math.min(ax, bx), Math.min(ay, by)), hi = chunkOf(Math.max(ax, bx), Math.max(ay, by))
+      for (let cy = Math.floor(lo / CHUNKS.x); cy <= Math.floor(hi / CHUNKS.x); cy++) {
+        for (let cx = lo % CHUNKS.x; cx <= hi % CHUNKS.x; cx++) {
+          const key = cy * CHUNKS.x + cx, seen = range.get(key)
+          if (seen === undefined) range.set(key, [k, k])
+          else seen[1] = k
+        }
+      }
+    }
+    for (const [key, [k0, k1]] of range) chunks[key]!.push(p, k0, k1)
+  })
+  return chunks
+}
+
+/** The streamed static world under `parent`; `update` it every frame with the camera focus. */
+export class World {
+  /** The meshes of every built chunk, by key. */
+  readonly loaded = new Map<number, ReadonlyArray<Mesh>>()
+  private readonly parent: Object3D
+  private readonly pieces: ReadonlyArray<Piece> = [...buildingPieces(), ...linePieces()]
+  private readonly byChunk = bucketPieces(this.pieces)
+  private readonly trees = bucketTrees()
+  private readonly cover = rasterCover(MAP)
+  private readonly axes = isoCamera()
+  private readonly rects = screenRects(this.axes.right, this.axes.up)
+  private readonly distances = new Float32Array(CHUNKS.x * CHUNKS.y)
+
+  constructor(parent: Object3D) {
+    this.parent = parent
+  }
+
+  /**
+   * Streams around `focus` (three space). `reach` is how far from its centre the view shows, in
+   * screen metres (see `radiiFor`). Drops chunks beyond the unload radius, then builds the missing
+   * ones within the load radius, nearest first, until `budgetMs` is spent (always at least one).
+   */
+  update(focus: Vector3, reach: number, budgetMs: number): void {
+    screenDistances(this.rects, focus.dot(this.axes.right), focus.dot(this.axes.up), this.distances)
+    const { build, drop } = plan(this.distances, this.loaded, radiiFor(reach))
+    for (const key of drop) {
+      for (const mesh of this.loaded.get(key) ?? []) {
+        mesh.removeFromParent()
+        // Tree shapes are shared by every chunk: an InstancedMesh frees only its instance buffers.
+        if (mesh instanceof InstancedMesh) mesh.dispose()
+        else mesh.geometry.dispose()
+      }
+      this.loaded.delete(key)
+    }
+    const start = performance.now()
+    for (const key of build) {
+      const meshes = this.build(key)
+      this.parent.add(...meshes)
+      this.loaded.set(key, meshes)
+      if (performance.now() - start >= budgetMs) break
+    }
+  }
+
+  private build(key: number): Array<Mesh> {
+    const sink = emptySink(), elsewhere = emptySink()
+    const at = (x: number, y: number): Sink => (chunkOf(x, y) === key ? sink : elsewhere)
+    const list = this.byChunk[key]!
+    for (let n = 0; n < list.length; n += 3) this.pieces[list[n]!]!.draw(at, list[n + 1]!, list[n + 2]!)
+    const meshes = [staticMesh(terrainChunk(key, this.cover), solidMaterial, false)]
     const solid = [...(sink.solid.empty ? [] : [sink.solid.geometry()]), ...sink.pieces]
     if (solid.length > 0) meshes.push(staticMesh(merge(solid), solidMaterial, true))
     if (!sink.decal.empty) meshes.push(staticMesh(sink.decal.geometry(), decalMaterial, false))
+    const trees = this.trees.get(key)
+    return trees === undefined ? meshes : [...meshes, ...treeMeshes(trees, solidMaterial)]
   }
-  const trees = buildTrees(solidMaterial)
-  parent.add(...meshes, ...trees)
 }

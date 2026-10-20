@@ -43,19 +43,23 @@ const largest = (nodes: number, edges: ReadonlyArray<number>, ids: ReadonlyArray
   return ids.filter((e) => find(edges[3 * e]!) === root)
 }
 
-/** Drops tunnel edges hanging off dead ends, repeatedly. */
-const pruneTunnelSpurs = (edges: ReadonlyArray<number>, ids: ReadonlyArray<number>, tunnel: (e: number) => boolean): Array<number> => {
+/** Drops edges hanging off a dead end (`end` is its dead-end node) while `drop` says so, repeatedly. */
+const pruneSpurs = (edges: ReadonlyArray<number>, ids: ReadonlyArray<number>, drop: (e: number, end: number) => boolean): Array<number> => {
   let kept = [...ids]
   for (;;) {
     const deg = new Map<number, number>()
     for (const e of kept) for (const n of [edges[3 * e]!, edges[3 * e + 1]!]) deg.set(n, (deg.get(n) ?? 0) + 1)
-    const next = kept.filter((e) => !(tunnel(e) && (deg.get(edges[3 * e]!) === 1 || deg.get(edges[3 * e + 1]!) === 1)))
+    const next = kept.filter((e) => ![edges[3 * e]!, edges[3 * e + 1]!].some((n) => deg.get(n) === 1 && drop(e, n)))
     if (next.length === kept.length) return kept
     kept = next
   }
 }
 
-export const buildGraph = (roads: ReadonlyArray<RoadF>): GraphOut => {
+/**
+ * The road graph. Traffic drops tunnel spurs and dead-end tips where `roomy(x, y)` is false
+ * (no room for a car to stop and turn: lanes that end between houses).
+ */
+export const buildGraph = (roads: ReadonlyArray<RoadF>, roomy: (x: number, y: number) => boolean): GraphOut => {
   const ids = new Map<string, number>()
   const xy: Array<number> = [], edges: Array<number> = []
   const node = (key: string, x: number, y: number) => {
@@ -87,7 +91,8 @@ export const buildGraph = (roads: ReadonlyArray<RoadF>): GraphOut => {
   })
   const nodes = xy.length / 2, all = Array.from({ length: edges.length / 3 }, (_, e) => e)
   const road = (e: number) => roads[edges[3 * e + 2]!]!
-  const traffic = largest(nodes, edges, pruneTunnelSpurs(edges, all.filter((e) => isTraffic(road(e).cls) && !road(e).private), (e) => road(e).tunnel === true))
+  const drivable = all.filter((e) => isTraffic(road(e).cls) && !road(e).private)
+  const traffic = largest(nodes, edges, pruneSpurs(edges, drivable, (e, n) => road(e).tunnel === true || !roomy(xy[2 * n]!, xy[2 * n + 1]!)))
   const walk = largest(nodes, edges, all.filter((e) => road(e).tunnel !== true))
   const degree = Array.from({ length: nodes }, () => 0)
   for (const e of all) {

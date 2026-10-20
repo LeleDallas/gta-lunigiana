@@ -2,9 +2,10 @@ import { Clock } from "@typeonce/ritmo"
 import { Ops, Random, Vec2 } from "@typeonce/ritmo-math"
 
 import { carClear, clearOf, wallsAlong } from "../body.ts"
-import { graph } from "../map/index.ts"
+import { pointInRing, staticGrid } from "../collide.ts"
+import { graph, MAP } from "../map/index.ts"
 import {
-  allowsModel, cruiseSpeed, distanceToEdge, endNode, laneOf, lanePoint, laneSide, leadsToDeadEnd, midpoints, nextTrafficEdge, roadOf, walkSide
+  allowsModel, cruiseSpeed, distanceToEdge, edgeIndex, endNode, laneOf, lanePoint, laneSide, leadsToDeadEnd, nextTrafficEdge, roadOf, trafficIndex, walkSide
 } from "../route.ts"
 import {
   Autopilot, CarInput, Driving, Game, Motion, Pedestrian, Person, Player, Pose, PrevPose, Rng, Route, STEP, Time, Traffic, Vehicle
@@ -27,11 +28,33 @@ export const PEDESTRIANS = { max: 22, spawn: [VIEW_REACH, 120], despawn: 140, un
 /** Tries per spawn slot before giving up until the next period. */
 const TRIES = 4
 
-const within = (edges: ReadonlyArray<number>, x: number, y: number, [min, max]: readonly [number, number]) =>
-  edges.filter((e) => {
-    const d2 = Vec2.distanceSquared(midpoints[e]!, { x, y })
-    return d2 >= min * min && d2 <= max * max
+/** Pedestrians only spawn on walk edges with a building within this many metres of their midpoint: the villages and hamlets, not the woods between them. */
+export const PEOPLED = 50
+const footprints = MAP.buildings.map(({ outer }) => {
+  let x0 = outer[0]!, y0 = outer[1]!, x1 = x0, y1 = y0
+  for (let k = 2; k + 1 < outer.length; k += 2) [x0, y0, x1, y1] = [Math.min(x0, outer[k]!), Math.min(y0, outer[k + 1]!), Math.max(x1, outer[k]!), Math.max(y1, outer[k + 1]!)]
+  return [x0, y0, x1, y1] as const
+})
+const buildingsIn = staticGrid(footprints.length, (i) => footprints[i]!, 64)
+/** Whether (x, y) is inside a building (not in a courtyard): verges run into houses where they crowd the road. */
+const indoors = (x: number, y: number): boolean => {
+  let inside = false
+  buildingsIn(x, y, x, y, (i) => {
+    const { outer, holes } = MAP.buildings[i]!
+    inside ||= pointInRing(x, y, outer) && !(holes ?? []).some((h) => pointInRing(x, y, h))
   })
+  return inside
+}
+const peopled = edgeIndex(graph.walkEdges.filter((e) => {
+  const lane = laneOf(e, true), m = lanePoint(lane, lane.length / 2, 0)
+  let near = false
+  buildingsIn(m.x - PEOPLED, m.y - PEOPLED, m.x + PEOPLED, m.y + PEOPLED, (i) => {
+    const [x0, y0, x1, y1] = footprints[i]!
+    const dx = Math.max(x0 - m.x, 0, m.x - x1), dy = Math.max(y0 - m.y, 0, m.y - y1)
+    near ||= dx * dx + dy * dy <= PEOPLED * PEOPLED
+  })
+  return near
+}))
 
 /** A random traffic model for `edge` (panda 75%, ape 15%, truck 10%), falling back to smaller ones that fit; undefined if none does. */
 const pickModel = (random: Random.Random, edge: number): VehicleModel | undefined => {
@@ -42,9 +65,9 @@ const pickModel = (random: Random.Random, edge: number): VehicleModel | undefine
 
 /**
  * Every half second, keeps the world around the player alive: traffic on
- * random traffic edges and pedestrians on walk edges spawn out of view and
- * despawn once far behind, or out of sight when stuck for good (never the
- * player's own car).
+ * random traffic edges and pedestrians on walk edges near buildings spawn
+ * out of view and despawn once far behind, or out of sight when stuck for
+ * good (never the player's own car).
  */
 export const Populate = Game.System("Lunigiana/Populate", {
   queries: {
@@ -78,7 +101,7 @@ export const Populate = Game.System("Lunigiana/Populate", {
     else cars++
   }
   const taken = queries.vehicles.each().map(({ data }) => data.pose.get())
-  const roads = within(graph.trafficEdges, at.x, at.y, TRAFFIC.spawn)
+  const roads = trafficIndex.around(at.x, at.y, TRAFFIC.spawn)
   for (let slot = 0; slot < TRAFFIC.perTick && cars < TRAFFIC.max; slot++) for (let k = 0; k < TRIES; k++) {
     const edge = random.pick(roads)
     if (edge === undefined) break
@@ -106,7 +129,7 @@ export const Populate = Game.System("Lunigiana/Populate", {
     if (far(pose, PEDESTRIANS.despawn) || stranded) commands.despawn(entity)
     else people++
   }
-  const paths = within(graph.walkEdges, at.x, at.y, PEDESTRIANS.spawn)
+  const paths = peopled.around(at.x, at.y, PEDESTRIANS.spawn)
   for (let slot = 0; slot < PEDESTRIANS.perTick && people < PEDESTRIANS.max; slot++) for (let k = 0; k < TRIES; k++) {
     const edge = random.pick(paths)
     if (edge === undefined) break
@@ -116,7 +139,7 @@ export const Populate = Game.System("Lunigiana/Populate", {
     const spot = lanePoint(lane, random.range(0, lane.length), side)
     // The edge's midpoint is in the band, but the spot may not be.
     if (!far(spot, PEDESTRIANS.spawn[0]) || far(spot, PEDESTRIANS.spawn[1])) continue
-    if (!clearOf(wallsAlong("walk", spot.x, spot.y, 0, 0, 1), spot.x, spot.y, PERSON_RADIUS)) continue
+    if (indoors(spot.x, spot.y) || !clearOf(wallsAlong("walk", spot.x, spot.y, 0, 0, 1), spot.x, spot.y, PERSON_RADIUS)) continue
     commands.spawn(pedestrian(randomLook(random), { ...spot, angle: Ops.atan2(lane.dy, lane.dx) }, { edge, forward, side }, { mood: "walk", until: 0 }))
     people++
     break

@@ -7,10 +7,10 @@
  */
 import { Ops, type Random } from "@typeonce/ritmo-math"
 
-import { carClear } from "./body.ts"
-import { segmentDistance } from "./collide.ts"
-import { graph, MAP, roadClassOf, type Road, type Segment } from "./map/index.ts"
-import type { VehicleModel } from "./vehicles.ts"
+import { carCircles, carClear } from "./body.ts"
+import { segmentDistance, staticGrid } from "./collide.ts"
+import { graph, MAP, roadClassOf, type Road, type Segment, wallsNear } from "./map/index.ts"
+import { VEHICLES, type VehicleModel } from "./vehicles.ts"
 
 /** An edge as travelled: start point, unit direction, length, and the right-hand normal. */
 export interface Lane {
@@ -116,6 +116,25 @@ const loopsOnly = (sides: Float64Array): Float64Array => {
 /** A car's body must clear the walls every LANE_SAMPLE metres along the middle 80% of a lane; its offset shrinks by SIDE_STEP until it does. */
 const LANE_SAMPLE = 1.5
 const SIDE_STEP = 0.25
+/** A car passes an oncoming Panda (most traffic) where the drive walls across a lane are both bodies plus this much apart, m; the walls are looked for this far out. */
+const PASS_MARGIN = 0.3
+const PASS_REACH = 3
+
+/** Free width across the drive walls at `along` metres down `lane` (up to 2 × PASS_REACH where a side is open). */
+const freeWidth = (lane: Lane, along: number): number => {
+  const p = lanePoint(lane, along, 0)
+  let left = PASS_REACH, right = PASS_REACH
+  for (const s of wallsNear("drive", p.x - PASS_REACH, p.y - PASS_REACH, p.x + PASS_REACH, p.y + PASS_REACH)) {
+    // Where the line across the lane, p + t·(rx, ry), meets the wall at a + u·(b − a).
+    const ex = s.bx - s.ax, ey = s.by - s.ay, den = lane.rx * ey - lane.ry * ex
+    if (den === 0) continue
+    const qx = s.ax - p.x, qy = s.ay - p.y, t = (qx * ey - qy * ex) / den, u = (qx * lane.ry - qy * lane.rx) / den
+    if (u < 0 || u > 1) continue
+    if (t >= 0) right = Math.min(right, t)
+    else left = Math.min(left, -t)
+  }
+  return left + right
+}
 
 /**
  * `sides` with only the largest connected part of its usable edges (≥ 0)
@@ -157,23 +176,34 @@ const largestPart = (sides: Float64Array): Float64Array => {
  * Per model, the lane offset of each traffic edge and direction: the nominal
  * keep-right offset, shrunk toward the centreline until the body clears every
  * wall along the lane (houses that crowd one side of the road); −1 where it
- * does not fit even on the centreline, its class is off limits, or the edge
- * is cut off from the rest.
+ * does not fit even on the centreline, two cars could not pass between the
+ * walls (they would meet head-on with no room to back out or turn round), its
+ * class is off limits, or the edge is cut off from the rest.
  */
 const lanesFor = (model: VehicleModel): Float64Array => {
   const sides = new Float64Array(graph.edges.length * 2).fill(-1)
-  for (const edge of graph.trafficEdges) for (const forward of [false, true]) {
+  const passing = VEHICLES[model].width + VEHICLES.panda.width + PASS_MARGIN
+  for (const edge of graph.trafficEdges) {
     if (!classAllows(edge, model)) continue
-    const lane = laneOf(edge, forward)
-    const angle = Ops.atan2(lane.dy, lane.dx)
-    const samples = Math.max(2, Math.ceil((lane.length * 0.8) / LANE_SAMPLE))
-    const fits = (side: number) => {
-      for (let i = 0; i <= samples; i++) if (!carClear(model, { ...lanePoint(lane, lane.length * (0.1 + (0.8 * i) / samples), side), angle })) return false
-      return true
+    // Samples every LANE_SAMPLE m over the middle 80%: the same points travelled either way.
+    const samples = Math.max(2, Math.ceil((graph.edges[edge]!.length * 0.8) / LANE_SAMPLE))
+    const at = (lane: Lane, i: number) => lane.length * (0.1 + (0.8 * i) / samples)
+    const ab = laneOf(edge, true)
+    let singleFile = false
+    for (let i = 0; i <= samples && !singleFile; i++) singleFile = freeWidth(ab, at(ab, i)) < passing
+    if (singleFile) continue
+    for (const forward of [false, true]) {
+      const lane = laneOf(edge, forward)
+      const angle = Ops.atan2(lane.dy, lane.dx)
+      const circles = carCircles(model, angle)
+      const fits = (side: number) => {
+        for (let i = 0; i <= samples; i++) if (!carClear(model, { ...lanePoint(lane, at(lane, i), side), angle }, 0, circles)) return false
+        return true
+      }
+      let side = trafficSide(roadOf(edge))
+      while (side > 0 && !fits(side)) side = Math.max(0, side - SIDE_STEP)
+      if (side > 0 || fits(0)) sides[key({ edge, forward })] = side
     }
-    let side = trafficSide(roadOf(edge))
-    while (side > 0 && !fits(side)) side = Math.max(0, side - SIDE_STEP)
-    if (side > 0 || fits(0)) sides[key({ edge, forward })] = side
   }
   return largestPart(sides)
 }
@@ -237,15 +267,49 @@ const chords: ReadonlyArray<Segment> = graph.edges.map((e) => {
 /** Distance from (x, y) to the centreline of `edge`. */
 export const distanceToEdge = (edge: number, x: number, y: number): number => segmentDistance(chords[edge]!, x, y)
 
-/** The edge of `edges` whose centreline is nearest to (x, y). */
-export const nearestEdge = (edges: ReadonlyArray<number>, x: number, y: number): number => {
-  let best = edges[0]!, distance = Number.MAX_VALUE
-  for (const e of edges) {
-    const d = distanceToEdge(e, x, y)
-    if (d < distance) [best, distance] = [e, d]
+/** Midpoint of every graph edge, indexed like `graph.edges`. */
+const midpoints: ReadonlyArray<{ readonly x: number; readonly y: number }> = chords.map((c) => ({ x: (c.ax + c.bx) / 2, y: (c.ay + c.by) / 2 }))
+
+/** Grid cell of `edgeIndex`, m (edges are at most ~25 m). */
+const EDGE_CELL = 32
+
+/**
+ * Lookups over a fixed set of graph edges through a grid of their chords, so that no query scans
+ * the whole map. `nearest`: the edge whose centreline is nearest (x, y), the first of `edges` on a
+ * tie. `around`: the edges whose midpoint is `min` to `max` m from (x, y), in a fixed order, in an
+ * array reused by the next call.
+ */
+export const edgeIndex = (edges: ReadonlyArray<number>) => {
+  const grid = staticGrid(edges.length, (k) => {
+    const c = chords[edges[k]!]!
+    return [Math.min(c.ax, c.bx), Math.min(c.ay, c.by), Math.max(c.ax, c.bx), Math.max(c.ay, c.by)]
+  }, EDGE_CELL)
+  const found: Array<number> = []
+  return {
+    nearest: (x: number, y: number): number => {
+      let best = 0, distance = Number.MAX_VALUE
+      const visit = (k: number) => {
+        const d = distanceToEdge(edges[k]!, x, y)
+        if (d < distance || (d === distance && k < best)) [best, distance] = [k, d]
+      }
+      // An edge outside the box is farther than r: once one inside is within r, it is the nearest.
+      for (let r = EDGE_CELL; r < 1e6; r *= 2) {
+        grid(x - r, y - r, x + r, y + r, visit)
+        if (distance <= r) break
+      }
+      return edges[best]!
+    },
+    around: (x: number, y: number, [min, max]: readonly [number, number]): ReadonlyArray<number> => {
+      found.length = 0
+      grid(x - max, y - max, x + max, y + max, (k) => {
+        const m = midpoints[edges[k]!]!, d2 = (m.x - x) ** 2 + (m.y - y) ** 2
+        if (d2 >= min * min && d2 <= max * max) found.push(edges[k]!)
+      })
+      return found
+    }
   }
-  return best
 }
 
-/** Midpoint of every graph edge, indexed like `graph.edges`. */
-export const midpoints: ReadonlyArray<{ readonly x: number; readonly y: number }> = chords.map((c) => ({ x: (c.ax + c.bx) / 2, y: (c.ay + c.by) / 2 }))
+/** Lookups on the whole traffic and walk networks. */
+export const trafficIndex = edgeIndex(graph.trafficEdges)
+export const walkIndex = edgeIndex(graph.walkEdges)

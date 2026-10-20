@@ -66,6 +66,9 @@ const FRAGMENT = /* glsl */ `
     gl_FragColor = linearToOutputTexel(c);
   }`
 
+/** The widest zoom `zoomFor` picks, texels per metre: the most ground the view ever shows. */
+export const WIDEST_ZOOM = 5
+
 /**
  * Texels per metre: 8 on foot, 6 in a car, 5 above 16 m/s; back to 6 only below 13 m/s, so town
  * speeds around the threshold never flip the zoom. `last` is the previous result.
@@ -73,7 +76,7 @@ const FRAGMENT = /* glsl */ `
 export const zoomFor = (speed: number | undefined, last: number): number => {
   if (speed === undefined) return 8
   const s = Math.abs(speed)
-  return s > 16 || (s >= 13 && last === 5) ? 5 : 6
+  return s > 16 || (s >= 13 && last === WIDEST_ZOOM) ? WIDEST_ZOOM : 6
 }
 
 /** The low-res render target, the camera that fills it and the blit to the canvas. */

@@ -10,7 +10,7 @@ import { ExtrudeGeometry, Path, Shape, Vector2 } from "three"
 import { buildingStyleOf, MAP, type Building, type BuildingStyle } from "../sim/map/index.ts"
 import { hash01 } from "../tools/geometry.ts"
 import { terrainY, yOf } from "./ground.ts"
-import { linear, paint, type SinkAt, type Triangles } from "./geometry.ts"
+import { linear, paint, type Piece, type Triangles } from "./geometry.ts"
 import { PALETTE } from "./palette.ts"
 import { hasHipRoof, hipRoof, orientedBox } from "./roof.ts"
 
@@ -108,10 +108,11 @@ const recolourTop = (g: ReturnType<typeof paint>, hex: number): void => {
   for (let i = 0; i < normal.count; i++) if (normal.getY(i) > 0.5) color.setXYZ(i, r, gg, bb)
 }
 
-/** Every building, in the chunk of its first vertex. */
-export const buildBuildings = (at: SinkAt): void => {
-  for (const b of MAP.buildings) {
+/** Every building as a piece anchored at its first vertex (it goes whole into that chunk). */
+export const buildingPieces = (): Array<Piece> => MAP.buildings.map((b) => ({
+  pts: [b.outer[0]!, b.outer[1]!],
+  draw: (at) => {
     const sink = at(b.outer[0]!, b.outer[1]!)
     sink.pieces.push(building(sink.solid, b))
   }
-}
+}))
