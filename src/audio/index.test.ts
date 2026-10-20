@@ -4,10 +4,10 @@ import { test } from "node:test"
 import { Keyboard } from "@typeonce/ritmo-browser"
 import { Vec2 } from "@typeonce/ritmo-math"
 
-import { laneOf, lanePoint, roadOf, walkSide } from "../sim/route.ts"
+import { laneOf, lanePoint, laneSide, roadOf, walkSide } from "../sim/route.ts"
 import { bindings, Game, Honk, Impact, KeyboardInput, makeRuntime, setup, update } from "../sim/index.ts"
 import { parkedCar, pedestrian } from "../sim/spawning.ts"
-import { BATTISTI, door, ON_BATTISTI, press, stage, type Timeline } from "../sim/testing.ts"
+import { BATTISTI, battistiTraffic, door, ON_BATTISTI, press, rolling, stage, type Timeline } from "../sim/testing.ts"
 import { Audio, audio } from "./index.ts"
 import type { Heard } from "./types.ts"
 
@@ -50,6 +50,21 @@ test("hear: the player on foot, then at the wheel of a running car with the horn
   assert.ok(!seated!.people.some((p) => p.player), "the driver is no person on foot")
   assert.ok(seated!.people.some((p) => !p.player && !p.fleeing && !p.down && Vec2.distance(p, verge) < 2), "the pedestrian on the verge")
   assert.deepEqual([onFoot!.horn, seated!.horn, horn!.horn], [false, false, true])
+})
+
+test("hear: AI traffic runs even standing; a car nobody drives is heard only while it moves", () => {
+  const lane = laneOf(BATTISTI.edge, BATTISTI.forward)
+  const side = laneSide(BATTISTI, "panda")
+  const coasting = { ...lanePoint(lane, 30, side), angle: ON_BATTISTI.angle }, parked = { ...lanePoint(lane, 60, side), angle: ON_BATTISTI.angle }
+  const { run, frames } = listen([], door(ON_BATTISTI), {
+    cars: [rolling("truck", coasting, 5, 0), parkedCar("panda", 0x3d6155, parked)],
+    traffic: [battistiTraffic(0xd4a85e)]
+  })
+  run(1)
+  const near = (p: { readonly x: number; readonly y: number }) => frames[0]!.vehicles.filter((v) => Vec2.distance(v, p) < 1)
+  assert.deepEqual(near(ON_BATTISTI).map((v) => [v.model, v.running, v.mine]), [["panda", true, false]])
+  assert.deepEqual(near(coasting).map((v) => [v.model, v.running, v.mine]), [["truck", false, false]])
+  assert.deepEqual(near(parked), [])
 })
 
 test("hear: impacts then honks since the last frame, as happenings, each heard once", () => {

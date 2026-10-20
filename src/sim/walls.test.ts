@@ -70,6 +70,16 @@ test("contacts: a car pushing or knocking a pedestrian against a house wall neve
   }
 })
 
+// Regression: the pin stops the car in the step it knocks the person down; the Impact still has the speed it hit at.
+test("contacts: a car pinning the player against a house wall is a person Impact as fast as the car was", () => {
+  const { run, world, heard } = start([], [{ ...facing(0.36), angle: 0 }, { cars: [rolling("panda", { ...facing(4), angle: TOWARD }, 8, 1)] }])
+  const car = world().vehicles[0]!.id
+  run(60)
+  const hits = heard.impacts.filter((i) => i.hit === "person")
+  assert.deepEqual(hits.map((i) => i.car), [car])
+  assert.ok(hits[0]!.speed > 8, `hit at ${hits[0]!.speed} m/s`)
+})
+
 test("contacts: a car rammed sideways into a house wall stays out of it", () => {
   const parked = { ...facing(VEHICLES.panda.width / 2 + 0.1), angle: BESIDE }
   const ram = { ...facing(VEHICLES.panda.width / 2 + 6), angle: TOWARD }
