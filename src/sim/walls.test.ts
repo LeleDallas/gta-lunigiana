@@ -1,0 +1,128 @@
+import assert from "node:assert/strict"
+import { test } from "node:test"
+
+import { Ops, Vec2 } from "@typeonce/ritmo-math"
+
+import { carClear, crossesAny, wallsAlong } from "./body.ts"
+import { graph } from "./map/index.ts"
+import { laneOf, lanePoint, laneSide, nearestEdge, roadOf, walkSide } from "./route.ts"
+import { parkedCar, pedestrian } from "./spawning.ts"
+import { battistiTraffic, door, ON_BATTISTI, press, rolling, start, walkClear } from "./testing.ts"
+import { PERSON_RADIUS } from "./tuning.ts"
+import { VEHICLES } from "./vehicles.ts"
+
+// Regressions: nothing (pushed, thrown, shoved, getting out, turning) ends up inside a building.
+
+/** A house wall, (-429.5, 452.8) -> (-420.3, 449.8), the house to its north. */
+const A = { x: -429.5, y: 452.8 }, B = { x: -420.3, y: 449.8 }
+const LENGTH = Vec2.distance(A, B)
+const ALONG = { x: (B.x - A.x) / LENGTH, y: (B.y - A.y) / LENGTH }
+const INTO = { x: -ALONG.y, y: ALONG.x }
+const MID = { x: (A.x + B.x) / 2, y: (A.y + B.y) / 2 }
+/** Signed distance from the wall's line, m (positive inside the house). */
+const depth = (p: { readonly x: number; readonly y: number }) => (p.x - MID.x) * INTO.x + (p.y - MID.y) * INTO.y
+/** The point `out` metres in front of the wall's middle. */
+const facing = (out: number) => ({ x: MID.x - INTO.x * out, y: MID.y - INTO.y * out })
+/** Headings: square on into the wall, and along it (left side to the wall). */
+const TOWARD = Ops.atan2(INTO.y, INTO.x)
+const BESIDE = Ops.atan2(ALONG.y, ALONG.x)
+const FAR = { ...facing(30), angle: 0 }
+const LOOK = { skin: 0xc68e6a, hair: 0x2b1d14, shirt: 0xb8312b, pants: 0x1d2b4f }
+
+test("contacts: a car pushing or knocking a pedestrian against a house wall never puts them through it", () => {
+  for (const speed of [2.5, 8]) {
+    const at = { ...facing(0.4), angle: 0 }
+    const walker = pedestrian(LOOK, at, { edge: nearestEdge(graph.walkEdges, at.x, at.y), forward: true, side: 0 }, { mood: "walk", until: 0 })
+    const { run, world } = start([], [FAR, { cars: [rolling("panda", { ...facing(4), angle: TOWARD }, speed, speed > 5 ? 1 : 0.3)], peds: [walker] }])
+    const { peds: [{ id: pedId }], vehicles: [{ id: carId }] } = world()
+    const ped = () => world().peds.find((p) => p.id === pedId)!
+    run(120, () => {
+      assert.ok(depth(ped()) < -PERSON_RADIUS + 0.02 && walkClear(ped()), `${speed} m/s: pedestrian at ${depth(ped())}`)
+      assert.ok(carClear("panda", world().vehicles.find((v) => v.id === carId)!, 0.1))
+    })
+    if (speed > 5) assert.ok(ped().down, "knocked down")
+  }
+})
+
+test("contacts: a car rammed sideways into a house wall stays out of it", () => {
+  const parked = { ...facing(VEHICLES.panda.width / 2 + 0.1), angle: BESIDE }
+  const ram = { ...facing(VEHICLES.panda.width / 2 + 6), angle: TOWARD }
+  const { run, world } = start([], [FAR, { cars: [parkedCar("panda", 0xf2efe6, parked), rolling("panda", ram, 10, 1)] }])
+  const ids = world().vehicles.map((car) => car.id)
+  const ours = () => world().vehicles.filter((car) => ids.includes(car.id))
+  run(120, () => {
+    for (const car of ours()) assert.ok(carClear("panda", car, 0.1) && depth(car) < 0, JSON.stringify(car))
+  })
+  assert.ok(ours().some((car) => Vec2.distance(car, parked) > 0.05), "the parked car was shoved")
+})
+
+test("physics: steering into a wall alongside never wedges the car in it", () => {
+  const car = { ...facing(VEHICLES.panda.width / 2 + 0.05), angle: BESIDE }
+  const { run, world } = start([], [FAR, { cars: [rolling("panda", car, 8, 1, 1)] }])
+  const id = world().vehicles[0]!.id
+  let last = world().vehicles[0]!
+  run(90, () => {
+    const now = world().vehicles.find((v) => v.id === id)!
+    assert.ok(carClear("panda", now, 0.1), JSON.stringify(now))
+    assert.ok(!crossesAny(wallsAlong("drive", now.x, now.y, last.x - now.x, last.y - now.y, 1), last, now), "no jump through a wall")
+    last = now
+  })
+})
+
+test("exit: with a house wall at the driver's door, the player gets out of the right door", () => {
+  const car = { ...facing(0.9), angle: BESIDE }
+  const { run, view, world } = start([...press(0, "action"), ...press(10, "action")], [door(car, -1), { cars: [parkedCar("panda", 0xb8312b, car)] }])
+  run(1)
+  assert.equal(view()?.mode, "driving")
+  run(10)
+  const me = view()!
+  const parked = world().vehicles.find((v) => !v.traffic)
+  assert.equal(me.mode, "foot")
+  assert.ok(depth(me.pose) < -PERSON_RADIUS && walkClear(me.pose), `outside the house: ${depth(me.pose)}`)
+  assert.ok((me.pose.x - parked!.x) * INTO.x + (me.pose.y - parked!.y) * INTO.y < 0, "on the car's right")
+  assert.ok(!crossesAny(wallsAlong("walk", parked!.x, parked!.y, me.pose.x - parked!.x, me.pose.y - parked!.y, 1), parked!, me.pose))
+})
+
+// Regression: getting in ignored walls (getting out does not), so the player stepped through walls by car.
+test("enter: a car on the other side of a wall cannot be entered, and the HUD offers none", () => {
+  const car = { ...facing(0.9), angle: BESIDE }
+  const behind = { x: MID.x + INTO.x * 0.6, y: MID.y + INTO.y * 0.6, angle: 0 }
+  assert.ok(walkClear(behind) && depth(behind) > 0, "staged in the house, 1.4 m from the car's axis")
+  const { run, view } = start(press(0, "action"), [behind, { cars: [parkedCar("panda", 0xb8312b, car)] }])
+  run(1)
+  assert.equal(view()?.mode, "foot")
+  assert.equal(view()?.nearby, undefined)
+})
+
+test("traffic: a car held up by a car parked in its lane turns round by its second try", () => {
+  const lane = laneOf(7, true)
+  const blocker = { ...lanePoint(lane, 15, laneSide({ edge: 7, forward: true }, "panda")), angle: ON_BATTISTI.angle }
+  const { run, world } = start([], [FAR, { cars: [parkedCar("panda", 0x3d6155, blocker)], traffic: [battistiTraffic(0xd4a85e)] }])
+  const id = world().vehicles.find((v) => v.traffic)!.id
+  // Routed and pointing back down the lane; how far it gets then depends on the traffic Populate sends the other way.
+  let turned = false
+  run(1200, () => {
+    const car = world().vehicles.find((v) => v.id === id)!
+    turned ||= car.route?.forward === false && Ops.cos(car.angle) * lane.dx + Ops.sin(car.angle) * lane.dy < 0
+  })
+  assert.ok(turned, "turned round within 20 s")
+})
+
+test("pedestrians: a walker whose verge is blocked by a parked car gets past it", () => {
+  // Via Cesare Battisti by the Carabinieri: both verges clear for 20 m.
+  const lane = laneOf(9, true)
+  const side = walkSide(roadOf(9))
+  const heading = Ops.atan2(lane.dy, lane.dx)
+  const at = { ...lanePoint(lane, 2, side), angle: heading }
+  const blocker = { ...lanePoint(lane, 8, side), angle: heading }
+  assert.ok(walkClear(at) && carClear("panda", blocker), "a clear verge to stage on")
+  const walker = pedestrian(LOOK, at, { edge: 9, forward: true, side }, { mood: "walk", until: 0 })
+  const { run, world } = start([], [FAR, { cars: [parkedCar("panda", 0x3d6155, blocker)], peds: [walker] }])
+  const id = world().peds[0]!.id
+  let progress = 0
+  run(900, () => {
+    const ped = world().peds.find((p) => p.id === id)!
+    progress = Math.max(progress, (ped.x - lane.x) * lane.dx + (ped.y - lane.y) * lane.dy)
+  })
+  assert.ok(progress > 11, `walked ${progress} m along`)
+})

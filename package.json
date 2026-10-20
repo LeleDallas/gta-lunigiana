@@ -1,0 +1,32 @@
+{
+  "name": "gta-lunigiana",
+  "scripts": {
+    "typecheck": "tsc",
+    "lint": "oxlint && ritmo-devtools lint src/sim/index.ts",
+    "test": "node --test \"src/**/*.test.ts\"",
+    "check": "pnpm typecheck && pnpm lint && pnpm test",
+    "map": "node src/tools/build-map.ts",
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "packageManager": "pnpm@10.33.0",
+  "dependencies": {
+    "@typeonce/ritmo": "^0.10.0",
+    "@typeonce/ritmo-browser": "^0.10.0",
+    "@typeonce/ritmo-math": "^0.10.0",
+    "@typeonce/ritmo-render": "^0.10.0",
+    "three": "0.186.1"
+  },
+  "devDependencies": {
+    "@typeonce/oxlint-plugin-ritmo": "^0.10.0",
+    "@typeonce/ritmo-devtools": "^0.10.0",
+    "@types/node": "^26.6.5",
+    "@types/three": "^0.186.0",
+    "oxlint": "^1.89.0",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.4"
+  },
+  "private": true,
+  "type": "module"
+}

@@ -1,0 +1,120 @@
+import { Clock, Decode, Descriptor, Schema } from "@typeonce/ritmo"
+import { InputCapture, Keyboard } from "@typeonce/ritmo-browser"
+import { Random } from "@typeonce/ritmo-math"
+
+import { VEHICLE_MODELS } from "./vehicles.ts"
+
+/**
+ * World conventions: x = east, y = north, metres from the map origin
+ * (`MAP.origin`). Angles are radians counter-clockwise from east.
+ */
+export const Root = Schema.defineRoot("Lunigiana")
+
+/** The one fixed step: Clock resource, FixedLoop and replays all use it. */
+export const STEP = Clock.hz(60)
+
+const PoseCodec = Decode.struct({ x: Decode.number, y: Decode.number, angle: Decode.number })
+
+/** Where a body is and which way it faces. */
+export const Pose = Descriptor.ConstructedComponent(PoseCodec)("Lunigiana/Pose")
+/** Pose at the start of the current step, for render interpolation. */
+export const PrevPose = Descriptor.ConstructedComponent(PoseCodec)("Lunigiana/PrevPose")
+/** A Pose (or PrevPose) value. */
+export type PoseValue = Descriptor.Descriptor.Value<typeof Pose>
+/** World-frame velocity (m/s) and yaw rate (rad/s). */
+export const Motion = Descriptor.ConstructedComponent(
+  Decode.struct({ vx: Decode.number, vy: Decode.number, spin: Decode.number })
+)("Lunigiana/Motion")
+
+/** The one human-controlled person. */
+export const Player = Descriptor.Tag("Lunigiana/Player")
+/** A person's look, as sRGB hex colours. */
+export const Person = Descriptor.ConstructedComponent(
+  Decode.struct({ skin: Decode.integer, hair: Decode.integer, shirt: Decode.integer, pants: Decode.integer })
+)("Lunigiana/Person", { immutable: true })
+/** A Person value. */
+export type Look = Descriptor.Descriptor.Value<typeof Person>
+/**
+ * A non-player person: walking its route, or running along it until step
+ * `until`; `blocked` counts the steps it has been getting nowhere.
+ */
+export const Pedestrian = Descriptor.ConstructedComponent(
+  Decode.struct({ mood: Decode.literal("walk", "flee"), until: Decode.integer, blocked: Decode.integer })
+)("Lunigiana/Pedestrian")
+/** Knocked to the ground until step `until` (player or pedestrian). */
+export const Down = Descriptor.ConstructedComponent(Decode.struct({ until: Decode.integer }))("Lunigiana/Down")
+
+/** A car, van or truck of one model and paint colour. */
+export const Vehicle = Descriptor.ConstructedComponent(
+  Decode.struct({ model: Decode.literal(...VEHICLE_MODELS), color: Decode.integer })
+)("Lunigiana/Vehicle", { immutable: true })
+/** What the vehicle's driver is doing this step: throttle and steer in [-1, 1]. */
+export const CarInput = Descriptor.ConstructedComponent(
+  Decode.struct({ throttle: Decode.number, steer: Decode.number, handbrake: Decode.boolean })
+)("Lunigiana/CarInput")
+/** An AI-driven vehicle (it follows its Route). */
+export const Traffic = Descriptor.Tag("Lunigiana/Traffic")
+/**
+ * Progress along the map graph (`graph` in ./map/index.ts): the current edge,
+ * the travel direction (a -> b when `forward`), and the lateral offset from the
+ * centreline in metres (positive = right of travel).
+ */
+export const Route = Descriptor.ConstructedComponent(
+  Decode.struct({ edge: Decode.integer, forward: Decode.boolean, side: Decode.number })
+)("Lunigiana/Route")
+/** A Route value. */
+export type RouteValue = Descriptor.Descriptor.Value<typeof Route>
+/**
+ * An AI driver's plan beyond its Route: the edge it takes after the current
+ * one (a -> b when `nextForward`), the steps it has been stuck, the step
+ * until which it reverses to get unstuck, and how many times it has had to.
+ */
+export const Autopilot = Descriptor.ConstructedComponent(
+  Decode.struct({ next: Decode.integer, nextForward: Decode.boolean, stuck: Decode.integer, reverseUntil: Decode.integer, tries: Decode.integer })
+)("Lunigiana/Autopilot")
+/** A vehicle the player has already entered once (it scored a theft). */
+export const Stolen = Descriptor.Tag("Lunigiana/Stolen")
+/** The player is in this vehicle. */
+export const Driving = Descriptor.ConstructedComponent(
+  Decode.struct({ vehicle: Decode.handle(Root, Vehicle) })
+)("Lunigiana/Driving")
+
+/** Simulation time. */
+export const Time = Clock.resource("Lunigiana/Time", STEP)
+/** The world's random stream (saved, so runs replay). */
+export const Rng = Descriptor.ConstructedResource(Random)("Lunigiana/Rng")
+/** Counters shown on the HUD. */
+export const Score = Descriptor.ConstructedResource(
+  Decode.struct({ stolen: Decode.integer, knocked: Decode.integer })
+)("Lunigiana/Score")
+
+/** Player controls. Keys are host detail, but they live here so `Controls` has one home. */
+export const bindings = {
+  up: ["ArrowUp", Keyboard.code("KeyW")],
+  down: ["ArrowDown", Keyboard.code("KeyS")],
+  left: ["ArrowLeft", Keyboard.code("KeyA")],
+  right: ["ArrowRight", Keyboard.code("KeyD")],
+  sprint: ["Shift"],
+  handbrake: [Keyboard.code("Space")],
+  action: [Keyboard.code("KeyF"), Keyboard.code("KeyE"), "Enter"]
+} as const
+type Controls = Keyboard.Snapshot<typeof bindings>
+
+/** This step's controls, copied from the KeyboardInput service by InputCapture. Not saved. */
+export const Input = Descriptor.TransientResource<Controls>()("Lunigiana/Input")
+/** Any snapshot() source of Controls: live keyboard, scripted timeline, replay playback. */
+export const KeyboardInput = Descriptor.Service<InputCapture.Source<Controls>>()("Lunigiana/Keyboard")
+
+export const Game = Schema.bind(
+  Schema.fragment({
+    components: { Pose, PrevPose, Motion, Player, Person, Pedestrian, Down, Vehicle, CarInput, Traffic, Route, Driving, Autopilot, Stolen },
+    resources: { Time, Rng, Score, Input },
+    requires: [
+      Schema.requires(Player, Pose, PrevPose, Motion, Person),
+      Schema.requires(Pedestrian, Pose, PrevPose, Motion, Person, Route),
+      Schema.requires(Vehicle, Pose, PrevPose, Motion, CarInput),
+      Schema.requires(Traffic, Vehicle, Route, Autopilot)
+    ]
+  }),
+  Root
+)

@@ -1,0 +1,192 @@
+// Deterministic tree scatter, the player spawn and parked-car spots.
+import type { Area, Spawn } from "../sim/map/index.ts"
+import type { BuildingF, RailF, RoadF, WaterF } from "./features.ts"
+import { arcLengths, BOUNDS, fillPolygon, hash01, inBounds, pointAt, pointInRing, r1, segIndex } from "./geometry.ts"
+
+const TREE_AREA = 50 // m² per tree
+const TREE_CAP = 40000
+const MASK_RES = 2
+
+/** Raster of the play area at MASK_RES m with every polygon in `polys` filled. */
+const mask = (polys: ReadonlyArray<ReadonlyArray<ReadonlyArray<number>>>) => {
+  const cols = Math.ceil((BOUNDS.maxX - BOUNDS.minX) / MASK_RES), rows = Math.ceil((BOUNDS.maxY - BOUNDS.minY) / MASK_RES)
+  const m = new Uint8Array(cols * rows)
+  for (const rings of polys) {
+    const fill = new Uint8Array(cols * rows) // per polygon even-odd, then OR
+    fillPolygon(rings, BOUNDS.minX, BOUNDS.minY, MASK_RES, cols, rows, (k) => (fill[k] = 1))
+    for (let k = 0; k < m.length; k++) m[k]! |= fill[k]!
+  }
+  return (x: number, y: number) => {
+    const c = Math.floor((x - BOUNDS.minX) / MASK_RES), r = Math.floor((y - BOUNDS.minY) / MASK_RES)
+    return c >= 0 && r >= 0 && c < cols && r < rows && m[r * cols + c] === 1
+  }
+}
+
+/** Flat (x, y, scale) triples (positions to the metre: scatter needs no more, and it keeps the JSON small): a jittered ~7 m lattice inside forest, plus sparse trees on river banks. */
+export const scatterTrees = (areas: ReadonlyArray<Area>, roads: ReadonlyArray<RoadF>, buildings: ReadonlyArray<BuildingF>, water: ReadonlyArray<WaterF>, rail: ReadonlyArray<RailF>): Array<number> => {
+  const forest = mask(areas.filter((a) => a.kind === "forest").map((a) => a.rings))
+  const open = mask(areas.filter((a) => a.kind !== "forest").map((a) => a.rings))
+  const built = mask(buildings.map((b) => [b.outer, ...(b.holes ?? [])]))
+  const keepOut = segIndex<null>()
+  for (const r of roads) keepOut.addLine(r.pts, r.w / 2 + 2, null)
+  for (const b of buildings) keepOut.addLine([...b.outer, b.outer[0]!, b.outer[1]!], 2, null)
+  for (const w of water) keepOut.addLine(w.pts, w.bed, null)
+  for (const r of rail) if (r.tunnel !== true) keepOut.addLine(r.pts, 6, null)
+  const free = (x: number, y: number) => inBounds(x, y, 1) && !open(x, y) && !built(x, y) && !keepOut.covers(x, y)
+  const trees: Array<number> = []
+  const step = Math.sqrt(TREE_AREA)
+  for (let gj = 0; gj * step < BOUNDS.maxY - BOUNDS.minY; gj++) for (let gi = 0; gi * step < BOUNDS.maxX - BOUNDS.minX; gi++) {
+    const x = BOUNDS.minX + (gi + hash01(gi, gj, 1)) * step, y = BOUNDS.minY + (gj + hash01(gi, gj, 2)) * step
+    if (forest(x, y) && free(x, y)) trees.push(Math.round(x), Math.round(y), r1(0.8 + 0.5 * hash01(gi, gj, 3)))
+  }
+  water.forEach((w, wi) => {
+    if (w.w < 4) return
+    const s = arcLengths(w.pts), total = s.at(-1)!
+    for (let k = 0; k * 9 < total; k++) for (const side of [1, -1]) {
+      if (hash01(wi, k, side, 4) > 0.55) continue
+      const p = pointAt(w.pts, s, k * 9), off = side * (w.bed + 2 + 3 * hash01(wi, k, side, 5))
+      const x = p.x - p.ty * off, y = p.y + p.tx * off
+      if (!forest(x, y) && free(x, y)) trees.push(Math.round(x), Math.round(y), r1(0.8 + 0.5 * hash01(wi, k, side, 6)))
+    }
+  })
+  return trees.slice(0, TREE_CAP * 3)
+}
+
+/** Wall clearance checks against flat (ax, ay, bx, by) segment lists. */
+export const clearance = (lists: ReadonlyArray<ReadonlyArray<number>>) => {
+  const idx = segIndex<null>()
+  for (const flat of lists) for (let i = 0; i + 3 < flat.length; i += 4) idx.add(flat[i]!, flat[i + 1]!, flat[i + 2]!, flat[i + 3]!, 3, null)
+  const circle = (x: number, y: number, r: number) => {
+    let ok = true
+    idx.within(x, y, (_, d2) => (ok &&= d2 >= r * r))
+    return ok
+  }
+  /** No segment crosses or lies inside the oriented box (half-length hl along `angle`, half-width hw). */
+  const box = (x: number, y: number, angle: number, hl: number, hw: number) => {
+    const c = Math.cos(angle), s = Math.sin(angle)
+    let ok = true
+    idx.within(x, y, (seg) => {
+      const ax = (seg.ax - x) * c + (seg.ay - y) * s, ay = -(seg.ax - x) * s + (seg.ay - y) * c
+      const dx = (seg.bx - x) * c + (seg.by - y) * s - ax, dy = -(seg.bx - x) * s + (seg.by - y) * c - ay
+      let t0 = 0, t1 = 1
+      for (const [p, q] of [[-dx, ax + hl], [dx, hl - ax], [-dy, ay + hw], [dy, hw - ay]] as const) {
+        if (p === 0) {
+          if (q < 0) return
+          continue
+        }
+        const r = q / p
+        if (p < 0) t0 = Math.max(t0, r)
+        else t1 = Math.min(t1, r)
+      }
+      if (t1 >= t0) ok = false
+    })
+    return ok
+  }
+  return { circle, box }
+}
+type Clearance = ReturnType<typeof clearance>
+
+const CAR_HL = 3.7 / 2, CAR_HW = 1.7 / 2, CAR_GAP = 0.3, SPAWN_R = 1.3 // 1.2 m (map.test.ts) + rounding margin
+
+/** On the Via Cesare Battisti sidewalk in front of the Carabinieri, facing along the street. */
+export const playerSpawn = (roads: ReadonlyArray<RoadF>, walk: Clearance, drive: Clearance, target: { readonly x: number; readonly y: number }): Spawn => {
+  const road = roads.find((r) => r.name === "Via Cesare Battisti")
+  if (road === undefined) throw new Error("Via Cesare Battisti not found")
+  const s = arcLengths(road.pts)
+  let at = 0, best = Number.MAX_VALUE
+  for (let d = 0; d <= s.at(-1)!; d += 0.5) {
+    const p = pointAt(road.pts, s, d), dd = Math.hypot(p.x - target.x, p.y - target.y)
+    if (dd < best) [at, best] = [d, dd]
+  }
+  for (let k = 0; k < 80; k++) {
+    const d = at + (k % 2 === 0 ? 1 : -1) * Math.ceil(k / 2) * 1.5
+    const p = pointAt(road.pts, s, Math.min(s.at(-1)!, Math.max(0, d)))
+    const toward = Math.sign((target.x - p.x) * -p.ty + (target.y - p.y) * p.tx) || 1
+    for (const side of [toward, -toward]) {
+      const off = side * (road.w / 2 + 1), x = p.x - p.ty * off, y = p.y + p.tx * off
+      if (walk.circle(x, y, SPAWN_R) && drive.circle(x, y, SPAWN_R)) return { x: r1(x), y: r1(y), angle: Math.round(Math.atan2(p.ty, p.tx) * 1000) / 1000 }
+    }
+  }
+  throw new Error("no clear player spawn on Via Cesare Battisti")
+}
+
+interface ParkingInput {
+  readonly roads: ReadonlyArray<RoadF>
+  readonly buildings: ReadonlyArray<BuildingF>
+  readonly areas: ReadonlyArray<Area>
+  readonly junctions: ReadonlyArray<readonly [number, number]>
+  readonly walk: Clearance
+  readonly drive: Clearance
+  readonly avoid: { readonly x: number; readonly y: number }
+  readonly station: { readonly x: number; readonly y: number }
+}
+
+const KERB_CLASSES = new Set(["tertiary", "unclassified", "residential"])
+
+/** Kerbside spots in built-up streets (right kerb, >= 9 m apart, >= 12 m from junctions) plus a few in the station car parks. */
+export const parkedSpots = ({ roads, buildings, areas, junctions, walk, drive, avoid, station }: ParkingInput): Array<Spawn> => {
+  const centroids = buildings.map((b) => {
+    let x = 0, y = 0
+    for (let i = 0; i < b.outer.length; i += 2) [x, y] = [x + b.outer[i]!, y + b.outer[i + 1]!]
+    return [(2 * x) / b.outer.length, (2 * y) / b.outer.length] as const
+  })
+  const insideBuilding = (x: number, y: number) => buildings.some((b) => pointInRing(x, y, b.outer))
+  const carriage = segIndex<RoadF>(), lanes = segIndex<RoadF>()
+  for (const r of roads) if (r.tunnel !== true) {
+    carriage.addLine(r.pts, r.w / 2 + 0.9, r)
+    lanes.addLine(r.pts, r.w / 2, r)
+  }
+  /** Centre and corners of the car box grown by `gap`. */
+  const box = (x: number, y: number, angle: number, gap: number) => {
+    const c = Math.cos(angle), s = Math.sin(angle), l = CAR_HL + gap, w = CAR_HW + gap
+    return [[x, y] as const, ...[[l, w], [l, -w], [-l, w], [-l, -w]].map(([u, v]) => [x + c * u! - s * v!, y + s * u! + c * v!] as const)]
+  }
+  const fits = (x: number, y: number, angle: number) =>
+    inBounds(x, y, 5) && walk.circle(x, y, SPAWN_R) && drive.circle(x, y, SPAWN_R) && drive.box(x, y, angle, CAR_HL + CAR_GAP, CAR_HW + CAR_GAP) &&
+    !insideBuilding(x, y) && Math.hypot(x - avoid.x, y - avoid.y) > 6
+  const candidates: Array<Spawn & { readonly order: number }> = []
+  roads.forEach((r, ri) => {
+    if (!KERB_CLASSES.has(r.cls) || r.bridge === true || r.tunnel === true) return
+    const s = arcLengths(r.pts), total = s.at(-1)!
+    for (let d = 6; d <= total - 6; d += 3) {
+      const p = pointAt(r.pts, s, d), off = r.w / 2 + 1, x = p.x + p.ty * off, y = p.y - p.tx * off, angle = Math.atan2(p.ty, p.tx)
+      if (junctions.some(([jx, jy]) => Math.hypot(jx - p.x, jy - p.y) < 12)) continue
+      if (centroids.filter(([cx, cy]) => Math.hypot(cx - x, cy - y) < 40).length < 2) continue
+      if (carriage.covers(x, y) || box(x, y, angle, 0).some(([qx, qy]) => lanes.covers(qx, qy))) continue // overlaps a carriageway (another road, or this one on a bend)
+      if (fits(x, y, angle)) candidates.push({ x, y, angle, order: hash01(ri, Math.round(d), 11) })
+    }
+  })
+  const spots: Array<Spawn> = []
+  for (const c of candidates.sort((a, b) => a.order - b.order)) {
+    if (spots.length >= 100) break
+    if (spots.every((o) => Math.hypot(o.x - c.x, o.y - c.y) >= 9)) spots.push(c)
+  }
+  // Station car parks: rows across the lot's longest edge, cars nose-in.
+  for (const lot of areas.filter((a) => a.kind === "parking")) {
+    const ring = lot.rings[0]!
+    const n = ring.length / 2
+    let cx = 0, cy = 0
+    for (let i = 0; i < n; i++) [cx, cy] = [cx + ring[2 * i]! / n, cy + ring[2 * i + 1]! / n]
+    if (Math.hypot(cx - station.x, cy - station.y) > 150) continue
+    let ex = 1, ey = 0, longest = 0
+    for (let i = 0; i < n; i++) {
+      const j = (i + 1) % n, dx = ring[2 * j]! - ring[2 * i]!, dy = ring[2 * j + 1]! - ring[2 * i + 1]!, l = Math.hypot(dx, dy)
+      if (l > longest) [ex, ey, longest] = [dx / l, dy / l, l]
+    }
+    const angle = Math.atan2(ex, -ey) // facing across the row (perpendicular to the longest edge)
+    const lotSpots: Array<Spawn> = []
+    const grid: Array<readonly [number, number]> = []
+    for (let u = -60; u <= 60; u += 2.7) for (let v = -60; v <= 60; v += 6) grid.push([cx + ex * u - ey * v, cy + ey * u + ex * v])
+    grid.sort((a, b) => Math.hypot(a[0] - cx, a[1] - cy) - Math.hypot(b[0] - cx, b[1] - cy) || a[0] - b[0] || a[1] - b[1])
+    for (const [x, y] of grid) {
+      if (lotSpots.length >= 6) break
+      const pts = box(x, y, angle, CAR_GAP)
+      if (!pts.every(([qx, qy]) => pointInRing(qx, qy, ring))) continue
+      if (pts.some(([qx, qy]) => carriage.covers(qx, qy))) continue // keep the lot's lanes and through roads free
+      if (!fits(x, y, angle) || ![...spots, ...lotSpots].every((o) => Math.hypot(o.x - x, o.y - y) >= 2.6)) continue
+      lotSpots.push({ x, y, angle })
+    }
+    spots.push(...lotSpots)
+  }
+  return spots.map((p) => ({ x: r1(p.x), y: r1(p.y), angle: Math.round(p.angle * 1000) / 1000 }))
+}

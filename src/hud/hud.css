@@ -1,0 +1,51 @@
+/* Pixel-look HUD over the game canvas: monospace stack, hard 2 px shadows, no smoothing. */
+:root {
+  --ink: #f2efe6;
+  --shadow: #17161a;
+  --accent: #f0c93c;
+  --panel: rgb(23 22 26 / 0.72);
+  font: 700 15px/1.25 "Courier New", ui-monospace, Menlo, Consolas, monospace;
+  -webkit-font-smoothing: none;
+  font-smooth: never;
+}
+html, body { margin: 0; height: 100%; overflow: hidden; background: #2c3d22; }
+#game { display: block; width: 100vw; height: 100vh; }
+
+#hud { position: fixed; inset: 0; pointer-events: none; color: var(--ink); text-shadow: 2px 2px 0 var(--shadow); text-transform: uppercase; letter-spacing: 0.06em; }
+#hud [hidden] { display: none; }
+
+.where { position: absolute; top: 16px; left: 16px; }
+#hud-road { font-size: 20px; color: var(--accent); }
+#hud-district { font-size: 14px; }
+
+.score { position: absolute; top: 16px; right: 16px; margin: 0; text-align: right; }
+.score div { display: flex; justify-content: flex-end; align-items: baseline; gap: 12px; }
+.score dt { font-size: 12px; }
+.score dt small { display: block; font-size: 10px; opacity: 0.75; }
+.score dd { margin: 0; min-width: 2ch; font-size: 22px; color: var(--accent); }
+
+#hud-prompt { position: absolute; left: 50%; bottom: 72px; transform: translateX(-50%); padding: 6px 12px; background: var(--panel); border: 2px solid var(--accent); }
+
+#hud-speedo { position: absolute; right: 16px; bottom: 28px; text-align: right; }
+#hud-speed { font-size: 40px; color: var(--accent); }
+#hud-speedo .unit { margin-left: 6px; font-size: 14px; }
+#hud-vehicle { font-size: 12px; }
+
+#hud-minimap { position: absolute; left: 16px; bottom: 48px; line-height: 0; }
+.minimap { image-rendering: pixelated; border: 2px solid var(--shadow); outline: 2px solid var(--ink); }
+
+.credits { position: absolute; right: 16px; bottom: 8px; font-size: 10px; text-transform: none; letter-spacing: 0; opacity: 0.85; }
+
+#title { position: fixed; inset: 0; display: grid; place-items: center; background: rgb(23 22 26 / 0.55); color: var(--ink); text-shadow: 2px 2px 0 var(--shadow); }
+#title[hidden] { display: none; }
+#title .card { padding: 24px 32px; background: var(--panel); border: 2px solid var(--accent); text-align: center; }
+#title h1 { margin: 0; font-size: 40px; color: var(--accent); text-transform: uppercase; letter-spacing: 0.08em; }
+#title .sub { margin: 4px 0 20px; text-transform: uppercase; }
+#title .keys { display: grid; gap: 4px; margin: 0 0 20px; text-align: left; }
+#title .keys div { display: grid; grid-template-columns: 14ch 1fr; gap: 16px; }
+#title dt { color: var(--accent); }
+#title dd { margin: 0; }
+#title .go { margin: 0 0 16px; animation: blink 1s steps(2, start) infinite; }
+#title .fine { margin: 0; font-size: 11px; opacity: 0.85; }
+@keyframes blink { to { visibility: hidden; } }
+@media (prefers-reduced-motion: reduce) { #title .go { animation: none; } }

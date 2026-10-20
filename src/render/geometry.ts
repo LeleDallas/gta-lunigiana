@@ -1,0 +1,111 @@
+/**
+ * Geometry plumbing shared by the world and actor builders. Everything is non-indexed with exactly
+ * `position`, `normal` and `color` (linear), so any two pieces merge into one draw call and get
+ * faceted normals.
+ *
+ * @module render/geometry
+ */
+import { BufferGeometry, Color, Float32BufferAttribute, MeshLambertMaterial } from "three"
+import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js"
+
+/** The material every opaque static or actor mesh shares: vertex colours, flat Lambert. */
+export const solidMaterial = new MeshLambertMaterial({ vertexColors: true, flatShading: true })
+/** Ground decals: pulled towards the camera in depth so they never fight what they lie on. */
+export const decalMaterial = new MeshLambertMaterial({ vertexColors: true, flatShading: true, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -2 })
+
+const linearCache = new Map<number, readonly [number, number, number]>()
+/** Linear RGB of an sRGB hex colour (vertex colours are linear). */
+export const linear = (hex: number): readonly [number, number, number] => {
+  let rgb = linearCache.get(hex)
+  if (rgb === undefined) {
+    const c = new Color(hex)
+    rgb = [c.r, c.g, c.b]
+    linearCache.set(hex, rgb)
+  }
+  return rgb
+}
+
+/** Grows flat-shaded, vertex-coloured triangles; `geometry()` hands them to three. */
+export class Triangles {
+  readonly position: Array<number> = []
+  readonly normal: Array<number> = []
+  readonly color: Array<number> = []
+
+  /** One triangle (three-world coordinates), counter-clockwise seen from its front. */
+  tri(ax: number, ay: number, az: number, bx: number, by: number, bz: number, cx: number, cy: number, cz: number, hex: number): void {
+    const ux = bx - ax, uy = by - ay, uz = bz - az, vx = cx - ax, vy = cy - ay, vz = cz - az
+    let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx
+    const l = Math.sqrt(nx * nx + ny * ny + nz * nz) || 1
+    nx /= l
+    ny /= l
+    nz /= l
+    const [r, g, b] = linear(hex)
+    this.position.push(ax, ay, az, bx, by, bz, cx, cy, cz)
+    this.normal.push(nx, ny, nz, nx, ny, nz, nx, ny, nz)
+    this.color.push(r, g, b, r, g, b, r, g, b)
+  }
+
+  /** A quad a-b-c-d (counter-clockwise seen from its front) as two triangles. */
+  quad(a: Point3, b: Point3, c: Point3, d: Point3, hex: number): void {
+    this.tri(a[0], a[1], a[2], b[0], b[1], b[2], c[0], c[1], c[2], hex)
+    this.tri(a[0], a[1], a[2], c[0], c[1], c[2], d[0], d[1], d[2], hex)
+  }
+
+  /** A quad wound so its front faces `outward` (any vector on the wanted side). */
+  face(a: Point3, b: Point3, c: Point3, d: Point3, outward: Point3, hex: number): void {
+    const ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2], vx = c[0] - a[0], vy = c[1] - a[1], vz = c[2] - a[2]
+    const dot = (uy * vz - uz * vy) * outward[0] + (uz * vx - ux * vz) * outward[1] + (ux * vy - uy * vx) * outward[2]
+    if (dot >= 0) this.quad(a, b, c, d, hex)
+    else this.quad(d, c, b, a, hex)
+  }
+
+  /** Whether nothing was added. */
+  get empty(): boolean {
+    return this.position.length === 0
+  }
+
+  /** The triangles as a non-indexed BufferGeometry. */
+  geometry(): BufferGeometry {
+    const g = new BufferGeometry()
+    g.setAttribute("position", new Float32BufferAttribute(this.position, 3))
+    g.setAttribute("normal", new Float32BufferAttribute(this.normal, 3))
+    g.setAttribute("color", new Float32BufferAttribute(this.color, 3))
+    return g
+  }
+}
+
+/** A three-world point. */
+type Point3 = readonly [number, number, number]
+
+/** The per-chunk buckets static builders write into: merged into one mesh per material per chunk. */
+export interface Sink {
+  /** Opaque world geometry (terrain-like depth). */
+  readonly solid: Triangles
+  /** Ground decals (roads, water, rail) drawn with a polygon offset over what they cover. */
+  readonly decal: Triangles
+  /** Ready-made solid pieces (extrusions) merged with `solid`. */
+  readonly pieces: Array<BufferGeometry>
+}
+/** The sink of the chunk holding map point (x, y). */
+export type SinkAt = (x: number, y: number) => Sink
+
+/** A three primitive (Box, Cylinder, Extrude...) as non-indexed position/normal/color in one colour. */
+export const paint = (source: BufferGeometry, hex: number): BufferGeometry => {
+  const g = source.index === null ? source : source.toNonIndexed()
+  for (const name of Object.keys(g.attributes)) if (name !== "position" && name !== "normal") g.deleteAttribute(name)
+  if (g.getAttribute("normal") === undefined) g.computeVertexNormals()
+  const [r, gg, b] = linear(hex)
+  const n = g.getAttribute("position").count
+  const color = new Float32Array(n * 3)
+  for (let i = 0; i < n; i++) color.set([r, gg, b], i * 3)
+  g.setAttribute("color", new Float32BufferAttribute(color, 3))
+  g.clearGroups()
+  return g
+}
+
+/** One geometry from many painted pieces (throws instead of three's silent `null`). */
+export const merge = (pieces: ReadonlyArray<BufferGeometry>): BufferGeometry => {
+  const merged = mergeGeometries([...pieces])
+  if (merged === null) throw new Error("mergeGeometries failed: attribute sets differ")
+  return merged
+}

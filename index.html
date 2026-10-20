@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="it">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>GTA: Lunigiana — Monzone</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="/src/hud/hud.css" />
+  </head>
+  <body>
+    <canvas id="game"></canvas>
+    <div id="hud">
+      <div class="where" aria-live="polite">
+        <div id="hud-road"></div>
+        <div id="hud-district"></div>
+      </div>
+      <dl class="score">
+        <div><dt>Auto rubate <small>cars stolen</small></dt><dd id="hud-stolen">0</dd></div>
+        <div><dt>Persone investite <small>people hit</small></dt><dd id="hud-knocked">0</dd></div>
+      </dl>
+      <div id="hud-prompt" hidden></div>
+      <div id="hud-speedo" hidden><span id="hud-speed">0</span><span class="unit">km/h</span><div id="hud-vehicle"></div></div>
+      <div id="hud-minimap"></div>
+      <div class="credits">Map data © OpenStreetMap contributors (ODbL) · Elevation: AWS Terrain Tiles / Mapzen</div>
+    </div>
+    <div id="title">
+      <div class="card">
+        <h1>GTA: Lunigiana</h1>
+        <p class="sub">Monzone · Fivizzano (MS)</p>
+        <dl class="keys">
+          <div><dt>WASD / ↑←↓→</dt><dd>walk · drive</dd></div>
+          <div><dt>Shift</dt><dd>sprint</dd></div>
+          <div><dt>F / E / Enter</dt><dd>enter · exit · steal</dd></div>
+          <div><dt>Space</dt><dd>handbrake</dd></div>
+        </dl>
+        <p class="go">Press any key</p>
+        <p class="fine">Map data © OpenStreetMap contributors (ODbL)<br />Elevation: AWS Terrain Tiles / Mapzen</p>
+      </div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

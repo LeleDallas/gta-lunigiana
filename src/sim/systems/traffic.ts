@@ -1,0 +1,170 @@
+import { Clock } from "@typeonce/ritmo"
+import { Ops, Random, Vec2 } from "@typeonce/ritmo-math"
+
+import { forwardSpeed, wrapAngle } from "../body.ts"
+import { graph } from "../map/index.ts"
+import {
+  allowsModel, alongLane, cruiseSpeed, distanceToEdge, endNode, facesForward, type Lane, laneOf, lanePoint, laneSide, leadsToDeadEnd, nearestEdge,
+  nextTrafficEdge, roadOf
+} from "../route.ts"
+import { Autopilot, CarInput, Driving, Game, Motion, Person, Pose, Rng, Route, STEP, Time, Traffic, Vehicle } from "../schema.ts"
+import { PERSON_RADIUS } from "../tuning.ts"
+import { VEHICLES, type VehicleModel } from "../vehicles.ts"
+
+/** Look-ahead along the route: base metres plus seconds of speed. */
+const LOOK_BASE = 6
+const LOOK_TIME = 0.6
+/** Braking cone: base metres plus seconds of speed ahead, half-width. */
+const CONE_BASE = 8
+const CONE_TIME = 1.2
+const CONE_HALF_WIDTH = 1.8
+/** Gap kept to whatever is ahead, m. */
+const GAP = 2
+/** Corner approach: slowest corner speed and the speed allowed per metre before the corner. */
+const CORNER_MIN = 3
+const CORNER_RAMP = 0.5
+/** Below STUCK_SPEED (m/s) a car counts as stuck until it is faster than MOVING_SPEED again. */
+const STUCK_SPEED = 1
+const MOVING_SPEED = 2.5
+/** Steps stuck before unsticking, and steps reversing then. */
+const STUCK_STEPS = Clock.steps(Clock.duration(STEP, 3))
+const REVERSE_STEPS = Clock.steps(Clock.duration(STEP, 1.5))
+/** Heading within this cosine of the lane counts as lined up with it. */
+const LINED_UP = 0.7
+/** Unstick attempts after which a car always turns round (dead end or not), and after which Populate gives up on it. */
+const TURN_TRIES = 2
+export const GIVE_UP_TRIES = 4
+/** Speed backing up to get unstuck, m/s (negative: reverse). */
+const REVERSE_SPEED = -3
+/** Within this distance of its edge's end node a car moves on to the next edge, m. */
+const ARRIVE = 4
+/** Farther than this from its edge, a car finds the nearest road again, m. */
+export const LOST = 12
+
+const usable = (model: VehicleModel) => graph.trafficEdges.filter((e) => allowsModel(e, model))
+const usableByModel = { panda: usable("panda"), ape: usable("ape"), truck: usable("truck"), carabinieri: usable("carabinieri") } satisfies Record<VehicleModel, ReadonlyArray<number>>
+
+/** Throttle (or brake) toward a wanted speed. */
+const throttleFor = (want: number, speed: number): number => Math.max(-1, Math.min(1, (want - speed) * 0.4))
+
+/**
+ * Past the lane's end, close to its end node (so a car circling a U-turn
+ * still moves on), or nearer the next edge than this one (a corner cut short).
+ */
+const arrived = (lane: Lane, along: number, at: { readonly x: number; readonly y: number }, edge: number, next: number): boolean => {
+  const end = lanePoint(lane, lane.length, 0)
+  return along >= lane.length - 0.5 || Vec2.distanceSquared(end, at) < ARRIVE ** 2 ||
+    distanceToEdge(next, at.x, at.y) < distanceToEdge(edge, at.x, at.y)
+}
+
+/**
+ * AI drivers on graph.trafficEdges: keep right (Route.side), steer at a point
+ * ahead along this edge and the next, pick the next edge at random at each
+ * node, slow for sharp turns and for anything in a cone ahead, and back up
+ * along the lane after standing still for 3 s (sometimes turning round, and
+ * always from its second time on, dead end or not).
+ */
+export const TrafficAI = Game.System("Lunigiana/TrafficAI", {
+  queries: {
+    cars: Game.Query({
+      selection: {
+        pose: Game.Query.read(Pose),
+        motion: Game.Query.read(Motion),
+        vehicle: Game.Query.read(Vehicle),
+        input: Game.Query.write(CarInput),
+        route: Game.Query.write(Route),
+        pilot: Game.Query.write(Autopilot)
+      },
+      with: [Traffic]
+    }),
+    vehicles: Game.Query({ selection: { pose: Game.Query.read(Pose), vehicle: Game.Query.read(Vehicle) } }),
+    people: Game.Query({ selection: { pose: Game.Query.read(Pose) }, with: [Person], without: [Driving] })
+  },
+  resources: { rng: Game.System.writeResource(Rng), time: Game.System.thisTick(Game.System.readResource(Time)) }
+}, ({ queries, resources }) => {
+  const { step } = resources.time.get()
+  const random = Random.draw(resources.rng)
+  const obstacles = [
+    ...queries.vehicles.each().map(({ entity, data }) => ({ id: entity.id, ...data.pose.get(), half: VEHICLES[data.vehicle.get().model].length / 2 })),
+    ...queries.people.each().map(({ entity, data }) => ({ id: entity.id, ...data.pose.get(), half: PERSON_RADIUS }))
+  ]
+  for (const { entity, data } of queries.cars.each()) {
+    const pose = data.pose.get()
+    const { model } = data.vehicle.get()
+    const spec = VEHICLES[model]
+    const speed = forwardSpeed(data.motion.get(), pose.angle)
+    let route = data.route.get()
+    let pilot = data.pilot.get()
+    if (distanceToEdge(route.edge, pose.x, pose.y) > LOST) {
+      const edge = nearestEdge(usableByModel[model], pose.x, pose.y)
+      const forward = roadOf(edge).oneway === true || facesForward(edge, pose.angle)
+      const after = nextTrafficEdge(endNode(edge, forward), edge, model, random)
+      route = { edge, forward, side: laneSide({ edge, forward }, model) }
+      pilot = { ...pilot, next: after.edge, nextForward: after.forward }
+    }
+    let lane = laneOf(route.edge, route.forward)
+    let along = alongLane(lane, pose.x, pose.y)
+    for (let hop = 0; hop < 2 && arrived(lane, along, pose, route.edge, pilot.next); hop++) {
+      const after = nextTrafficEdge(endNode(pilot.next, pilot.nextForward), pilot.next, model, random)
+      route = { edge: pilot.next, forward: pilot.nextForward, side: laneSide({ edge: pilot.next, forward: pilot.nextForward }, model) }
+      pilot = { ...pilot, next: after.edge, nextForward: after.forward }
+      lane = laneOf(route.edge, route.forward)
+      along = alongLane(lane, pose.x, pose.y)
+    }
+    const next = laneOf(pilot.next, pilot.nextForward)
+    const ahead = Math.max(0, along) + LOOK_BASE + Math.max(0, speed) * LOOK_TIME
+    const target = ahead <= lane.length
+      ? lanePoint(lane, ahead, route.side)
+      : lanePoint(next, Math.min(next.length, ahead - lane.length), laneSide({ edge: pilot.next, forward: pilot.nextForward }, model))
+    const error = wrapAngle(Ops.atan2(target.y - pose.y, target.x - pose.x) - pose.angle)
+    const steer = Math.max(-1, Math.min(1, error * 2.5))
+
+    if (step < pilot.reverseUntil) {
+      // Backing up, the tail aims at a point behind on the lane (steering works mirrored in reverse).
+      const behind = lanePoint(lane, along - LOOK_BASE, route.side)
+      const tail = wrapAngle(Ops.atan2(behind.y - pose.y, behind.x - pose.x) - pose.angle - Math.PI)
+      data.input.set({ throttle: throttleFor(REVERSE_SPEED, speed), steer: Math.max(-1, Math.min(1, -tail * 2.5)), handbrake: false })
+      data.route.set(route)
+      data.pilot.set(pilot)
+      continue
+    }
+
+    const cruise = cruiseSpeed(roadOf(route.edge))
+    const sharp = (1 - (lane.dx * next.dx + lane.dy * next.dy)) / 2
+    let want = Math.min(cruise, Math.max(CORNER_MIN, cruise * (1 - 1.2 * sharp)) + CORNER_RAMP * Math.max(0, lane.length - along))
+    // Pointing away from the target (turning round, a corner gone wide): corner speed, for the tightest circle.
+    want = Math.min(want, CORNER_MIN + (cruise - CORNER_MIN) * Math.max(0, Ops.cos(error)))
+    const fx = Ops.cos(pose.angle), fy = Ops.sin(pose.angle)
+    const range = CONE_BASE + Math.max(0, speed) * CONE_TIME
+    for (const other of obstacles) {
+      if (other.id === entity.id) continue
+      const rx = other.x - pose.x, ry = other.y - pose.y
+      const front = rx * fx + ry * fy
+      if (front <= 0 || front > range + other.half || Math.abs(ry * fx - rx * fy) >= CONE_HALF_WIDTH) continue
+      want = Math.min(want, Math.max(0, (front - spec.length / 2 - other.half - GAP) * 0.8))
+    }
+
+    const holding = want < 0.5 && Math.abs(speed) < 0.5
+    data.input.set(holding
+      ? { throttle: 0, steer, handbrake: true }
+      : { throttle: throttleFor(want, speed), steer, handbrake: false })
+
+    // Stopped (or grinding along a wall) counts up; only real progress resets it.
+    const stuck = Math.abs(speed) < STUCK_SPEED ? pilot.stuck + 1 : Math.abs(speed) > MOVING_SPEED ? 0 : pilot.stuck
+    if (stuck < STUCK_STEPS) pilot = { ...pilot, stuck }
+    else {
+      pilot = { ...pilot, stuck: 0, reverseUntil: step + REVERSE_STEPS, tries: pilot.tries + 1 }
+      const back = { edge: route.edge, forward: !route.forward }
+      // Turn round only when lined up with the route (mid-turn, backing up helps it round instead).
+      const linedUp = lane.dx * fx + lane.dy * fy > LINED_UP
+      const turn = linedUp && (pilot.tries >= TURN_TRIES || (!leadsToDeadEnd(back, model) && random.next() < 0.5))
+      if (roadOf(route.edge).oneway !== true && turn) {
+        route = { ...route, forward: back.forward, side: laneSide(back, model) }
+        const after = nextTrafficEdge(endNode(route.edge, route.forward), route.edge, model, random)
+        pilot = { ...pilot, next: after.edge, nextForward: after.forward }
+      }
+    }
+    data.route.set(route)
+    data.pilot.set(pilot)
+  }
+})

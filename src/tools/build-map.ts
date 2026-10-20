@@ -1,0 +1,209 @@
+// Builds src/sim/map/monzone.json from data/raw (OSM + full forest relations + z15 terrarium).
+// Run: node src/tools/build-map.ts  (pnpm map), from any directory. Output is deterministic.
+import { writeFileSync } from "node:fs"
+import { join } from "node:path"
+
+import type { District, MonzoneMap } from "../sim/map/index.ts"
+import { pushTrunk } from "../sim/map/kinds.ts"
+import { extractAreas, extractBarriers, extractBuildings, extractPois, extractRail, extractRoads, extractWater, type RoadF } from "./features.ts"
+import { along, arcLengths, BOUNDS, crossings, flatLine, M_PER_DEG, ORIGIN, r1, segIndex, type V } from "./geometry.ts"
+import { buildGraph } from "./graph.ts"
+import { readOsm } from "./osm.ts"
+import { chainsOf, lifted, makeProfiler, type Bound, type Linear } from "./profiles.ts"
+import { clearance, parkedSpots, playerSpawn, scatterTrees } from "./spawns.ts"
+import { loadDem, makeGrid, sampleGrid } from "./terrain.ts"
+import { buildWalls } from "./walls.ts"
+import { carveAll, fitUnderDecks, waterLine, waterProfiles, type Crossed } from "./water.ts"
+
+const ROOT = join(import.meta.dirname, "../..")
+const OUT = join(ROOT, "src/sim/map/monzone.json")
+const t0 = performance.now()
+const lap = (label: string) => console.log(`${label.padEnd(10)} ${((performance.now() - t0) / 1000).toFixed(2)} s`)
+
+const osm = readOsm(join(ROOT, "data/raw/monzone.osm"))
+const full = ["3009596", "9736893"].map((id) => ({ id, osm: readOsm(join(ROOT, `data/raw/rel/${id}.osm`)) }))
+const roads = extractRoads(osm), water = extractWater(osm), rail = extractRail(osm)
+const buildings = extractBuildings(osm), areas = extractAreas(osm, full), barriers = extractBarriers(osm), pois = extractPois(osm)
+lap("osm")
+
+// ---- terrain: DEM -> blurred 4 m grid -> carved water -> roads and rail -> water kept under the decks ----
+const grid = makeGrid(loadDem(join(ROOT, "data/raw/terrarium")))
+const dem = { ...grid, z: Float64Array.from(grid.z) } // the untouched blurred DEM every profile samples
+const ground = (x: number, y: number) => sampleGrid(dem, x, y)
+const at = (x: number, y: number) => sampleGrid(grid, x, y)
+const wp = waterProfiles(water, ground)
+carveAll(grid, water, wp)
+lap("water")
+
+// Roads may claim river banks but never the water itself.
+const protect = new Uint8Array(grid.cols * grid.rows)
+const owner = new Uint8Array(grid.cols * grid.rows).fill(255)
+{
+  const wet = segIndex<null>()
+  for (const w of water) if (w.w >= 4) wet.addLine(w.pts, w.w / 2 + 1, null)
+  for (let k = 0; k < protect.length; k++) protect[k] = wet.covers(grid.x0 + (k % grid.cols) * grid.cell, grid.y0 + Math.floor(k / grid.cols) * grid.cell) ? 1 : 0
+}
+const { profile, nodeZ, zOf, denseOf } = makeProfiler(grid, ground, owner, protect)
+const zAt = (l: Linear, s: number) => along(arcLengths(l.pts), zOf.get(l)!, s)
+
+const RAIL_DECK = 1.5 // rail bridge structure above an underpass's clear height, m
+const UNDERPASS = 4 // clear height of an untagged underpass, m
+const RAIL_OVER_WATER = 3 // minimum rail height over the water it bridges, m (more fights the station level crossing 25 m away)
+/** Rail over road without a shared node (rail bridge or road tunnel): the road keeps the clearance under the rail. */
+const railRoad = rail.flatMap((rl) => roads.flatMap((rd) => {
+  if (!lifted(rl) && rd.tunnel !== true) return []
+  const level = (c: V) => rl.pts.some((v) => v.id !== undefined && Math.hypot(v.x - c.x, v.y - c.y) < 0.1 && rd.pts.some((u) => u.id === v.id))
+  return crossings(rl.pts, rd.pts).filter((c) => !level(c)).map((c) => ({ rl, rd, c, clear: (rd.maxheight ?? UNDERPASS) + RAIL_DECK, exact: rd.maxheight !== undefined }))
+}))
+type Chain = ReadonlyArray<{ readonly item: Linear }>
+/** Mean uncarved ground along `l` within 35 m (arc length) of `s`: a road's natural level before it is profiled. */
+const naturalAt = (l: Linear, s: number) => {
+  const ss = arcLengths(l.pts)
+  let sum = 0, n = 0
+  for (let d = Math.max(0, s - 35); d <= Math.min(ss.at(-1)!, s + 35); d += 2, n++) sum += ground(along(ss, l.pts.map((v) => v.x), d), along(ss, l.pts.map((v) => v.y), d))
+  return sum / Math.max(1, n)
+}
+/** Roads under the rail stay that far below it (exactly when the underpass has a maxheight). */
+const roadBounds = (chain: Chain): Array<Bound> => railRoad.filter((x) => chain.some((m) => m.item === x.rd))
+  .map((x) => ({ x: x.c.x, y: x.c.y, z: zAt(x.rl, x.c.sa) - x.clear, ...(x.exact ? {} : { kind: "max" as const }) }))
+/** Level crossings: a rail node shared with a road. */
+const levels = rail.flatMap((rl) => roads.flatMap((rd) => rd.pts.flatMap((v, i) => (v.id !== undefined && rl.pts.some((u) => u.id === v.id) ? [{ rl, rd, v, s: arcLengths(rd.pts)[i]! }] : []))))
+/**
+ * The rail meets level crossings and tagged underpasses (maxheight + RAIL_DECK above them) at the
+ * road's natural level, and stays RAIL_OVER_WATER above the water it bridges.
+ */
+const railBounds = (chain: Chain): Array<Bound> => [
+  ...levels.filter((x) => chain.some((m) => m.item === x.rl)).map((x) => ({ x: x.v.x, y: x.v.y, z: naturalAt(x.rd, x.s) })),
+  ...railRoad.filter((x) => x.exact && chain.some((m) => m.item === x.rl)).map((x) => ({ x: x.c.x, y: x.c.y, z: naturalAt(x.rd, x.c.sb) + x.clear })),
+  ...chain.filter((m) => lifted(m.item)).flatMap((m) => water.flatMap((w, wi) =>
+    crossings(m.item.pts, w.pts).map((c) => ({ x: c.x, y: c.y, z: along(wp[wi]!.s, wp[wi]!.z, c.sb) + RAIL_OVER_WATER, kind: "min" as const }))))
+]
+const widest = (chain: ReadonlyArray<{ readonly item: RoadF }>) => Math.max(...chain.map((m) => m.item.w))
+const ofClass = (...cls: ReadonlyArray<string>) => roads.filter((r) => cls.includes(r.cls))
+// The rail goes first (its grade limit is the strictest; roads dip under it and meet it at level
+// crossings), then roads by class. Ranks decide grid cells: tertiary 0 beats rail 1 beats the rest.
+for (const ch of chainsOf(rail)) profile(ch, { w: 4, rank: 1, grade: 0.025, half: 100 }, railBounds(ch))
+for (const ch of chainsOf(ofClass("tertiary"))) profile(ch, { w: widest(ch), rank: 0, grade: 0.1, half: 35 }, roadBounds(ch))
+for (const ch of chainsOf(ofClass("unclassified", "residential"))) profile(ch, { w: widest(ch), rank: 2, grade: 0.15, half: 35 }, roadBounds(ch))
+for (const ch of chainsOf(ofClass("service", "track"))) profile(ch, { w: widest(ch), rank: 3, grade: 0.2, half: 35 }, roadBounds(ch))
+lap("roads")
+
+/** A bridge or tunnel no profiled chain covers (paths, steps): the line between its ends, from the uncarved ground. */
+const lone = (l: Linear): Array<number> => {
+  const end = (v: V) => (v.id !== undefined ? nodeZ.get(v.id) : undefined) ?? ground(v.x, v.y)
+  const za = end(l.pts[0]!), zb = end(l.pts.at(-1)!), s = arcLengths(l.pts)
+  return s.map((d) => za + ((zb - za) * d) / (s.at(-1)! || 1))
+}
+const deckZ = (l: Linear) => zOf.get(l) ?? lone(l)
+const crossed: Array<Crossed> = []
+for (const [l, lw] of [...roads.map((r) => [r, r.w] as const), ...rail.map((r) => [r, 4] as const)]) {
+  if (l.tunnel === true || (!lifted(l) && !zOf.has(l))) continue // tunnels pass under; paths follow the terrain
+  const z = deckZ(l), s = arcLengths(l.pts)
+  water.forEach((w, wi) => {
+    for (const c of crossings(w.pts, l.pts)) crossed.push({ water: wi, at: c.sa, half: lw / 2 + (l.bridge === true ? 2 : 1), deck: along(s, z, c.sb), bridge: l.bridge === true })
+  })
+}
+fitUnderDecks(grid, water, wp, crossed, (n) => owner[n] !== 255, at)
+for (let k = 0; k < grid.z.length; k++) grid.z[k] = Math.round(grid.z[k]! * 10) / 10
+lap("decks")
+
+/** Per-vertex elevation: the profile, a lone bridge's line between its ends, or the terrain (paths). */
+const zLine = (l: Linear): Array<number> => (zOf.get(l) ?? (lifted(l) ? lone(l) : l.pts.map((v) => at(v.x, v.y)))).map(r1)
+/** Output polyline and z: profiled pieces carry their extra bend samples. */
+const lineOut = (l: Linear) => {
+  const d = denseOf.get(l)
+  return d === undefined ? { pts: flatLine(l.pts), z: zLine(l) } : { pts: flatLine(d.pts), z: d.z.map(r1) }
+}
+
+// ---- collision, graph, trees, spawns ----
+const walls = buildWalls(grid, roads, water, buildings, barriers)
+lap("walls")
+const graph = buildGraph(roads)
+const trees = scatterTrees(areas, roads, buildings, water, rail)
+lap("trees")
+const trunks: Array<number> = []
+for (let i = 0; i < trees.length; i += 3) pushTrunk(trunks, trees[i]!, trees[i + 1]!)
+const walkClear = clearance([walls.walk, trunks]), driveClear = clearance([walls.drive, trunks])
+const poi = (id: number) => {
+  const p = pois.find((q) => q.id === id)
+  if (p === undefined) throw new Error(`poi ${id} missing`)
+  return p
+}
+const station = poi(1813987803), carabinieri = poi(14183344901)
+const player = playerSpawn(roads, walkClear, driveClear, carabinieri)
+const junctions = graph.degree.flatMap((d, n) => (d >= 3 ? [[graph.xy[2 * n]!, graph.xy[2 * n + 1]!] as const] : []))
+const parked = parkedSpots({ roads, buildings, areas, junctions, walk: walkClear, drive: driveClear, avoid: player, station })
+lap("spawns")
+
+// HUD names (`districtAt` in src/sim/map/index.ts): OSM places plus the village's named clusters;
+// isolated farmhouses fall back to the nearest disc.
+const districts: Array<District> = [
+  { name: "Monzone (Stazione)", x: -500, y: 480, r: 250 },
+  { name: "Via Riolo", x: -200, y: 310, r: 160 },
+  { name: "Immacolata", x: -90, y: 120, r: 120 },
+  { name: "Santa Lucia", x: 44.6, y: 223.8, r: 130 },
+  { name: "Via per Equi", x: 260, y: 370, r: 190 },
+  { name: "Caldanella", x: 570, y: 510, r: 110 },
+  { name: "Cimitero", x: -45, y: -70, r: 70 },
+  { name: "Monzone Alto", x: -34.4, y: -300.3, r: 170 },
+  { name: "Collecchia", x: -140, y: -480, r: 100 },
+  { name: "Torrignana", x: -398.7, y: -99.1, r: 200 },
+  { name: "Aiola", x: 720, y: 190, r: 240 },
+  { name: "Castello di Aiola", x: 420, y: -260, r: 110 },
+  { name: "Novicchia", x: -924.1, y: -397.1, r: 220 },
+  { name: "Acquanera", x: 117.2, y: -95.6, r: 120 }
+]
+
+const roadOut = (r: RoadF) => ({
+  id: r.id, cls: r.cls, ...(r.name !== undefined ? { name: r.name } : {}), ...(r.ref !== undefined ? { ref: r.ref } : {}), w: r.w, surface: r.surface,
+  ...(r.oneway ? { oneway: true } : {}), ...(r.bridge ? { bridge: true } : {}), ...(r.tunnel ? { tunnel: true } : {}), ...(r.layer !== undefined ? { layer: r.layer } : {}),
+  ...lineOut(r)
+})
+const map: MonzoneMap = {
+  version: 1,
+  origin: ORIGIN,
+  mPerDeg: M_PER_DEG,
+  bounds: BOUNDS,
+  heightmap: { cell: grid.cell, cols: grid.cols, rows: grid.rows, x0: grid.x0, y0: grid.y0, data: Array.from(grid.z, (z) => Math.round(z * 10)) },
+  roads: roads.map(roadOut),
+  buildings: buildings.map((b) => {
+    let z0 = Number.MAX_VALUE
+    for (const ring of [b.outer, ...(b.holes ?? [])]) for (let i = 0; i < ring.length; i += 2) z0 = Math.min(z0, at(ring[i]!, ring[i + 1]!))
+    const { id, kind, name, h, style, ruins, tint, outer, holes } = b
+    return { id, kind, ...(name !== undefined ? { name } : {}), h, z0: r1(z0), style, ...(ruins ? { ruins } : {}), tint, outer, ...(holes ? { holes } : {}) }
+  }),
+  water: water.map((w, i) => {
+    const line = waterLine(w.pts, wp[i]!)
+    return { id: w.id, kind: w.kind, ...(w.name !== undefined ? { name: w.name } : {}), w: w.w, pts: flatLine(line.pts), z: line.z.map(r1) }
+  }),
+  rail: rail.map((r) => ({ id: r.id, ...(r.bridge ? { bridge: true } : {}), ...(r.tunnel ? { tunnel: true } : {}), ...lineOut(r) })),
+  areas,
+  barriers,
+  pois,
+  districts,
+  graph: { xy: graph.xy, edges: graph.edges, traffic: graph.traffic, walk: graph.walk },
+  walls: { walk: walls.walk, drive: walls.drive },
+  trees,
+  spawns: { player, parked }
+}
+const json = JSON.stringify(map)
+writeFileSync(OUT, json)
+lap("write")
+
+/** Steepest vertex-to-vertex grade per road class (bridges included), over steps of >= 4 m. */
+const grades: Record<string, string> = {}
+for (const r of map.roads) for (let i = 1, j = 0; i < r.z.length; i++) {
+  const ds = Math.hypot(r.pts[2 * i]! - r.pts[2 * j]!, r.pts[2 * i + 1]! - r.pts[2 * j + 1]!)
+  if (ds < 4) continue
+  const g = Math.abs(r.z[i]! - r.z[j]!) / ds
+  if (g > parseFloat(grades[r.cls] ?? "0") / 100) grades[r.cls] = `${(g * 100).toFixed(1)}% (${r.id})`
+  j = i
+}
+const kb = (v: unknown) => `${(JSON.stringify(v).length / 1024).toFixed(0)} KB`
+console.log({
+  bytes: json.length, roads: map.roads.length, buildings: map.buildings.length, water: map.water.length, rail: map.rail.length, areas: areas.length,
+  wallsWalk: walls.walk.length / 4, wallsDrive: walls.drive.length / 4, blockedCells: { walk: walls.walkCells, drive: walls.driveCells },
+  nodes: graph.xy.length / 2, edges: graph.edges.length / 3, traffic: graph.traffic.length, walk: graph.walk.length, trees: trees.length / 3, parked: parked.length, player,
+  grades,
+  sizes: { heightmap: kb(map.heightmap), trees: kb(trees), walls: kb(map.walls), graph: kb(map.graph), roads: kb(map.roads), buildings: kb(map.buildings), areas: kb(areas) }
+})
