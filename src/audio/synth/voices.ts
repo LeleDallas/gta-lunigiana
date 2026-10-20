@@ -7,7 +7,7 @@
  * @module audio/synth/voices
  */
 import type { OneShot, Shot } from "../types.ts"
-import { jitter, type ShotIo } from "./graph.ts"
+import { jitter, type ShotIo, unit } from "./graph.ts"
 
 type Formants = readonly [number, number, number]
 
@@ -98,7 +98,7 @@ const CUES = {
 
 /** Who `voice` 0…1 is: the lower half male, the upper female; within each, a pitch ±12 % and a vocal tract ±5 %. */
 const speakerOf = (voice: number): { readonly sex: Sex; readonly pitch: number; readonly tract: number } => {
-  const v = Math.min(1, Math.max(0, voice)), within = v < 0.5 ? v * 2 : (v - 0.5) * 2
+  const v = unit(voice), within = v < 0.5 ? v * 2 : (v - 0.5) * 2
   return { sex: v < 0.5 ? "male" : "female", pitch: 0.88 + 0.24 * within, tract: 0.95 + 0.1 * within }
 }
 

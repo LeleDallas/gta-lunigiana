@@ -135,7 +135,8 @@ const CALLS = {
     let end = t
     for (let i = 0, n = 8 + Math.floor(Math.random() * 10); i < n; i++) {
       const hz = 2000 + Math.random() * 6000, seconds = 0.03 + Math.random() * 0.12
-      end = note(io, t, hz, hz * jitter(0.3), seconds, 0.3 + 0.2 * Math.random(), Math.random() < 0.3 ? [40 + 40 * Math.random(), 400] : undefined)
+      // A long note's tail can outlast the short one after it.
+      end = Math.max(end, note(io, t, hz, hz * jitter(0.3), seconds, 0.3 + 0.2 * Math.random(), Math.random() < 0.3 ? [40 + 40 * Math.random(), 400] : undefined))
       t += seconds + 0.01 + 0.05 * Math.random()
     }
     return end

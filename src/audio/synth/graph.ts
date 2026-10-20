@@ -21,8 +21,8 @@ export const jitter = (spread: number): number => 1 + (Math.random() * 2 - 1) * 
 /** A gain within ±`db` dB of 1. */
 export const jitterDb = (db: number): number => 10 ** (((Math.random() * 2 - 1) * db) / 20)
 
-/** `x` clamped to 0…1. */
-export const unit = (x: number): number => Math.min(1, Math.max(0, x))
+/** `x` clamped to 0…1; NaN is 0 (a non-finite AudioParam value throws, which would silence that kind for good). */
+export const unit = (x: number): number => Math.min(1, Math.max(0, x)) || 0
 
 /** Band-passed `noise` at `t`: rises to `peak` in `attack` s, then decays with time constant `tau` s. */
 export const burst = (ctx: BaseAudioContext, noise: AudioBuffer, out: AudioNode, t: number, attack: number, tau: number, hz: number, q: number, peak: number): void => {
