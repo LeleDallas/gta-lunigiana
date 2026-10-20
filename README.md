@@ -10,14 +10,24 @@ low-resolution pixel-art look.
 
 ## The valley
 
-The Valle del Lucido runs down the north-western slope of the Apuan Alps, in the comune of
-Fivizzano (province of Massa-Carrara). Its torrent, the Lucido, has two branches: the Lucido di
-Vinca, coming down from the south, and the Lucido di Equi, coming from the east past the spa
-village of Equi Terme. They meet at Monzone, under the 18th-century humpback bridge of Santa
-Lucia. Monzone has two halves: Ponte di Monzone, the lower village that grew around the
-railway station on the Lucca–Aulla line, and Monzone Alto, the old village perched on a rocky
-spur under the church of San Prospero. Downstream, the Lucido runs north past the hamlets of
-Isolano and Pian del Molino to Gragnola, where it joins the Aulella.
+The Valle del Lucido is a side valley of the Aulella in eastern Lunigiana, almost entirely in the
+comune of Fivizzano (province of Massa-Carrara). It runs a little over 14 km, from the flat,
+farmed valley floor at Gragnola, where the Lucido flows into the Aulella, up to pastures above
+1,000 m in the northern Apuan Alps, under Pizzo d'Uccello and Monte Sagro. Much of it lies in the
+Apuan Alps Regional Park. Local tradition says the torrent is called *Lucido*, "bright", for its
+clear water.
+
+The Lucido has two branches, the Lucido di Vinca and the Lucido d'Equi, which meet on the valley
+floor at Monzone, under the 18th-century humpback bridge of Santa Lucia. Monzone has two halves:
+Ponte di Monzone along the road and the railway, and Monzone Alto on a rocky spur under the
+church of San Prospero. Up the Equi branch, Equi Terme has sulphurous springs used since Roman
+times, karst caves open to visitors, a rock shelter (the Tecchia di Equi) with traces of
+Neanderthals and cave bears, and the Solco di Equi, a narrow canyon towards Pizzo d'Uccello.
+Downstream, Gragnola, the valley's historic market town, sits below the Malaspina Castello
+dell'Aquila. In the 19th century, marble quarried on Monte Sagro brought the valley a short
+period of prosperity; Monzone station's freight yard served the marble trade, with the stone
+brought down by an aerial cableway. The Lucca–Aulla railway still climbs the valley through
+Gragnola, Monzone and Equi Terme.
 
 The playable map covers about 5.2 × 4.6 km of it:
 
@@ -36,6 +46,17 @@ surveyed eave heights), road widths and surfaces come from Regione Toscana's 1:2
 
 This is a fan project. It is not affiliated with or endorsed by Rockstar Games or Take-Two
 Interactive; "Grand Theft Auto" is their trademark.
+
+## Screenshots
+
+| | |
+|---|---|
+| ![On foot beside the Carabinieri's Alfa Romeo Giulia on Via Cesare Battisti, Monzone](docs/screenshots/monzone-carabinieri.png) | ![Driving the stolen Carabinieri car over the Via delle Cave bridge across the Lucido, beside the railway](docs/screenshots/driving.png) |
+| On foot in Monzone, next to the Carabinieri's car | Over the Lucido in the stolen Giulia |
+| ![The full map, opened with M: the valley from Monzone to Gragnola and Codiponte](docs/screenshots/full-map.png) | ![Gragnola's old town on the Lucido and the Via Borgo Lucido bridge](docs/screenshots/gragnola.png) |
+| The full map (M) | Gragnola, on the Lucido |
+| ![Equi Terme around Piazza delle Terme](docs/screenshots/equi-terme.png) | ![Monzone Alto with the church of San Prospero and its bell tower](docs/screenshots/monzone-alto.png) |
+| Equi Terme | Monzone Alto and San Prospero |
 
 ## Requirements
 
@@ -144,6 +165,15 @@ are what pins it. `node src/tools/preview-map.ts` draws a top-down PNG of the bu
   https://www502.regione.toscana.it/geoscopio/cartoteca.html.
 
 The game shows both credits on the title card and in the HUD.
+
+Sources for "The valley": [Grotte di Equi, *La Valle del Lucido*](https://grottediequi.it/territorio/la-valle-del-lucido/),
+[*Il nome Valle del Lucido*](https://aipiedidelleapuane.wordpress.com/2017/02/28/il-nome-valle-del-lucido/),
+the Italian Wikipedia pages for [Monzone](https://it.wikipedia.org/wiki/Monzone),
+[Equi Terme](https://it.wikipedia.org/wiki/Equi_Terme), [Gragnola](https://it.wikipedia.org/wiki/Gragnola_(Fivizzano)),
+[the Aulella](https://it.wikipedia.org/wiki/Aulella) and
+[Monzone station](https://it.wikipedia.org/wiki/Stazione_di_Monzone-Monte_dei_Bianchi-Isolano),
+[Visit Tuscany: Equi Terme](https://www.visittuscany.com/en/towns-and-villages/equi-terme/), and the
+valley study in [*ARQ*](https://arqarqt.revistas.csic.es/index.php/arqarqt/article/download/39/36/37).
 
 ## Documentation
 
