@@ -96,7 +96,7 @@ const reachesOf = (water: Water): Array<Reach> => {
   return out
 }
 
-/** Every reach of the map, gridded (≈ 8 ms, on the first query). */
+/** Every reach of the map, gridded (≈ 30 ms, on the first query). */
 const indexReaches = () => {
   const reaches = MAP.water.flatMap(reachesOf)
   const near = staticGrid(reaches.length, (i) => {

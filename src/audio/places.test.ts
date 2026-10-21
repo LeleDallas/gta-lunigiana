@@ -11,6 +11,8 @@ const seeded = (seed: number) => () => ((seed = (seed * 1664525 + 1013904223) >>
 const FOREST = { x: 500, y: -400 }, MEADOW = { x: -329, y: 1078 }, GRAGNOLA = { x: -1751.2, y: 3360.4 }, EQUI = { x: 1804.9, y: 721 }
 /** Monzone's street where the game starts, in sight of slopes steeper than 35° but not rock. */
 const SPAWN = { x: -412.6, y: 437.8 }
+/** 0.15 m off a drive wall in a quarry, with no trunk or building within 3 m and no barrier within 20 m: a cut face. */
+const QUARRY_FACE = { x: -2480, y: -5923.85 }
 
 test("surfaces: road carriageways by their OSM surface, the forest floor, a meadow", () => {
   // Midway along the longest segment of the first road of each surface, away from any junction.
@@ -26,7 +28,7 @@ test("surfaces: road carriageways by their OSM surface, the forest floor, a mead
   assert.equal(surfaceAt(MEADOW.x, MEADOW.y), "grass")
 })
 
-test("walls: a tree trunk, buildings by kind and style, the guard rail, the stone wall and a cliff, each 0.3 m off; bare ground is earth", () => {
+test("walls: a tree trunk, buildings by kind and style, the guard rail, the stone wall and a cliff, each 0.3 m off; bare ground is earth, a quarry's bank rock", () => {
   /** 0.3 m off the middle of the longest edge of `pts`, on its right (outside a counter-clockwise ring). */
   const beside = (pts: ReadonlyArray<number>, closed: boolean) => {
     let best = { x: 0, y: 0, length: 0 }
@@ -51,6 +53,7 @@ test("walls: a tree trunk, buildings by kind and style, the guard rail, the ston
   const { trees } = MAP
   assert.equal(wallAt(trees[0]! + 0.55, trees[1]!), "tree")
   assert.equal(wallAt(MEADOW.x, MEADOW.y), "earth")
+  assert.equal(wallAt(QUARRY_FACE.x, QUARRY_FACE.y), "rock")
 })
 
 test("walls: the nearest source wins, a trunk by a house wall is the trunk; a bank is earth though trees stand 1.5–3 m off it", () => {
@@ -130,7 +133,7 @@ test("one bell per settlement, lower in taller towers", () => {
   assert.ok(bells.length >= 8)
   assert.equal(new Set(bells.map((b) => b.key)).size, bells.length)
   for (const b of bells) assert.ok(b.pitch >= 400 && b.pitch <= 800, b.key)
-  // The map's tallest building, Monzone Alto's 30 m church tower, hangs the deepest bell.
+  // Monzone Alto's 30 m church tower hangs the deepest bell.
   const alto = bells.find((b) => Math.hypot(b.x - 6, b.y + 326) < 5)
   assert.ok(alto !== undefined && alto.pitch === 400 && alto.z > 325)
 })

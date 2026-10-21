@@ -284,7 +284,7 @@ honks, barks, shouts, screams and bells. The search runs along 16 directions fro
 that climbs at least 50°, the slope the terrain paints as bare rock, and stands at least 10 m above
 the ears. A gentler slope, grassed or wooded, mirrors sound up into the sky and scatters back too
 little to hear (even a forest edge returns 16–31 dB under the direct sound), so it does not echo.
-Rock is in sight from about a quarter of the map. Up to two echoes play, the strongest first and
+Rock is in sight from about half of the map. Up to two echoes play, the strongest first and
 at least 45° apart:
 
 - delay 2d/c after the direct sound;
@@ -402,7 +402,7 @@ One-shots:
 | `scream`, `shout` | `synth/voices.ts`: a sawtooth glottis on a pitch contour, breath noise, three vowel formants and a fast roughness; each person keeps one voice (sex and pitch from their id) | a pedestrian starts to flee (scared by a fast car, or back on their feet after a knockdown) screams or shouts "Ehi!"; a carjacked driver within 15 m shouts. At most one cue per person per 4 s | scream 100 (1 m), shout 88 (1 m) |
 | `bell` | `synth/nature.ts`: a bell's inharmonic partials (hum, prime, tierce, quint, nominal...), each split to beat; four primes rendered, any pitch resampled from the nearest | the computer's local clock: the hours (1–12 strokes, 2.5 s apart) on the hour and one stroke on the half hour, from the 4 loudest towers in earshot, each starting up to 6 s late | 118 (5 m) |
 | `bird` | `synth/nature.ts`: autumn calls of the robin, great tit, blackbird ("chink" or "seee") and chaffinch ("pink"), 35/30/20/15 % | from a tree 15–70 m away: 0.3 calls a second in full forest, plus 0.05 near houses | 85 (1 m) |
-| `bark` | `synth/nature.ts`: two to five barks of a big or a small dog through a formant tract | 183 farm dogs (about one in eight barns, sheds, houses and farm buildings with open ground and no paving 5 m out): those within 200 m bark every 45 s on average, four times as often while the player runs or drives within 30 m | 96 (1 m) |
+| `bark` | `synth/nature.ts`: two to five barks of a big or a small dog through a formant tract | 225 farm dogs (about one in eight barns, sheds, houses and farm buildings with open ground and no paving 5 m out): those within 200 m bark every 45 s on average, four times as often while the player runs or drives within 30 m | 96 (1 m) |
 
 A crash's params say what met: `body` is the listener's car if they sit in one of the two, else
 the Impact's `car` (query order, not necessarily the one that struck; model and zone), `against`
@@ -418,7 +418,8 @@ drive wall (`wallAt` in `places.ts`) is that of the nearest wall source within 3
 point, if it is the wall the car met (within 0.6 m of the nearest drive wall of any kind): a tree
 trunk (`tree`); a building's walls by kind and style (a greenhouse `glass`, the industrial style,
 which takes in substations and silos, `sheet`, the stone, church, tower and ruin styles `stone`,
-the rest `masonry`); a barrier (a guard rail `rail`, a wall `stone`, a cliff `rock`); anything
+the rest `masonry`); a barrier (a guard rail `rail`, a wall `stone`, a cliff `rock`); else the
+bank itself: `rock` in the bare-stone covers (a quarry's cut face, a crag, scree), and anything
 else, a steep bank, a stream's edge or the end of the map, is `earth`, though trees stand a metre
 or two off it (35 % of the probes 0.15 m off the map's banks read `tree` before that rule, 3.6 %
 after).
@@ -541,7 +542,7 @@ crash plays) a play took 2 ms (median; 4.6 for nine in ten, 8.8 at most) and no 
 within a second of one. ponytail: the render runs on the main thread; move it to a Worker if the
 browser shows long tasks.
 
-The bells are the tallest church or tower of each district, 22 in all. A tower of 10 m or less
+The bells are the tallest church or tower of each district, 27 in all. A tower of 10 m or less
 rings an 800 Hz prime; taller towers ring lower, down to 400 Hz at 30 m.
 
 ## Calibration and mix
@@ -689,7 +690,7 @@ functions (`synth/world.test.ts` imports them to check).
 | `src/render/index.test.ts` | every system of the render and audio schedules declares no writes |
 | `src/audio/acoustics.test.ts` | the laws: the line source against the exact table, the air cutoffs, Doppler, the pan, diffraction, ground, foliage, masking, the mix calibration |
 | `src/audio/occlusion.test.ts` | path differences on real map spots: a flat meadow, Monzone Alto's 30 m tower, a bell over its own walls, Monte San Giorgio between its flanks |
-| `src/audio/places.test.ts`, `src/audio/places/water.test.ts` | surfaces, wall materials (a trunk, buildings by kind and style, the guard rail, the stone wall, a cliff, bare ground; the nearer of a trunk and a house wall 1.2–2.5 m apart wins; a bank with trees 1.5–3 m off it is earth), ambience shares, streets, echoes off the rock at Equi Terme and none off Monzone's gentler slopes, bells, dogs and birds, the Torrente Lucido from Monzone station, the Fontana di Aiola |
+| `src/audio/places.test.ts`, `src/audio/places/water.test.ts` | surfaces, wall materials (a trunk, buildings by kind and style, the guard rail, the stone wall, a cliff, bare ground, a quarry's bank; the nearer of a trunk and a house wall 1.2–2.5 m apart wins; a bank with trees 1.5–3 m off it is earth), ambience shares, streets, echoes off the rock at Equi Terme and none off Monzone's gentler slopes, bells, dogs and birds, the Torrente Lucido from Monzone station, the Fontana di Aiola |
 | `src/audio/director/index.test.ts` | the director on a recording speaker at real map spots: proximity (in the open and behind a ridge), a building's muffling, Doppler, step cadence, travel delay, crash merging and scrapes, a house wall's material and cobbles in the crash and scrape params, the bodies swapped for a listener in the struck car, a zone's wear carried to the next crash, a wall crash's debris surface read under the car, a scrape's material held through a brief other contact, a wall crash on foot muffled by the house in the way, a bump culled nearer than a crash, echoes off a rock face and hidden in a street, the reverb dry in the open and wet in a walled street, nothing before the context, the cabin (the own crash's tail and echoes through it), getting in and out, horn and siren, the bells, water and its masking, the valley's never-silent bed and the river 15 m away against behind the houses, voice caps and their hysteresis, flee cues |
 | `src/audio/director/hearing.test.ts`, `occluder.test.ts` | the reverb send: none in the open, in a street by distance (capped), gaps and the cabin, even for a sound of the own car that skips it; the obstacle cache's refresh and forgetting |
 | `src/audio/speaker.test.ts`, `mixer.test.ts`, `buffers.test.ts`, `measure.test.ts` | the one-shot cap, the speaker inert until a trusted gesture, the level meter, seamless noise loops, the render measurements |
@@ -747,7 +748,8 @@ task, no console error, no non-finite placement.
 - **Fixed weather:** 15 °C, 70 % humidity, an October afternoon. No night, no wind direction.
 - **Water** loudness comes from width and grade, not discharge; the Cascata di Equi is hard-coded.
 - **Stereo** is a pan along the screen's right axis, with no front or back; it follows the view's
-  turns, not the camera's eased swing between them.
+  turns, not the camera's eased swing between them, and a one-shot or echo already on its way (a
+  far bell stroke, a bark 200 m off) keeps the pan it was sent with.
 - **The occluder is bounded:** at most 12 paths a frame are re-measured, each at most every
   150 ms, so a source moving fast behind houses can lag a few frames.
 - **A car rubbing along a wall** keeps a faint scrape held while the sim reports the small hits.

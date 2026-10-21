@@ -52,6 +52,12 @@ test("hear: the player on foot, then at the wheel of a running car with the horn
   assert.deepEqual([onFoot!.horn, seated!.horn, horn!.horn], [false, false, true])
 })
 
+test("hear: the listener carries the view's quarter turns, which the stereo image turns with", () => {
+  const { run, frames } = listen([...press(1, "turnLeft"), ...press(3, "turnLeft"), ...press(5, "turnRight")], door(ON_BATTISTI))
+  run(7)
+  assert.deepEqual(frames.map((f) => f.listener.turns), [0, 1, 1, 2, 2, 1, 1])
+})
+
 test("hear: AI traffic runs even standing; a car nobody drives is heard only while it moves", () => {
   const lane = laneOf(BATTISTI.edge, BATTISTI.forward)
   const side = laneSide(BATTISTI, "panda")

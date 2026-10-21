@@ -96,18 +96,22 @@ const distanceTo = (pts: ReadonlyArray<number>, closed: boolean, x: number, y: n
   return Math.sqrt(d2)
 }
 
+/** A drive wall in the bare-stone covers is the rock itself: a cut quarry face, a crag, a bank of scree. */
+const BANK_MATERIAL: Partial<Record<Cover, Material>> = { rock: "rock", quarry: "rock", scree: "rock" }
+
 /** A trunk, building or barrier this much farther than the nearest drive wall is not the wall that was hit, m (a trunk's square wall against its circle, a contact a few cm off). */
 const SAME_WALL = 0.6
 
 /**
  * What a vehicle hitting a drive wall at the contact point (x, y) hit, by how it sounds: the
  * nearest tree trunk, building wall or barrier within `reach` m, if it is the nearest drive wall;
- * else earth (a steep bank, a stream's edge, the end of the map).
+ * else the bank itself, rock in the bare-stone covers and earth elsewhere (a steep bank, a
+ * stream's edge, the end of the map).
  */
 export const wallAt = (x: number, y: number, reach = 3): Material => {
   let wall = Infinity
   for (const s of wallsNear("drive", x - reach, y - reach, x + reach, y + reach)) wall = Math.min(wall, segDist2(x, y, s.ax, s.ay, s.bx, s.by).d2)
-  let nearest = Math.min(reach, Math.sqrt(wall) + SAME_WALL), material: Material = "earth"
+  let nearest = Math.min(reach, Math.sqrt(wall) + SAME_WALL), material: Material = BANK_MATERIAL[coverAt(x, y)] ?? "earth"
   const offer = (d: number, what: Material) => {
     if (d < nearest) [nearest, material] = [d, what]
   }
