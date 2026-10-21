@@ -1,4 +1,4 @@
-# Grand Theft Auto: Valle del Lucido
+# Grand Theft Auto: Lunigiana
 
 ![Title card](docs/screenshots/title.png)
 

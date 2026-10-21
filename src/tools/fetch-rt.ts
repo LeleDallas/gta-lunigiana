@@ -25,7 +25,7 @@ import { UCS_CODES } from "./ucs.ts"
 
 const ROOT = join(import.meta.dirname, "../..")
 const OUT = join(ROOT, "data/raw/rt")
-const CACHE = join(tmpdir(), "grand-theft-auto-vdl-rt")
+const CACHE = join(tmpdir(), "gta-lunigiana-rt")
 const BASE = "https://www502.regione.toscana.it/geoscopio/download"
 
 /** Every 2019 CTR 1:2000 sheet that maps ground in the play area (cartoteca layer rt_cartoteca.ctr2k). */
