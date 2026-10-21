@@ -91,6 +91,10 @@ You need:
 - **pnpm 10**: `packageManager` pins it in `package.json`, and `corepack enable` installs it
 - **A browser with WebGL**: plus Web Audio for the sound
 
+## Play in the browser
+
+Every push to `main` publishes the game to GitHub Pages at <https://mastro993.github.io/gta-lunigiana/> (`.github/workflows/pages.yml`).
+
 ## Run the game locally
 
 Install the dependencies and start the dev server:
@@ -135,7 +139,7 @@ Every script runs with `pnpm`:
 | Script | What it does |
 |---|---|
 | `pnpm dev` | Vite dev server on port 5173 |
-| `pnpm build` | production build into `dist/` |
+| `pnpm build` | production build into `dist/` (the Pages workflow adds `--base=./`) |
 | `pnpm preview` | serves `dist/` on port 4173 |
 | `pnpm check` | `typecheck`, then `lint`, then `test` |
 | `pnpm typecheck` | `tsc` (no emit) |
