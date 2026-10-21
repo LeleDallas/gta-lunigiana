@@ -11,6 +11,7 @@
  *
  * @module audio/director
  */
+import { screenAxes } from "../../sim/view.ts"
 import { EAR_HEIGHT } from "../acoustics.ts"
 import { echoesAt, type Echo } from "../places.ts"
 import type { Heard, Speaker } from "../types.ts"
@@ -52,7 +53,7 @@ export const makeDirector = (
       const { listener } = heard
       // The ground under the listener stays on the level it was on: a bridge deck, not the river under it.
       ground = groundAt(listener.x, listener.y, ground)
-      const ears = { x: listener.x, y: listener.y, z: ground + EAR_HEIGHT, vx: listener.vx, vy: listener.vy }
+      const ears = { x: listener.x, y: listener.y, z: ground + EAR_HEIGHT, vx: listener.vx, vy: listener.vy, right: screenAxes(listener.turns).right }
       const inside = listener.car === undefined ? undefined : heard.vehicles.find((v) => v.id === listener.car)?.model
       const { ambient, street } = world.listen(ears, now, dt)
       if (live && (faces === undefined || now - faces.at >= ECHOES_EVERY || Math.hypot(ears.x - faces.x, ears.y - faces.y) >= ECHOES_MOVED)) {

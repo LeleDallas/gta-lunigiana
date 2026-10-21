@@ -35,10 +35,12 @@ test("Doppler at 42 m/s: +228 cents approaching, −201 receding, none at the so
 
 test("a source along the screen's right axis pans right, ahead stays centred, inside the head fades out", () => {
   const { right, up } = screenAxes(0)
-  assert.ok(panOf(right.x * 30, right.y * 30) > 0.8)
-  assert.ok(panOf(-right.x * 30, -right.y * 30) < -0.8)
-  near(panOf(up.x * 30, up.y * 30), 0, 1e-9)
-  near(panOf(right.x * 0.5, right.y * 0.5), 0.85 / 4, 1e-9)
+  assert.ok(panOf(right.x * 30, right.y * 30, right) > 0.8)
+  assert.ok(panOf(-right.x * 30, -right.y * 30, right) < -0.8)
+  near(panOf(up.x * 30, up.y * 30, right), 0, 1e-9)
+  near(panOf(right.x * 0.5, right.y * 0.5, right), 0.85 / 4, 1e-9)
+  // A quarter turn of the view to the left brings the old screen-up round to the right.
+  near(panOf(up.x * 30, up.y * 30, screenAxes(1).right), 0.85, 1e-9)
 })
 
 test("diffraction: none in the clear, the table in the shadow, capped at 15 dB", () => {

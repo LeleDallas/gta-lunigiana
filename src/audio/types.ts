@@ -98,6 +98,8 @@ interface HeardListener {
   readonly vy: number
   /** The vehicle the player sits in. */
   readonly car: number | undefined
+  /** Net quarter turns of the view to the left of its home seat (the sim's `View`): the screen, and the stereo image, turn with it. */
+  readonly turns: number
 }
 
 /** One frame of the world, as the audio schedule reads it. */

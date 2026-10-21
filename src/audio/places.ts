@@ -13,7 +13,7 @@ import { coverName, mapCover, type Cover } from "../render/landcover.ts"
 import { staticGrid } from "../sim/collide.ts"
 import { type Building, buildingBoxes, buildingsIn, buildingStyleOf, districtAt, heightAt, MAP, type Road, treesIn, TRUNK, wallsNear } from "../sim/map/index.ts"
 import { hash01, segDist2 } from "../tools/geometry.ts"
-import { delayOf, EAR_HEIGHT, panOf } from "./acoustics.ts"
+import { delayOf, EAR_HEIGHT } from "./acoustics.ts"
 import type { Material, Surface } from "./types.ts"
 
 export { waterNear, type WaterHeard } from "./places/water.ts"
@@ -117,7 +117,7 @@ export const wallAt = (x: number, y: number, reach = 3): Material => {
     const building = MAP.buildings[i]!, what = buildingMaterial(building)
     for (const ring of [building.outer, ...(building.holes ?? [])]) offer(distanceTo(ring, true, x, y), what)
   })
-  // The map has a handful of barriers: every one is measured.
+  // The map has a few dozen barriers: every one is measured.
   for (const { kind, pts } of MAP.barriers) {
     const what = BARRIER_MATERIAL[kind]
     if (what !== undefined) offer(distanceTo(pts, false, x, y), what)
@@ -206,8 +206,8 @@ export const forestAlong = (ax: number, ay: number, bx: number, by: number): num
   return (forest * length) / n
 }
 
-/** A discrete echo of a loud sound off a rock face: seconds after the direct sound, dB below its 1 m level, and where it comes from. */
-export interface Echo { readonly delay: number; readonly loss: number; readonly pan: number }
+/** A discrete echo of a loud sound off a rock face: seconds after the direct sound, dB below its 1 m level, and where the face is from the listener, m. */
+export interface Echo { readonly delay: number; readonly loss: number; readonly dx: number; readonly dy: number }
 
 /** Echoing faces are searched in `AZIMUTHS` directions from `ECHO_NEAR` to `ECHO_FAR` m every `ECHO_STEP` m (physics.md §7: distinct echoes from 17 m on). */
 const AZIMUTHS = 16, ECHO_NEAR = 40, ECHO_FAR = 400, ECHO_STEP = 8
@@ -240,7 +240,7 @@ export const echoesAt = (x: number, y: number): ReadonlyArray<Echo> => {
   faces.sort((a, b) => a.loss - b.loss)
   const apart = (a: number, b: number) => Math.min(Math.abs(a - b), AZIMUTHS - Math.abs(a - b)) >= AZIMUTHS / 8
   const first = faces[0], second = faces.find((f) => first !== undefined && apart(f.k, first.k))
-  return [first, second].filter((f) => f !== undefined).map(({ d, dx, dy, loss }) => ({ delay: delayOf(2 * d), loss, pan: panOf(dx, dy) }))
+  return [first, second].filter((f) => f !== undefined).map(({ d, dx, dy, loss }) => ({ delay: delayOf(2 * d), loss, dx, dy }))
 }
 
 /** A church bell: its tower top and the prime partial of its bell, Hz. */

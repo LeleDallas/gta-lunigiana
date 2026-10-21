@@ -17,7 +17,11 @@ test("the 30 m church tower of Monzone Alto shadows the street behind it, but no
 })
 
 test("a bell at the top of the 30 m tower rings out over its own walls", () => {
-  const tower = MAP.buildings.reduce((a, b) => (b.h > a.h ? b : a))
+  // Monzone Alto's church tower, the tallest building of its block (the map's tallest stand elsewhere).
+  const block: Array<number> = []
+  buildingsIn(-20, -340, 30, -310, (i) => block.push(i))
+  const tower = block.map((i) => MAP.buildings[i]!).reduce((a, b) => (b.h > a.h ? b : a))
+  assert.ok(tower.kind === "church" && tower.h > 29, `${tower.kind} ${tower.h} m`)
   const xs = tower.outer.filter((_, k) => k % 2 === 0), ys = tower.outer.filter((_, k) => k % 2 === 1)
   const bell = { x: (Math.min(...xs) + Math.max(...xs)) / 2, y: (Math.min(...ys) + Math.max(...ys)) / 2, z: tower.z0 + tower.h }
   for (let k = 0; k < 8; k++) {

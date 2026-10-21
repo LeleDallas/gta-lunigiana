@@ -15,7 +15,15 @@ import type { Placement } from "../types.ts"
 import { DELAY_FROM, REVERB } from "./levels.ts"
 
 /** The listener's ears (z a.s.l., m) and velocity, m/s. */
-export interface Ears { readonly x: number; readonly y: number; readonly z: number; readonly vx: number; readonly vy: number }
+export interface Ears {
+  readonly x: number
+  readonly y: number
+  readonly z: number
+  readonly vx: number
+  readonly vy: number
+  /** The screen's right axis on the ground, as the view is turned: what pans right. */
+  readonly right: { readonly x: number; readonly y: number }
+}
 
 /** Where a sound comes from (z a.s.l., m), moving at (vx, vy) m/s. */
 export interface Source { readonly x: number; readonly y: number; readonly z: number; readonly vx?: number; readonly vy?: number }
@@ -76,7 +84,7 @@ export const hear = (path: Path): Hearing => {
   return {
     placement: {
       gain: mixGain(path.db, loss) * fade,
-      pan: panOf(dx, dy),
+      pan: panOf(dx, dy, ears.right),
       cutoff: Math.min(airCutoff(r), edge.cutoff, through?.cutoff ?? 20000),
       cents: path.doppler === true ? doppler(source.x, source.y, source.vx ?? 0, source.vy ?? 0, ears.x, ears.y, ears.vx, ears.vy) : 0,
       wet

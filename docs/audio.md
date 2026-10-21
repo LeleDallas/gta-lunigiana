@@ -45,7 +45,8 @@ components, Input (horn key) ──────┴─► audio schedule (Lunigia
    neither determinism nor saves (both tests run with the events emitted).
 2. **The audio schedule** (`src/audio/index.ts`): one system, `Lunigiana/Hear`, ticked once per
    animation frame. It reads the world and builds one `Heard` (`src/audio/types.ts`):
-   - `listener`: the player's pose and velocity, and the vehicle they sit in;
+   - `listener`: the player's pose and velocity, the vehicle they sit in, and the view's quarter
+     turns (the `View` resource), which the stereo image turns with;
    - `vehicles`: every vehicle that runs (AI traffic, or the player's car) or moves (faster than
      0.01 m/s, or spinning). Parked cars nobody touches are left out;
    - `people`: everyone on foot (pedestrians, and the player when not driving), with their
@@ -114,8 +115,8 @@ components, Input (horn key) ──────┴─► audio schedule (Lunigia
 - **The speaker:** the live voices by key, the one-shots playing, and the kinds muted after a
   failure.
 - **Static data** never changes once built. The bells are found at load; the ambience grid, the
-  water reaches and the dogs in the first `hear`, during the audio tick after `setup` (≈ 65 ms in
-  Node, ≈ 40 of it the cover raster, which the browser has already built for the renderer); the
+  water reaches and the dogs in the first `hear`, during the audio tick after `setup` (≈ 155 ms in
+  Node, ≈ 100 of it the cover raster, which the browser has already built for the renderer); the
   road-surface index on the first footstep or tyre. The land-cover raster is the renderer's
   (`mapCover()` in `src/render/landcover.ts`, built once and shared).
 - **Randomness** in the director (birds, dogs) and the synths (variants, jitter) is `Math.random`:
@@ -331,9 +332,12 @@ Held voices glide their send as the street eases, so walking into a village fade
 
 ### Stereo
 
-The pan is the source's direction along the screen's right axis (`SCREEN_RIGHT`), scaled to ±0.85
-so nothing sits in one ear only, and fading to the centre within 2 m. The camera never turns, so a
-car on the right of the screen is heard on the right. There is no front and back.
+The pan is the source's direction along the screen's right axis, scaled to ±0.85 so nothing sits
+in one ear only, and fading to the centre within 2 m. The axis is `screenAxes(turns).right` for the
+view's quarter turns, so a car on the right of the screen is heard on the right whichever way the
+camera looks; an echo pans toward its face the same way. A turn moves the pan at once: held voices
+glide to it with a 50 ms time constant, about as fast as the camera eases through the turn (83 ms).
+There is no front and back.
 
 ## Sound catalogue
 
@@ -742,7 +746,8 @@ task, no console error, no non-finite placement.
   audio starts is skipped.
 - **Fixed weather:** 15 °C, 70 % humidity, an October afternoon. No night, no wind direction.
 - **Water** loudness comes from width and grade, not discharge; the Cascata di Equi is hard-coded.
-- **Stereo** is a pan along the screen's right axis, with no front or back.
+- **Stereo** is a pan along the screen's right axis, with no front or back; it follows the view's
+  turns, not the camera's eased swing between them.
 - **The occluder is bounded:** at most 12 paths a frame are re-measured, each at most every
   150 ms, so a source moving fast behind houses can lag a few frames.
 - **A car rubbing along a wall** keeps a faint scrape held while the sim reports the small hits.

@@ -7,7 +7,6 @@
  *
  * @module audio/acoustics
  */
-import { screenAxes } from "../sim/view.ts"
 import type { VehicleModel } from "../sim/vehicles.ts"
 
 /** Speed of sound at 15 °C, m/s: c = 331.3 + 0.606·T (§5). */
@@ -115,15 +114,13 @@ export const doppler = (sx: number, sy: number, svx: number, svy: number, lx: nu
 /** Travel time over r m, s (§6). */
 export const delayOf = (r: number): number => r / SPEED_OF_SOUND
 
-/** Screen-right on the ground, with the view in its home seat. */
-const RIGHT = screenAxes(0).right
-
 /**
  * Stereo position of a source (dx, dy) m from the listener (x east, y north): its direction's
- * share along the screen's right axis, scaled to ±0.85 so nothing sits in one ear only, and
- * fading to centre within 2 m (inside the head).
+ * share along `right`, the screen's right axis on the ground, scaled to ±0.85 so nothing sits in
+ * one ear only, and fading to centre within 2 m (inside the head).
  */
-export const panOf = (dx: number, dy: number): number => (0.85 * (dx * RIGHT.x + dy * RIGHT.y)) / Math.max(2, Math.hypot(dx, dy))
+export const panOf = (dx: number, dy: number, right: { readonly x: number; readonly y: number }): number =>
+  (0.85 * (dx * right.x + dy * right.y)) / Math.max(2, Math.hypot(dx, dy))
 
 /** How much of a sound at `levelDb` survives masking by `ambientDb`, 0…1: full at ambient − 5, linear in dB to 0 at ambient − 15 (§8). */
 export const audibility = (levelDb: number, ambientDb: number): number => Math.min(1, Math.max(0, (levelDb - ambientDb + 15) / 10))

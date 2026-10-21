@@ -216,7 +216,8 @@ The pixel pipeline (`src/render/pipeline.ts`):
 
 The audio schedule (`src/audio/index.ts`) is host code beside render. Its one system,
 `Lunigiana/Hear`, reads the player, the vehicles that run or move, the people on foot, the `Impact`
-and `Honk` events and the horn key, and hands them as plain `Heard` data to the `Audio` service.
+and `Honk` events, the horn key and the view's turns (the stereo image turns with the screen), and
+hands them as plain `Heard` data to the `Audio` service.
 `main.ts` provides the director (`src/audio/director`, plain TypeScript), which runs the outdoor
 acoustics and drives the Web Audio speaker (`src/audio/speaker.ts`) and its synths
 (`src/audio/synth`). The speaker starts its AudioContext on the first key or click, the one that

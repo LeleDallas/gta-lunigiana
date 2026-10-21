@@ -116,9 +116,11 @@ test("streets: Gragnola's centre is enclosed, a meadow is open; the forest lines
 test("echoes at Equi Terme come off the rock faces around it, finite and in range, 10 dB lost on the rock; none on the open meadow or off slopes short of rock", () => {
   const echoes = echoesAt(EQUI.x, EQUI.y)
   assert.ok(echoes.length >= 1 && echoes.length <= 2)
-  for (const { delay, loss, pan } of echoes) {
+  for (const { delay, loss, dx, dy } of echoes) {
     assert.ok(delay >= 80 / SPEED_OF_SOUND && delay <= 800 / SPEED_OF_SOUND, `${delay} s`)
-    assert.ok(Number.isFinite(loss) && loss >= 20 * Math.log10(SPEED_OF_SOUND * delay) + 10 && Math.abs(pan) <= 0.85, `${loss} dB`)
+    assert.ok(Number.isFinite(loss) && loss >= 20 * Math.log10(SPEED_OF_SOUND * delay) + 10, `${loss} dB`)
+    // The way out to the face and back.
+    assert.ok(Math.abs(2 * Math.hypot(dx, dy) - SPEED_OF_SOUND * delay) < 1e-6, `${dx}, ${dy}`)
   }
   assert.deepEqual(echoesAt(MEADOW.x, MEADOW.y), [])
   assert.deepEqual(echoesAt(SPAWN.x, SPAWN.y), [])

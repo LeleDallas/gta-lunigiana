@@ -11,7 +11,7 @@
 import { Descriptor } from "@typeonce/ritmo"
 
 import {
-  CarInput, Down, Driving, Game, Honk, Impact, Input, Motion, Pedestrian, Person, Player, Pose, Traffic, Vehicle
+  CarInput, Down, Driving, Game, Honk, Impact, Input, Motion, Pedestrian, Person, Player, Pose, Traffic, Vehicle, View
 } from "../sim/index.ts"
 import { VEHICLES, type VehicleModel } from "../sim/vehicles.ts"
 import type { Body, Happening, Heard, HeardPerson, HeardVehicle, Zone } from "./types.ts"
@@ -53,7 +53,7 @@ const Hear = Game.System("Lunigiana/Hear", {
       without: [Driving]
     })
   },
-  resources: { input: Game.System.readResource(Input) },
+  resources: { input: Game.System.readResource(Input), view: Game.System.readResource(View) },
   events: { impacts: Game.System.readEvent(Impact), honks: Game.System.readEvent(Honk) },
   services: { audio: Game.System.service(Audio) }
 }, ({ queries, resources, events, services }) => {
@@ -95,7 +95,7 @@ const Hear = Game.System("Lunigiana/Hear", {
     ...events.honks.all().map((honk) => ({ kind: "honk" as const, ...honk }))
   ]
   services.audio.hear({
-    listener: { x: pose.x, y: pose.y, vx: motion.vx, vy: motion.vy, car },
+    listener: { x: pose.x, y: pose.y, vx: motion.vx, vy: motion.vy, car, turns: resources.view.get().turns },
     vehicles,
     people,
     happenings,

@@ -76,7 +76,7 @@ const person = (id: number, at: { readonly x: number; readonly y: number }, more
   id, x: at.x, y: at.y, vx: 0, vy: 0, player: false, fleeing: false, down: false, ...more
 })
 const world = (at: { readonly x: number; readonly y: number }, more: Partial<Heard> = {}, car?: number): Heard => ({
-  listener: { x: at.x, y: at.y, vx: 0, vy: 0, car }, vehicles: [], people: [], happenings: [], horn: false, ...more
+  listener: { x: at.x, y: at.y, vx: 0, vy: 0, car, turns: 0 }, vehicles: [], people: [], happenings: [], horn: false, ...more
 })
 const away = (from: { readonly x: number; readonly y: number }, metres: number, dir: { readonly x: number; readonly y: number } = SCREEN_RIGHT) =>
   ({ x: from.x + metres * dir.x, y: from.y + metres * dir.y })
@@ -94,6 +94,15 @@ test("a running car 30 m away on screen-right is heard there; 2 km away it is no
   const far = rig()
   far.hear(world(MEADOW, { vehicles: [car(1, "panda", away(MEADOW, 2000))] }))
   assert.equal(far.held().has("engine:1"), false)
+})
+
+test("the stereo image turns with the view: a car ahead of the home seat's screen is heard on the right after a quarter turn left", () => {
+  const pan = (turns: number) => {
+    const director = rig(), heard = world(MEADOW, { vehicles: [car(1, "panda", away(MEADOW, 30, screenAxes(0).up))] })
+    director.hear({ ...heard, listener: { ...heard.listener, turns } })
+    return director.held().get("engine:1")!.at.pan
+  }
+  assert.ok(Math.abs(pan(0)) < 1e-9 && pan(1) > 0.8 && pan(-1) < -0.8, `${pan(0)} ${pan(1)} ${pan(-1)}`)
 })
 
 test("a car at full load 300 m across the open meadow is heard; 400 m away behind Monte San Giorgio it is not", () => {

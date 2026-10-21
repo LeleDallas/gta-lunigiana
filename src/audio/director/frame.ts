@@ -10,7 +10,7 @@
 import { groundY, yOf } from "../../render/ground.ts"
 import { heightAt } from "../../sim/map/index.ts"
 import type { VehicleModel } from "../../sim/vehicles.ts"
-import { airCutoff, audibility, CABIN, dbToGain, gainToDb, SPEED_OF_SOUND, spreading } from "../acoustics.ts"
+import { airCutoff, audibility, CABIN, dbToGain, gainToDb, panOf, SPEED_OF_SOUND, spreading } from "../acoustics.ts"
 import type { Echo } from "../places.ts"
 import type { Continuous, Heard, OneShot, Placement, Speaker } from "../types.ts"
 import { type Ears, hear, type Hearing, SILENT, type Source } from "./hearing.ts"
@@ -88,7 +88,7 @@ export const makeFrame = (setup: Setup): Frame => {
       if (audibility(at.level - extra, ambient) === 0) continue
       const placement = {
         gain: at.placement.gain * dbToGain(-extra),
-        pan: echo.pan,
+        pan: panOf(echo.dx, echo.dy, ears.right),
         cutoff: Math.min(at.placement.cutoff, airCutoff(echo.delay * SPEED_OF_SOUND), at.shell?.cutoff ?? 20000),
         cents: 0,
         // The send is post-gain, and the cabin's loss is in the gain now.

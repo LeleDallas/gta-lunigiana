@@ -58,7 +58,7 @@ const sourceOf = (sound: Sound): Calibration =>
 interface Where { readonly r: number; readonly side: number; readonly cabin: Cabin | undefined; readonly street: number }
 
 /** Still ears over open, flat ground; sources stand at the same height, so `r` is the distance. */
-const EARS = { x: 0, y: 0, z: EAR_HEIGHT, vx: 0, vy: 0 } as const
+const EARS = { x: 0, y: 0, z: EAR_HEIGHT, vx: 0, vy: 0, right: SCREEN_RIGHT } as const
 
 /** How `sound` reaches the listener at `where`, and its calibration. */
 const heard = (sound: Sound, where: Where): { readonly hearing: Hearing; readonly source: Calibration } => {

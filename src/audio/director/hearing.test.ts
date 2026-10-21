@@ -1,11 +1,12 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
 
+import { screenAxes } from "../../sim/view.ts"
 import { CABIN, type Cabin, EAR_HEIGHT, gainToDb } from "../acoustics.ts"
 import { hear } from "./hearing.ts"
 
 /** Ears over open, flat ground. */
-const ears = { x: 0, y: 0, z: EAR_HEIGHT, vx: 0, vy: 0 }
+const ears = { x: 0, y: 0, z: EAR_HEIGHT, vx: 0, vy: 0, right: screenAxes(0).right }
 
 /** The reverb send of a car `metres` south, with the listener in a street `street` 0…1 and maybe a cabin. */
 const wet = (metres: number, street: number, cabin?: Cabin) =>
