@@ -70,7 +70,7 @@ export const makeRuntime = <const Services extends RuntimeServices<any>>(options
   debug: options.debug
 })
 
-/** The runtime and schedules `ritmo-devtools lint` checks; the render schedule is described, not run. */
+/** The runtime and schedules `ritmo-devtools lint` checks; the render and audio schedules are described, not run. */
 export const lintTarget = async (): Promise<Lint.Target<typeof Game.schema, typeof Root>> => {
   const made = makeRuntime({
     seed: 1,
@@ -78,8 +78,10 @@ export const lintTarget = async (): Promise<Lint.Target<typeof Game.schema, type
     debug: { hostClock: HostClock.test() }
   })
   if (!made.ok) throw new Error(`invalid runtime: ${JSON.stringify(made.error)}`)
-  // Loaded here, not at the top: the render schedule is host code, outside the simulation.
+  // Loaded here, not at the top: the render and audio schedules are host code, outside the simulation.
   // oxlint-disable-next-line no-restricted-imports -- the lint target describes the render schedule
   const { render } = await import("../render/index.ts")
-  return { runtime: made.value, schedules: { setup, update }, describe: { render } }
+  // oxlint-disable-next-line no-restricted-imports -- and the audio schedule, the reader of the sim's events
+  const { audio } = await import("../audio/index.ts")
+  return { runtime: made.value, schedules: { setup, update }, describe: { render, audio } }
 }

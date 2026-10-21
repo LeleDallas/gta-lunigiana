@@ -2,8 +2,8 @@ import { Clock } from "@typeonce/ritmo"
 import { Ops, Random, Vec2 } from "@typeonce/ritmo-math"
 
 import { carClear, clearOf, wallsAlong } from "../body.ts"
-import { pointInRing, staticGrid } from "../collide.ts"
-import { graph, MAP } from "../map/index.ts"
+import { pointInRing } from "../collide.ts"
+import { buildingBoxes, buildingsIn, graph, MAP } from "../map/index.ts"
 import {
   allowsModel, cruiseSpeed, distanceToEdge, edgeIndex, endNode, laneOf, lanePoint, laneSide, leadsToDeadEnd, nextTrafficEdge, roadOf, trafficIndex, walkSide
 } from "../route.ts"
@@ -30,12 +30,6 @@ const TRIES = 4
 
 /** Pedestrians only spawn on walk edges with a building within this many metres of their midpoint: the villages and hamlets, not the woods between them. */
 export const PEOPLED = 50
-const footprints = MAP.buildings.map(({ outer }) => {
-  let x0 = outer[0]!, y0 = outer[1]!, x1 = x0, y1 = y0
-  for (let k = 2; k + 1 < outer.length; k += 2) [x0, y0, x1, y1] = [Math.min(x0, outer[k]!), Math.min(y0, outer[k + 1]!), Math.max(x1, outer[k]!), Math.max(y1, outer[k + 1]!)]
-  return [x0, y0, x1, y1] as const
-})
-const buildingsIn = staticGrid(footprints.length, (i) => footprints[i]!, 64)
 /** Whether (x, y) is inside a building (not in a courtyard): verges run into houses where they crowd the road. */
 const indoors = (x: number, y: number): boolean => {
   let inside = false
@@ -49,7 +43,7 @@ const peopled = edgeIndex(graph.walkEdges.filter((e) => {
   const lane = laneOf(e, true), m = lanePoint(lane, lane.length / 2, 0)
   let near = false
   buildingsIn(m.x - PEOPLED, m.y - PEOPLED, m.x + PEOPLED, m.y + PEOPLED, (i) => {
-    const [x0, y0, x1, y1] = footprints[i]!
+    const [x0, y0, x1, y1] = buildingBoxes[i]!
     const dx = Math.max(x0 - m.x, 0, m.x - x1), dy = Math.max(y0 - m.y, 0, m.y - y1)
     near ||= dx * dx + dy * dy <= PEOPLED * PEOPLED
   })

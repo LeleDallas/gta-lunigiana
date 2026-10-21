@@ -5,12 +5,12 @@
  *
  * @module render/landcover
  */
-import type { AreaKind, MonzoneMap } from "../sim/map/index.ts"
+import { type AreaKind, MAP, type MonzoneMap } from "../sim/map/index.ts"
 import { fillPolygon, segDist2 } from "../tools/geometry.ts"
 import { PALETTE } from "./palette.ts"
 
 /** Cover kinds: meadow by default, the map's area kinds, and the river bed. */
-type Cover = "meadow" | AreaKind | "pebble"
+export type Cover = "meadow" | AreaKind | "pebble"
 /** Every cover, in fill order: later kinds draw over earlier ones. */
 const COVERS = [
   "meadow", "forest", "grassland", "scrub", "sparse", "scree", "rock", "quarry", "residential", "farmland", "farmyard", "vineyard", "park", "school",
@@ -101,3 +101,7 @@ export const rasterCover = (map: Pick<MonzoneMap, "heightmap" | "areas" | "water
 
 /** The cover name of a raster value. */
 export const coverName = (value: number): Cover => COVERS[value] ?? "meadow"
+
+let shared: Uint8Array | undefined
+/** `rasterCover(MAP)`, built on first use and shared by the renderer and the audio host (≈ 80 ms, 4.9 MB); never write to it. */
+export const mapCover = (): Uint8Array => (shared ??= rasterCover(MAP))

@@ -1,0 +1,123 @@
+import assert from "node:assert/strict"
+import { test } from "node:test"
+
+import { Keyboard } from "@typeonce/ritmo-browser"
+import { Vec2 } from "@typeonce/ritmo-math"
+
+import { laneOf, lanePoint, laneSide, roadOf, walkSide } from "../sim/route.ts"
+import { bindings, Game, Honk, Impact, KeyboardInput, makeRuntime, setup, update } from "../sim/index.ts"
+import { parkedCar, pedestrian } from "../sim/spawning.ts"
+import { BATTISTI, battistiTraffic, door, ON_BATTISTI, press, rolling, stage, type Timeline } from "../sim/testing.ts"
+import { Audio, audio } from "./index.ts"
+import type { Heard } from "./types.ts"
+
+/** A runtime on `timeline` whose Audio service records every Heard, the audio schedule ticked after each update. */
+const listen = (timeline: Timeline, ...staging: Parameters<typeof stage>) => {
+  const frames: Array<Heard> = []
+  const made = makeRuntime({
+    seed: 1,
+    services: Game.Runtime.services(
+      Game.Runtime.service(KeyboardInput, Keyboard.scripted(bindings, timeline)),
+      Game.Runtime.service(Audio, { hear: (heard: Heard) => frames.push(heard) })
+    )
+  })
+  assert.ok(made.ok)
+  const runtime = made.value
+  assert.ok(runtime.tick(setup).ok)
+  assert.ok(runtime.tick(stage(...staging)).ok)
+  const run = (n: number) => {
+    for (let i = 0; i < n; i++) assert.ok(runtime.tick(update, audio).ok)
+  }
+  return { runtime, run, frames }
+}
+
+test("hear: the player on foot, then at the wheel of a running car with the horn held, and a pedestrian nearby", () => {
+  const lane = laneOf(BATTISTI.edge, BATTISTI.forward)
+  const side = walkSide(roadOf(BATTISTI.edge))
+  const verge = { ...lanePoint(lane, 8, side), angle: 0 }
+  const walker = pedestrian({ skin: 0xc68e6a, hair: 0x2b1d14, shirt: 0xb8312b, pants: 0x1d2b4f }, verge, { ...BATTISTI, side }, { mood: "walk", until: 0 })
+  const { run, frames } = listen([...press(1, "action"), { frame: 3, press: ["horn"] }], door(ON_BATTISTI), { cars: [parkedCar("panda", 0xb8312b, ON_BATTISTI)], peds: [walker] })
+  run(4)
+  assert.equal(frames.length, 4, "one Heard per tick")
+  const [onFoot, , seated, horn] = frames
+  assert.equal(onFoot!.listener.car, undefined)
+  assert.ok(onFoot!.people.some((p) => p.player && Vec2.distance(p, door(ON_BATTISTI)) < 0.5), "the player on foot is a person")
+  assert.ok(!onFoot!.vehicles.some((v) => Vec2.distance(v, ON_BATTISTI) < 0.5), "a parked, still car is silent")
+
+  const mine = seated!.vehicles.filter((v) => v.mine)
+  assert.equal(mine.length, 1)
+  assert.deepEqual([mine[0]!.id, mine[0]!.model, mine[0]!.running], [seated!.listener.car, "panda", true])
+  assert.ok(!seated!.people.some((p) => p.player), "the driver is no person on foot")
+  assert.ok(seated!.people.some((p) => !p.player && !p.fleeing && !p.down && Vec2.distance(p, verge) < 2), "the pedestrian on the verge")
+  assert.deepEqual([onFoot!.horn, seated!.horn, horn!.horn], [false, false, true])
+})
+
+test("hear: the listener carries the view's quarter turns, which the stereo image turns with", () => {
+  const { run, frames } = listen([...press(1, "turnLeft"), ...press(3, "turnLeft"), ...press(5, "turnRight")], door(ON_BATTISTI))
+  run(7)
+  assert.deepEqual(frames.map((f) => f.listener.turns), [0, 1, 1, 2, 2, 1, 1])
+})
+
+test("hear: AI traffic runs even standing; a car nobody drives is heard only while it moves", () => {
+  const lane = laneOf(BATTISTI.edge, BATTISTI.forward)
+  const side = laneSide(BATTISTI, "panda")
+  const coasting = { ...lanePoint(lane, 30, side), angle: ON_BATTISTI.angle }, parked = { ...lanePoint(lane, 60, side), angle: ON_BATTISTI.angle }
+  const { run, frames } = listen([], door(ON_BATTISTI), {
+    cars: [rolling("truck", coasting, 5, 0), parkedCar("panda", 0x3d6155, parked)],
+    traffic: [battistiTraffic(0xd4a85e)]
+  })
+  run(1)
+  const near = (p: { readonly x: number; readonly y: number }) => frames[0]!.vehicles.filter((v) => Vec2.distance(v, p) < 1)
+  assert.deepEqual(near(ON_BATTISTI).map((v) => [v.model, v.running, v.mine]), [["panda", true, false]])
+  assert.deepEqual(near(coasting).map((v) => [v.model, v.running, v.mine]), [["truck", false, false]])
+  assert.deepEqual(near(parked), [])
+})
+
+test("hear: impacts then honks since the last frame, as happenings with the struck vehicle's model and zone, each heard once", () => {
+  const lane = laneOf(BATTISTI.edge, BATTISTI.forward)
+  const coasting = { ...lanePoint(lane, 30, laneSide(BATTISTI, "truck")), angle: ON_BATTISTI.angle }
+  const { runtime, run, frames } = listen([], door(ON_BATTISTI), { cars: [rolling("truck", coasting, 5, 0)] })
+  run(1)
+  const truck = frames[0]!.vehicles.find((v) => v.model === "truck")!
+  // 3 m behind the truck's centre, and an impact of a vehicle gone since.
+  const behind = { x: truck.x - 3 * Math.cos(truck.angle), y: truck.y - 3 * Math.sin(truck.angle) }
+  runtime.send(Honk, { car: 7, model: "ape", x: 1, y: 2 })
+  runtime.send(Impact, { hit: "wall", ...behind, speed: 5, mass: 4, car: truck.id })
+  runtime.send(Impact, { hit: "wall", x: 3, y: 4, speed: 5, mass: 1, car: 9999 })
+  run(2)
+  assert.deepEqual(frames.slice(1).map((f) => f.happenings), [
+    [{ kind: "impact", hit: "wall", ...behind, speed: 5, mass: 4, car: truck.id, body: { model: "truck", zone: "rear" } }, { kind: "honk", car: 7, model: "ape", x: 1, y: 2 }],
+    []
+  ])
+})
+
+test("hear: an Ape rolling into a parked Panda hits it with its front on the Panda's rear", () => {
+  const lane = laneOf(BATTISTI.edge, BATTISTI.forward), side = laneSide(BATTISTI, "panda")
+  const ahead = { ...lanePoint(lane, 15, side), angle: ON_BATTISTI.angle }
+  const { run, frames } = listen([], door(ON_BATTISTI), { cars: [parkedCar("panda", 0x3d6155, ahead), rolling("ape", { ...lanePoint(lane, 5, side), angle: ON_BATTISTI.angle }, 8, 0)] })
+  run(120)
+  const hits = frames.flatMap((f) => f.happenings).flatMap((h) => (h.kind === "impact" && h.hit === "car" ? [h] : []))
+  assert.ok(hits.length >= 1)
+  for (const hit of hits) assert.deepEqual(new Map([hit.body, hit.otherBody!].map((b) => [b.model, b.zone])), new Map([["ape", "front"], ["panda", "rear"]]))
+})
+
+// Regression: zones split at 45° from the centre, so a hit on a long body's front door (0.9 m ahead of a Panda's centre) was its front.
+test("hear: an Ape T-boning a parked Panda on its front door hits the Panda's side", () => {
+  const fx = Math.cos(ON_BATTISTI.angle), fy = Math.sin(ON_BATTISTI.angle), gap = 0.825 + 1.45 + 0.6
+  const ape = { x: ON_BATTISTI.x + 0.9 * fx - gap * fy, y: ON_BATTISTI.y + 0.9 * fy + gap * fx, angle: ON_BATTISTI.angle - Math.PI / 2 }
+  const { run, frames } = listen([], door({ x: ON_BATTISTI.x - 40 * fx, y: ON_BATTISTI.y - 40 * fy, angle: 0 }), { cars: [parkedCar("panda", 0x3d6155, ON_BATTISTI), rolling("ape", ape, 8, 0)] })
+  run(30)
+  const hits = frames.flatMap((f) => f.happenings).flatMap((h) => (h.kind === "impact" && h.hit === "car" ? [h] : []))
+  assert.ok(hits.length > 0)
+  for (const hit of hits) assert.deepEqual(new Map([hit.body, hit.otherBody!].map((b) => [b.model, b.zone])), new Map([["ape", "front"], ["panda", "side"]]))
+})
+
+// Regression: an oblique wall hit's point lay on the wall normal through the centre, so anything 45° off square was a side.
+test("hear: a Panda rolling 50° off square into a house wall hits it with its front", () => {
+  const wall = { x: -433.525, y: 433.24, angle: 1.386 }, turn = (50 * Math.PI) / 180, back = 18 - Math.cos(turn) * 1.025 - 0.825
+  const car = { x: wall.x + back * Math.cos(wall.angle), y: wall.y + back * Math.sin(wall.angle), angle: wall.angle + turn }
+  const { run, frames } = listen([], door({ x: car.x - 30, y: car.y, angle: 0 }), { cars: [rolling("panda", car, 12, 0)] })
+  run(40)
+  const hits = frames.flatMap((f) => f.happenings).flatMap((h) => (h.kind === "impact" && h.hit === "wall" ? [h] : []))
+  assert.ok(hits.length > 0 && hits.every((h) => h.body.zone === "front"), hits.map((h) => h.body.zone).join())
+})

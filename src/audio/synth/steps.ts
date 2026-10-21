@@ -1,0 +1,86 @@
+/**
+ * Footsteps (Farnell, Designing Sound ch. 26): each step is a heel strike then the ball of the
+ * foot, every strike a low thump, a band-passed noise burst coloured by the surface, and its
+ * grains: gravel crunch, leaf crackle, the stone "tock" of a lastricato. Four variants per surface
+ * and gait are baked once per context and played with ±8 % rate and ±2 dB, so no two steps match.
+ *
+ * @module audio/synth/steps
+ */
+import { bufferOf } from "../buffers.ts"
+import type { Kit, OneShot, Shot, Surface } from "../types.ts"
+import { bake, burst, jitter, jitterDb, normalise, perContext, pick, ping, playBuffer, trimmed } from "./graph.ts"
+
+/** How a surface sounds underfoot (synthesis.md §7 starting points, levels TUNED by rendering). */
+interface Tread {
+  /** Level of the 110 Hz body thump (τ 12 ms). */
+  readonly thump: number
+  /** The main burst: band-pass centre (Hz) and Q, attack and decay time constant (s). */
+  readonly hz: number
+  readonly q: number
+  readonly attack: number
+  readonly decay: number
+  /** Noise grains per heel strike (3 ms, around `grainHz`, up to `grit` loud) and damped ~900 Hz stone knocks. */
+  readonly grains: number
+  readonly grainHz: number
+  readonly grit: number
+  readonly tocks: number
+}
+
+const TREADS = {
+  asphalt: { thump: 0.5, hz: 2200, q: 1.2, attack: 0.004, decay: 0.01, grains: 0, grainHz: 0, grit: 0, tocks: 0 },
+  // Italian lastricato: a harder click and loose slabs knocking.
+  stone: { thump: 0.6, hz: 3000, q: 1.5, attack: 0.002, decay: 0.007, grains: 0, grainHz: 0, grit: 0, tocks: 2 },
+  gravel: { thump: 0.3, hz: 600, q: 0.8, attack: 0.006, decay: 0.04, grains: 30, grainHz: 3500, grit: 0.45, tocks: 0 },
+  // Packed earth: between gravel and grass, a duller thud with a little grit.
+  dirt: { thump: 0.4, hz: 900, q: 0.7, attack: 0.008, decay: 0.03, grains: 12, grainHz: 3000, grit: 0.3, tocks: 0 },
+  grass: { thump: 0.15, hz: 1200, q: 0.5, attack: 0.015, decay: 0.04, grains: 6, grainHz: 5000, grit: 0.15, tocks: 0 },
+  // The autumn forest floor: like grass, under a crackle of dry leaves.
+  leaves: { thump: 0.1, hz: 1500, q: 0.5, attack: 0.01, decay: 0.05, grains: 40, grainHz: 5500, grit: 0.35, tocks: 0 }
+} as const satisfies Record<Surface, Tread>
+
+const SURFACES = Object.keys(TREADS) as ReadonlyArray<Surface>
+const VARIANTS = 4
+/** Seconds baked per step: long enough for the slowest tail to die out. */
+const SLOT = 0.7
+
+/** Footfalls per second at `speed` m/s on foot: 2 at a walk (2.2 m/s), 3 at a sprint (5.5 m/s). */
+export const stepRate = (speed: number): number => Math.min(3.4, Math.max(1.2, 2 + (speed - 2.2) / 3.3))
+
+/** A walking step plays this many dB under a running one (the director's masking counts it too). */
+export const WALK_DB = 4
+
+/** Schedules one step on `tread`: the heel, then the ball (sooner when running, which is also `WALK_DB` louder and 20 % brighter). */
+const footfall = (oc: OfflineAudioContext, kit: Kit, tread: Tread, run: boolean): void => {
+  const out = oc.destination, louder = run ? 10 ** (WALK_DB / 20) : 1, bright = run ? 1.2 : 1
+  for (const [t, weight] of [[0, 1], [run ? 0.04 : 0.09, 0.6]] as const) {
+    const a = weight * louder
+    ping(oc, out, t, 110, tread.thump * a, 0.012)
+    burst(oc, kit.white, out, t, tread.attack, tread.decay, tread.hz * bright, tread.q, 0.5 * a)
+    for (let i = 0; i < Math.round(tread.grains * weight); i++) {
+      burst(oc, kit.white, out, t + Math.random() * tread.decay * 3, 0.00075, 0.001, tread.grainHz * bright * jitter(0.4), 2, tread.grit * Math.random() * a)
+    }
+    for (let i = 0; i < Math.round(tread.tocks * weight); i++) {
+      ping(oc, out, t + 0.002 + Math.random() * 0.015, 900 * jitter(0.15), 0.25 * jitter(0.5) * a, 0.006)
+    }
+  }
+}
+
+const keyOf = (surface: Surface, run: boolean): string => `${surface} ${run ? "run" : "walk"}`
+
+const baked = perContext(async (ctx, kit) => {
+  const sets = SURFACES.flatMap((surface) => [false, true].map((run) => ({ surface, run })))
+  const sounds = await Promise.all(sets.map(({ surface, run }) =>
+    Promise.all(Array.from({ length: VARIANTS }, () => bake(ctx.sampleRate, SLOT, (oc) => footfall(oc, kit, TREADS[surface], run)).then(trimmed)))))
+  // One factor for all, so the surfaces keep their relative levels: a running step on stone peaks at 0.5.
+  normalise(sounds.flat(), 0.5, sounds[sets.findIndex((set) => set.surface === "stone" && set.run)])
+  return new Map(sets.map(({ surface, run }, i) => [keyOf(surface, run), sounds[i]!.map((samples) => bufferOf(ctx, samples))]))
+})
+
+/** One footstep on `surface`, walking or running. */
+export const step: Shot<Extract<OneShot, { readonly kind: "step" }>> = {
+  prepare: baked.prepare,
+  play: (io, { surface, run }, when) => {
+    const variants = baked.get(io.ctx)?.get(keyOf(surface, run))
+    return variants === undefined ? when : playBuffer(io, pick(variants), when, jitter(0.08), jitterDb(2))
+  }
+}

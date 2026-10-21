@@ -2,7 +2,7 @@ import { Clock } from "@typeonce/ritmo"
 import { Vec2 } from "@typeonce/ritmo-math"
 
 import { carCircles, carRadius, moveCar, walkBy, wallsAlong } from "../body.ts"
-import { Down, Driving, Game, Motion, Pedestrian, Person, Player, Pose, Route, Score, STEP, Time, Vehicle } from "../schema.ts"
+import { Down, Driving, Game, Impact, Motion, Pedestrian, Person, Player, Pose, Route, Score, STEP, Time, Vehicle } from "../schema.ts"
 import { KNOCK_SPEED, PERSON_RADIUS } from "../tuning.ts"
 import { VEHICLES, type VehicleModel } from "../vehicles.ts"
 import { FLEE_TIME, runFrom } from "./pedestrians.ts"
@@ -15,9 +15,9 @@ const RESTITUTION = 0.2
 const CARRY = 0.6
 const THROW = 3
 
-/** The deepest overlap between two circle sets: penetration and unit normal from `b` to `a`. */
+/** The deepest overlap between two circle sets: penetration, unit normal from `b` to `a`, and the contact point (px, py) on `b`'s surface. */
 const deepest = (as: ReadonlyArray<Vec2.Vec2>, ra: number, bs: ReadonlyArray<Vec2.Vec2>, rb: number) => {
-  let depth = 0, nx = 0, ny = 0
+  let depth = 0, nx = 0, ny = 0, px = 0, py = 0
   for (const a of as) for (const b of bs) {
     const dx = a.x - b.x, dy = a.y - b.y
     const d = Math.sqrt(dx * dx + dy * dy)
@@ -26,8 +26,10 @@ const deepest = (as: ReadonlyArray<Vec2.Vec2>, ra: number, bs: ReadonlyArray<Vec
     depth = pen
     nx = d > 1e-9 ? dx / d : 1
     ny = d > 1e-9 ? dy / d : 0
+    px = b.x + nx * rb
+    py = b.y + ny * rb
   }
-  return { depth, nx, ny }
+  return { depth, nx, ny, px, py }
 }
 
 /** A body's working copy for this step (written back once, if `moved`). */
@@ -79,6 +81,7 @@ const stopInto = (person: Body, nx: number, ny: number) => {
  * standing person faster than KNOCK_SPEED knocks them down and throws them (a
  * point for the player when it was their car), slower it pushes them aside,
  * and a person pinned against a wall stops the vehicle instead; people step apart.
+ * Vehicles closing on each other and knockdowns are Impact events.
  */
 export const Contacts = Game.System("Lunigiana/Contacts", {
   queries: {
@@ -91,8 +94,9 @@ export const Contacts = Game.System("Lunigiana/Contacts", {
     driver: Game.Query({ selection: { driving: Game.Query.read(Driving) }, with: [Player] })
   },
   resources: { score: Game.System.writeResource(Score), time: Game.System.readResource(Time) },
-  commands: Game.System.commands(Game.System.inserts(Down))
-}, ({ queries, resources, commands }) => {
+  commands: Game.System.commands(Game.System.inserts(Down)),
+  events: { impact: Game.System.writeEvent(Impact) }
+}, ({ queries, resources, commands, events }) => {
   const mine = queries.driver.each().map(({ data }) => Game.Entity.id(data.driving.get().vehicle))
   const cars = queries.vehicles.each().map((match) => {
     const pose = match.data.pose.get(), motion = match.data.motion.get()
@@ -105,7 +109,7 @@ export const Contacts = Game.System("Lunigiana/Contacts", {
   for (let i = 0; i < cars.length; i++) for (let j = i + 1; j < cars.length; j++) {
     const a = cars[i]!.car, b = cars[j]!.car
     if (Vec2.distanceSquared(a, b) > (a.reach + b.reach) ** 2) continue
-    const { depth, nx, ny } = deepest(circlesOf(a), a.r, circlesOf(b), b.r)
+    const { depth, nx, ny, px, py } = deepest(circlesOf(a), a.r, circlesOf(b), b.r)
     if (depth <= 0) continue
     // a takes its mass share of the separation; b the rest, including what a's walls refused.
     const share = depth * (b.mass / (a.mass + b.mass))
@@ -118,6 +122,8 @@ export const Contacts = Game.System("Lunigiana/Contacts", {
       a.vy += (ny * impulse) / a.mass
       b.vx -= (nx * impulse) / b.mass
       b.vy -= (ny * impulse) / b.mass
+      const mass = 1 / (1 / a.mass + 1 / b.mass)
+      events.impact.emit({ hit: "car", x: px, y: py, speed: -closing, mass, car: cars[i]!.match.entity.id, other: cars[j]!.match.entity.id })
     }
   }
 
@@ -131,8 +137,9 @@ export const Contacts = Game.System("Lunigiana/Contacts", {
     if (Vec2.distanceSquared(person, car) > (car.reach + PERSON_RADIUS) ** 2) continue
     const { depth, nx, ny } = deepest([person], PERSON_RADIUS, circlesOf(car), car.r)
     if (depth <= 0) continue
-    // The car's own speed decides: running into a parked car must not floor the runner.
-    const knocked = !person.down && car.vx * nx + car.vy * ny > 0 && car.vx * car.vx + car.vy * car.vy > KNOCK_SPEED ** 2
+    // The car's own speed decides: running into a parked car must not floor the runner. Taken before a pin stops the car.
+    const speed2 = car.vx * car.vx + car.vy * car.vy
+    const knocked = !person.down && car.vx * nx + car.vy * ny > 0 && speed2 > KNOCK_SPEED ** 2
     // Out of the car's way; whatever a wall behind them refuses, the car gives back.
     const want = depth + 0.01
     const short = want - shovePerson(person, nx, ny, want)
@@ -152,6 +159,7 @@ export const Contacts = Game.System("Lunigiana/Contacts", {
     person.vx = car.vx * CARRY + nx * THROW
     person.vy = car.vy * CARRY + ny * THROW
     commands.insert(match.entity, [Down, { until: step + Clock.steps(DOWN_TIME) }])
+    events.impact.emit({ hit: "person", x: person.x, y: person.y, speed: Math.sqrt(speed2), mass: car.mass, car: owner.entity.id, other: match.entity.id })
     if (mine.includes(owner.entity.id)) resources.score.update((score) => ({ ...score, knocked: score.knocked + 1 }))
   }
 

@@ -21,7 +21,7 @@ import { BUILDING_STYLES, type BuildingStyle, isRoadClass, pushTrunk, type RoadC
 import raw from "./monzone.json" with { type: "json" }
 import { unpackRows, unpackTrees, unpackWalls } from "./packed.ts"
 
-export { AREA_KINDS, type AreaKind, BUILDING_STYLES, type BuildingStyle, isAreaKind, isDrivable, ROAD_CLASSES, type RoadClass } from "./kinds.ts"
+export { AREA_KINDS, type AreaKind, BUILDING_STYLES, type BuildingStyle, isAreaKind, isDrivable, ROAD_CLASSES, type RoadClass, TRUNK } from "./kinds.ts"
 
 /** Play area rectangle, metres. */
 interface Bounds { readonly minX: number; readonly minY: number; readonly maxX: number; readonly maxY: number }
@@ -194,6 +194,20 @@ export const heightAt = (x: number, y: number): number => {
   return (south + (north - south) * ty) / 10
 }
 
+/** Bounding box [minX, minY, maxX, maxY] of every building's outer ring, indexed like `MAP.buildings`. */
+export const buildingBoxes: ReadonlyArray<readonly [number, number, number, number]> = MAP.buildings.map(({ outer }) => {
+  let x0 = outer[0]!, y0 = outer[1]!, x1 = x0, y1 = y0
+  for (let k = 2; k + 1 < outer.length; k += 2) [x0, y0, x1, y1] = [Math.min(x0, outer[k]!), Math.min(y0, outer[k + 1]!), Math.max(x1, outer[k]!), Math.max(y1, outer[k + 1]!)]
+  return [x0, y0, x1, y1] as const
+})
+
+/**
+ * Building broad phase (`staticGrid` over `buildingBoxes`, 64 m cells): calls `visit` with the
+ * index into `MAP.buildings` of every building whose box may overlap the query box (run the exact
+ * test). Shared by the sim and the audio host; `visit` must not query again.
+ */
+export const buildingsIn = staticGrid(buildingBoxes.length, (i) => buildingBoxes[i]!, 64)
+
 /** A wall edge in metres. */
 export interface Segment {
   readonly ax: number
@@ -207,8 +221,11 @@ const CELL = 16
 const { trees } = MAP
 /** Scratch for `pushTrunk`: the four edges of one trunk square, 16 numbers. */
 const trunk: Array<number> = []
-// Trees as points (the map has hundreds of thousands): their squares are made on query.
-const treesIn = staticGrid(trees.length / 3, (i) => [trees[3 * i]!, trees[3 * i + 1]!, trees[3 * i]!, trees[3 * i + 1]!], CELL)
+/**
+ * Tree broad phase (trees as points, the map has hundreds of thousands): calls `visit` with the
+ * index i of every tree (`MAP.trees` at 3i, 3i + 1) in a cell the box overlaps; run the exact test.
+ */
+export const treesIn = staticGrid(trees.length / 3, (i) => [trees[3 * i]!, trees[3 * i + 1]!, trees[3 * i]!, trees[3 * i + 1]!], CELL)
 
 /** A broad phase over flat (ax, ay, bx, by) walls plus every tree trunk, answering into one reused array of reused segments. */
 const indexWalls = (flat: ArrayLike<number>) => {

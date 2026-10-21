@@ -8,6 +8,7 @@ import { graph, MAP, wallsNear } from "./map/index.ts"
 import { pushTrunk } from "./map/kinds.ts"
 import { edgeIndex, facesForward, laneOf, lanePoint, laneSide, roadOf, walkIndex, walkSide } from "./route.ts"
 import { parkedCar, pedestrian } from "./spawning.ts"
+import { HONK_STEPS } from "./systems/traffic.ts"
 import { BATTISTI, battistiTraffic, door, ON_BATTISTI, press, rolling, start, walkClear } from "./testing.ts"
 import { PERSON_RADIUS } from "./tuning.ts"
 import { VEHICLES } from "./vehicles.ts"
@@ -69,6 +70,16 @@ test("contacts: a car pushing or knocking a pedestrian against a house wall neve
   }
 })
 
+// Regression: the pin stops the car in the step it knocks the person down; the Impact still has the speed it hit at.
+test("contacts: a car pinning the player against a house wall is a person Impact as fast as the car was", () => {
+  const { run, world, heard } = start([], [{ ...facing(0.36), angle: 0 }, { cars: [rolling("panda", { ...facing(4), angle: TOWARD }, 8, 1)] }])
+  const car = world().vehicles[0]!.id
+  run(60)
+  const hits = heard.impacts.filter((i) => i.hit === "person")
+  assert.deepEqual(hits.map((i) => i.car), [car])
+  assert.ok(hits[0]!.speed > 8, `hit at ${hits[0]!.speed} m/s`)
+})
+
 test("contacts: a car rammed sideways into a house wall stays out of it", () => {
   const parked = { ...facing(VEHICLES.panda.width / 2 + 0.1), angle: BESIDE }
   const ram = { ...facing(VEHICLES.panda.width / 2 + 6), angle: TOWARD }
@@ -119,18 +130,26 @@ test("enter: a car on the other side of a wall cannot be entered, and the HUD of
   assert.equal(view()?.nearby, undefined)
 })
 
-test("traffic: a car held up by a car parked in its lane turns round by its second try", () => {
+test("traffic: a car held up by a car parked in its lane honks once each time it is stuck, and turns round by its second try", () => {
   const lane = laneOf(BATTISTI.edge, BATTISTI.forward)
   const blocker = { ...lanePoint(lane, 15, laneSide(BATTISTI, "panda")), angle: ON_BATTISTI.angle }
-  const { run, world } = start([], [FAR, { cars: [parkedCar("panda", 0x3d6155, blocker)], traffic: [battistiTraffic(0xd4a85e)] }])
+  const { run, world, heard } = start([], [FAR, { cars: [parkedCar("panda", 0x3d6155, blocker)], traffic: [battistiTraffic(0xd4a85e)] }])
   const id = world().vehicles.find((v) => v.traffic)!.id
   // Routed and pointing back down the lane; how far it gets then depends on the traffic Populate sends the other way.
   let turned = false
-  run(1200, () => {
+  // Frames of its honks and of its tries to get unstuck, until it has turned round.
+  const honked: Array<number> = [], reversed: Array<number> = []
+  run(1200, (frame) => {
+    if (turned) return
     const car = world().vehicles.find((v) => v.id === id)!
-    turned ||= car.route?.forward === false && Ops.cos(car.angle) * lane.dx + Ops.sin(car.angle) * lane.dy < 0
+    if (heard.honks.filter((h) => h.car === id).length > honked.length) honked.push(frame)
+    if ((car.pilot?.tries ?? 0) > reversed.length) reversed.push(frame)
+    turned = car.route?.forward === false && Ops.cos(car.angle) * lane.dx + Ops.sin(car.angle) * lane.dy < 0
   })
   assert.ok(turned, "turned round within 20 s")
+  assert.ok(reversed.length > 0)
+  assert.deepEqual(honked, reversed.map((frame) => frame - HONK_STEPS), "one honk per stuck episode, half-way to backing up")
+  assert.ok(heard.honks.filter((h) => h.car === id).every((h) => h.model === "panda" && Vec2.distance(h, blocker) < 10), "behind the blocker")
 })
 
 test("pedestrians: a walker whose verge is blocked by a parked car gets past it", () => {
