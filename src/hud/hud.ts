@@ -7,6 +7,7 @@
 import type { PlayerViewModel } from "../sim/index.ts"
 import { locationAt } from "./location.ts"
 import { makeMinimap } from "./minimap.ts"
+import { element } from "./title.ts"
 import { makeWorldMap } from "./worldmap.ts"
 
 /** The action prompt for the current view, or "" when there is nothing to do. */
@@ -19,12 +20,6 @@ export const promptText = (view: PlayerViewModel): string => {
 
 /** Speedometer reading in km/h (always positive, rounded). */
 export const kmh = (metresPerSecond: number): number => Math.round(Math.abs(metresPerSecond) * 3.6)
-
-const element = (document: Document, id: string): HTMLElement => {
-  const found = document.getElementById(id)
-  if (found === null) throw new Error(`index.html lacks #${id}`)
-  return found
-}
 
 /** Binds the HUD to its markup; `update` once per frame with the interpolated player position and the view's yaw. */
 export const makeHud = (document: Document) => {
@@ -100,17 +95,4 @@ export const pausable = <R>(paused: () => boolean, keyboard: { readonly snapshot
   if (!paused()) return tick()
   keyboard.snapshot()
   return skip
-}
-
-/** Hides the title card on the first key press or click. */
-export const dismissTitleOnInput = (window: Window): void => {
-  const title = window.document.getElementById("title")
-  if (title === null) return
-  const dismiss = () => {
-    title.hidden = true
-    window.removeEventListener("keydown", dismiss)
-    window.removeEventListener("pointerdown", dismiss)
-  }
-  window.addEventListener("keydown", dismiss)
-  window.addEventListener("pointerdown", dismiss)
 }

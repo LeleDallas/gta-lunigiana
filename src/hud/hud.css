@@ -56,6 +56,15 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #2c3d22; }
 #title .keys div { display: grid; grid-template-columns: 14ch 1fr; gap: 16px; }
 #title dt { color: var(--accent); }
 #title dd { margin: 0; }
+#title [hidden] { display: none; }
+#title progress { display: block; width: 100%; height: 12px; margin: 0 0 8px; appearance: none; background: var(--shadow); border: 2px solid var(--shadow); outline: 2px solid var(--ink); }
+#title progress::-webkit-progress-bar { background: var(--shadow); }
+#title progress::-webkit-progress-value { background: var(--accent); }
+#title progress::-moz-progress-bar { background: var(--accent); }
+#title .step { margin: 0 0 16px; }
+#title-detail { opacity: 0.75; }
+#title-error { margin: 0 0 12px; color: var(--accent); }
+#title button { margin: 0 0 16px; padding: 2px 12px; font: inherit; color: var(--shadow); background: var(--accent); border: 2px solid var(--shadow); cursor: pointer; text-shadow: none; }
 #title .go { margin: 0 0 16px; animation: blink 1s steps(2, start) infinite; }
 #title .fine { margin: 0; font-size: 11px; opacity: 0.85; }
 @keyframes blink { to { visibility: hidden; } }

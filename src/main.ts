@@ -1,10 +1,11 @@
 /// <reference types="vite/client" />
 /**
- * Browser host: makes the streamed world and the pixel view, makes the runtime with the live
- * keyboard, the render registries and the audio director, and drives everything from one
- * FixedLoop: fixed sim steps, then once per animation frame the render and audio schedules, the
- * camera, world streaming, the frame and the HUD. While the full map (M) is open, both are
- * skipped and the sound is suspended: the game is paused.
+ * Browser host (imported by `boot.ts` once the map is in): makes the streamed world and the pixel
+ * view, makes the runtime with the live keyboard, the render registries and the audio director,
+ * and drives everything from one FixedLoop: fixed sim steps, then once per animation frame the
+ * render and audio schedules, the camera, world streaming, the frame and the HUD. While the full
+ * map (M) is open, both are skipped and the sound is suspended: the game is paused. The build runs
+ * in steps the title card names; the card says "Press any key" once the first frame is drawn.
  *
  * @module main
  */
@@ -19,9 +20,11 @@ import { makeSpeaker } from "./audio/speaker.ts"
 import { VEHICLE_SHOTS, VEHICLE_VOICES } from "./audio/synth/vehicles.ts"
 import { WORLD_SHOTS, WORLD_VOICES } from "./audio/synth/world.ts"
 import type { Shots, Voices } from "./audio/types.ts"
-import { dismissTitleOnInput, makeHud, pausable, toggleMapOnKey } from "./hud/hud.ts"
+import { makeHud, pausable, toggleMapOnKey } from "./hud/hud.ts"
+import { paint, step, titleReady } from "./hud/title.ts"
 import { groundY, terrainY } from "./render/ground.ts"
 import { blend, makeRegistries, People, render, RenderClock, Vehicles } from "./render/index.ts"
+import { mapCover } from "./render/landcover.ts"
 import { PALETTE } from "./render/palette.ts"
 import { followSun, PixelView, QUARTER, turnToward, WIDEST_ZOOM, zoomFor } from "./render/pipeline.ts"
 import { World } from "./render/world.ts"
@@ -50,7 +53,13 @@ sun.castShadow = true
 sun.shadow.mapSize.set(2048, 2048)
 sun.shadow.normalBias = 0.05 // depth bias and range: followSun
 scene.add(sun, sun.target)
+await step(document, "Painting land cover", 0.8)
+mapCover() // built once, shared by the world and the sound
+await step(document, "Planting trees", 0.86)
 const world = new World(scene)
+await step(document, "Waking the valley", 0.92)
+// Before the pixel-ratio listener below, which repaints the maps.
+const hud = makeHud(document)
 
 const view = new PixelView(renderer)
 /** Screen metres from the view's centre to its corner at the widest zoom: what streaming must cover. */
@@ -73,7 +82,7 @@ dpr.addEventListener("change", onDpr, { once: true })
 const keyboard = Keyboard.actions(window, bindings)
 const renderClock = { alpha: 0 }
 const { people, vehicles } = makeRegistries(scene)
-// The speaker starts its AudioContext on the same first key or click that dismisses the title card.
+// The speaker starts its AudioContext on the first key or click from here on: pressed while loading, or the one that dismisses the title card.
 const speaker = makeSpeaker(window, { ...VEHICLE_VOICES, ...WORLD_VOICES } satisfies Voices, { ...VEHICLE_SHOTS, ...WORLD_SHOTS } satisfies Shots)
 const director = makeDirector(speaker)
 const made = makeRuntime({
@@ -95,13 +104,10 @@ if (!ready.ok) throw new Error(`setup: ${JSON.stringify(ready.error)}`)
 // Before the first update: the audio system starts reading the Impact and Honk events from here on.
 const listening = runtime.tick(audio)
 if (!listening.ok) throw new Error(`audio: ${JSON.stringify(listening.error)}`)
+await step(document, "Building the first view", 0.97)
 // Build everything the first frame shows now, so nothing pops in at the start.
 const spawn = runtime.inspect(PlayerView)
 if (spawn !== undefined) world.update(new Vector3(spawn.pose.x, groundY(spawn.pose.x, spawn.pose.y), -spawn.pose.y), spawn.turns * QUARTER, reach(), Infinity)
-
-const hud = makeHud(document)
-dismissTitleOnInput(window)
-toggleMapOnKey(window, hud)
 
 const camera = { x: 0, y: 0, elevation: 0, placed: false, zoom: 8 }
 // The view swings through each quarter turn, or jumps when the player asks for less motion.
@@ -135,6 +141,8 @@ const draw = (frame: FixedLoop.Frame): void => {
   hud.update(player, x, y, angle, view.yaw)
 }
 
+// Keys pressed while loading arrive during the steps: drop their presses (held keys stay held).
+keyboard.snapshot()
 const loop = FixedLoop.start({
   source: BrowserTickSource.make(window),
   step: STEP,
@@ -149,6 +157,9 @@ const loop = FixedLoop.start({
   onFailure: (failure) => console.error("loop stopped", failure)
 })
 if (!loop.ok) throw new Error(`loop: ${JSON.stringify(loop.error)}`)
+await paint() // the first frame, shader compiles included
+toggleMapOnKey(window, hud)
+titleReady(window)
 
 // Dev only: the Ritmo monitor (backslash toggles it) and a handle for measuring from the console.
 // No HMR hooks: nothing accepts updates, so Vite reloads the page on every edit.

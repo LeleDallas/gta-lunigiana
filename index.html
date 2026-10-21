@@ -43,10 +43,16 @@
           <div><dt>H</dt><dd>horn · siren (Carabinieri)</dd></div>
           <div><dt>M</dt><dd>map (pauses)</dd></div>
         </dl>
-        <p class="go">Press any key</p>
+        <div id="title-load">
+          <progress id="title-bar" max="1" value="0" aria-labelledby="title-step"></progress>
+          <p class="step"><span id="title-step" aria-live="polite">Loading</span> <span id="title-detail"></span></p>
+          <p id="title-error" role="alert" hidden></p>
+          <button id="title-retry" type="button" hidden>Retry</button>
+        </div>
+        <p class="go" id="title-go" hidden>Press any key</p>
         <p class="fine">Map data © OpenStreetMap contributors (ODbL)<br />Fonte dei dati: Regione Toscana – CTR 1:2000, Rilievi LIDAR,<br />Uso e copertura del suolo (CC BY 4.0), DTM 10x10 (CC BY 3.0 IT)</p>
       </div>
     </div>
-    <script type="module" src="/src/main.ts"></script>
+    <script type="module" src="/src/boot.ts"></script>
   </body>
 </html>
