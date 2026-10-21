@@ -162,7 +162,7 @@ The simulation, the browser hosts and the map tools live in separate folders:
 | `index.html` | canvas, HUD markup and title card |
 | `lab.html` | the audio audition page (dev server only) |
 | `data/raw/` | pinned map inputs: OSM extract, Regione Toscana CTR and LiDAR |
-| `docs/` | architecture, map pipeline, gameplay and audio notes |
+| `docs/` | architecture, map pipeline, gameplay and audio notes; `docs/standards/` holds the checks for each part of the game |
 
 ## Rebuilding the map
 
@@ -203,3 +203,5 @@ The `docs/` folder explains how the game works:
 - [docs/audio.md](docs/audio.md): how the game sounds and why: data flow, the acoustics, every sound, the calibration, the audition page and tests
 - [docs/map.md](docs/map.md): the map pipeline, the JSON format and the data’s limits
 - [docs/gameplay.md](docs/gameplay.md): on foot, vehicles, traffic, pedestrians, score and tuning
+
+[AGENTS.md](AGENTS.md) routes coding agents to [CODING_STANDARDS.md](CODING_STANDARDS.md), the workflow every change follows, and to the checks for each part of the game in [docs/standards/](docs/standards/).

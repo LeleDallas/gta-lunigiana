@@ -1,7 +1,7 @@
 // Top-down debug render of src/sim/map/monzone.json -> .research/map-preview.png.
 // Usage: node src/tools/preview-map.ts [pxPerM=1] [minX,minY,maxX,maxY] [out.png]
-import { writeFileSync } from "node:fs"
-import { join } from "node:path"
+import { mkdirSync, writeFileSync } from "node:fs"
+import { dirname, join } from "node:path"
 
 import { type AreaKind, type BuildingStyle, buildingStyleOf, graph, heightAt, isAreaKind, MAP, type RoadClass } from "../sim/map/index.ts"
 import { fillPolygon, segDist2 } from "./geometry.ts"
@@ -87,5 +87,6 @@ line(pl.x, pl.y, pl.x + Math.cos(pl.angle) * 8, pl.y + Math.sin(pl.angle) * 8, 0
 
 const flipped = new Uint8Array(img.length)
 for (let j = 0; j < H; j++) flipped.set(img.subarray(j * W * 3, (j + 1) * W * 3), (H - 1 - j) * W * 3)
+mkdirSync(dirname(out), { recursive: true })
 writeFileSync(out, encodePngRgb(W, H, flipped))
 console.log(`${out} ${W}x${H}`)
