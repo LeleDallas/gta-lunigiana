@@ -1,0 +1,41 @@
+# Map standards
+
+Checks for a change to the map pipeline (`src/tools`), the map code (`src/sim/map`) or its inputs
+(`data/raw`), on top of the steps in [CODING_STANDARDS.md](../../CODING_STANDARDS.md). CI runs only
+`pnpm check` and never builds the map, so these runs are yours.
+
+## Every map change
+
+- Run `pnpm map` twice and compare `shasum src/sim/map/monzone.json`: the two outputs are
+  byte-identical.
+- Draw the changed area with `node src/tools/preview-map.ts` (a top-down PNG in `.research/`) and
+  look at it.
+- A rebuilt map shifts pinned positions: test coordinates, bot waypoints and screenshot spots.
+  Find them again by geometry.
+- Place hand-made tables (`STONE_CORES`, `LANDMARKS`, stream widths, district discs) on
+  orthophotos and OSM nodes, with a comment saying how.
+- `data/raw` is pinned. Fetch again (`pnpm fetch-osm`, `pnpm fetch-rt`) only to change the inputs
+  on purpose: OSM returns current edits, so the map moves.
+
+## Data sources and requests
+
+- **Licences**: accept CC BY and the ODbL (OpenStreetMap's). Ask the user before any other
+  share-alike source (CC BY-SA and the like), and leave out non-commercial or unlicensed data.
+- **Records and credits**: record each accepted and rejected source, with the reason, in
+  [docs/map.md](../map.md). Credit each accepted one in the README and in both credit lines of
+  `index.html` (the HUD's and the title card's), keeping Regione Toscana's wording verbatim.
+- **Overpass** is often overloaded: the pipeline uses the OSM API's `/map` tiles, and the
+  kumi.systems mirror serves one-off queries.
+
+## New map part or biome
+
+Follow issue #3 (the extent, the order of parts and the runbook), plus the checklist and
+acceptance criteria in the part's issue (#17–#26) or the biome's (#13–#16).
+
+- Many runbook tools (`region.ts`, `footprint-check`, `rt-index`, `pick-sheets`, `pick-lidar`,
+  `coverage`, `playtest.ts`, `pin-raw`, `fetch-lig`) arrive with issues #4–#7 and #12. When one is
+  missing from `src/tools` and `package.json`, name the issue that adds it and ask the user before
+  building it.
+- A failed scale check (tile size, build memory, first frame, heap) is engine work first.
+- Moving `BOUNDS` moves every tree: trees are stored in whole metres from a corner 100 m
+  south-west of it.
