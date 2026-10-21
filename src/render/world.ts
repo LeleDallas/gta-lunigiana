@@ -3,7 +3,7 @@
  * chunk is one terrain mesh, one solid mesh (buildings, roofs, bridges, platforms), one decal
  * mesh (roads, water, rail) and an InstancedMesh per tree kind. Pieces and trees are bucketed
  * per chunk once, so a build reads only its own; the land cover is rasterised once for the whole
- * map (`mapCover`, shared with the audio host; ≈ 80 ms, 4.9 MB, cheaper than clipping areas per
+ * map (`mapCover`, shared with the audio host; ≈ 105 ms, 4.9 MB, cheaper than clipping areas per
  * chunk). Dynamic actors are not here (see render/index.ts).
  *
  * @module render/world

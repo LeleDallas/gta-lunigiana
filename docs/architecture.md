@@ -119,6 +119,44 @@ memory of each sound source (pruned as sources go; see [audio.md](audio.md#where
 `bindings` in `src/sim/schema.ts` is the only list of keys. Tests and replays use the same path:
 `Keyboard.scripted(bindings, timeline)` replaces the live keyboard.
 
+## Start-up
+
+The title card doubles as the loading screen: the game downloads the map, builds in named steps,
+and asks for a key only once the first frame is drawn.
+
+1. `index.html` is static, so the card shows before any script runs. Its entry, `src/boot.ts`,
+   is a few kB and imports only the card (`src/hud/title.ts`) and the map file's handover
+   (`src/sim/map/packed.ts`), so the bar moves within milliseconds.
+2. `boot.ts` fetches `monzone.bin` (6.7 MB of gzip, a hashed asset) and counts the bytes against
+   `Content-Length` (the first 60% of the bar, with MB so far). It gunzips with
+   `DecompressionStream` while the file arrives, then hands the bytes to `provideMap`. The file is
+   named `.bin`, not `.gz`: Vite's server would label a `.gz` as `Content-Encoding: gzip`, and the
+   browser would then gunzip it first.
+3. It imports the game in three parts, with a paint between them, because each import evaluates
+   only the modules the earlier ones left: `src/sim/map/index.ts` (decoding, collision grids),
+   `src/sim/route.ts` (each vehicle model's lanes), then `main.ts`.
+4. `main.ts` builds the rest in steps with top-level `await`, each named on the card: the land
+   cover (`mapCover`), the world (`new World`), then the HUD, the runtime, `setup` and the first
+   audio tick, then every chunk of the first view.
+5. Before the loop starts, `main.ts` drops the presses of keys hit while loading (held keys stay
+   held, as `pausable` does). After the first frame (its shader compiles included), it arms M and
+   calls `titleReady`. The card then swaps the bar for "Press any key" and hides on the next key
+   or click.
+6. If any step throws (the download, a missing WebGL), the card keeps the step's name, shows the
+   error (`role="alert"`) and a Retry button that reloads; a failed module import stays failed
+   until a reload.
+
+The step name is a polite live region, so screen readers hear each step; the byte count beside it
+is not, so chunks stay quiet. In a background tab, where animation frames stop, each paint waits
+100 ms instead.
+
+Measured with the production build in headless Chrome on an M4 Pro, 1280×720:
+
+| Case | Before | After |
+|---|---|---|
+| local server | first frame at 2.2 s | "Press any key" at 0.76 s |
+| 4× CPU, 1.5 MB/s | the 15 MB script in at 9.8 s (a dead "Press any key" until then), one 3.5 s task, first frame at 13.5 s | map in at 4.6 s, ready at 7.3 s, longest task 0.69 s ("Planning traffic") |
+
 ## Host loop
 
 `src/main.ts` drives everything from one `FixedLoop`: 60 Hz steps, at most 5 steps per frame, and
@@ -220,8 +258,8 @@ and `Honk` events, the horn key and the view's turns (the stereo image turns wit
 hands them as plain `Heard` data to the `Audio` service.
 `main.ts` provides the director (`src/audio/director`, plain TypeScript), which runs the outdoor
 acoustics and drives the Web Audio speaker (`src/audio/speaker.ts`) and its synths
-(`src/audio/synth`). The speaker starts its AudioContext on the first key or click, the one that
-dismisses the title card, and suspends it while the full map is open or the tab is hidden. In dev
+(`src/audio/synth`). The speaker starts its AudioContext on the first key or click once it exists
+(made during the last loading steps, so normally the one that dismisses the title card), and suspends it while the full map is open or the tab is hidden. In dev
 builds `gta.audio` exposes the speaker, its output level and the context. Everything else is in
 [audio.md](audio.md).
 

@@ -35,7 +35,8 @@ const set = (node: HTMLElement, text: string) => {
 export const loading = (document: Document, step: string, done: number, detail = ""): void => {
   set(element(document, "title-step"), step)
   set(element(document, "title-detail"), detail)
-  ;(element(document, "title-bar") as HTMLProgressElement).value = done
+  const bar = element(document, "title-bar") as HTMLProgressElement
+  bar.value = done
 }
 
 /** `loading` a new step, then `paint`: call before each long piece of start-up work. */

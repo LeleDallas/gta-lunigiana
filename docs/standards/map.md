@@ -6,8 +6,8 @@ Checks for a change to the map pipeline (`src/tools`), the map code (`src/sim/ma
 
 ## Every map change
 
-- Run `pnpm map` twice and compare `shasum src/sim/map/monzone.json`: the two outputs are
-  byte-identical.
+- Run `pnpm map` twice and compare `gunzip -c src/sim/map/monzone.bin | shasum`: the two outputs
+  are byte-identical.
 - Draw the changed area with `node src/tools/preview-map.ts` (a top-down PNG in `.research/`) and
   look at it.
 - A rebuilt map shifts pinned positions: test coordinates, bot waypoints and screenshot spots.

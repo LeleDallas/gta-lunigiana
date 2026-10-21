@@ -130,7 +130,7 @@ The browser synthesises every sound with Web Audio, with no sample files: engine
 
 Each sound reaches you through outdoor acoustics. It fades with distance and under the background noise, so you hear only what’s near. Houses and hills muffle it, the air dulls it, its pitch shifts as it passes, far crashes arrive late, and loud ones echo off the slopes.
 
-The first key or click, the one that dismisses the title card, starts the sound. See [docs/audio.md](docs/audio.md) for the details.
+The first key or click once the game has loaded, the one that dismisses the title card, starts the sound. See [docs/audio.md](docs/audio.md) for the details.
 
 ## Package scripts
 
@@ -160,10 +160,11 @@ The simulation, the browser hosts and the map tools live in separate folders:
 | `src/sim/map/` | the generated map (`monzone.bin`), its decoder, types and lookups (heights, walls, road graph) |
 | `src/render/` | Three.js host code: pixel pipeline, static world meshes, actor meshes, the render schedule |
 | `src/audio/` | Web Audio host code: the audio schedule, the acoustics director, the speaker and mixer, the synths, the audition page |
-| `src/hud/` | DOM HUD: location names, score, prompt, speedometer, minimap, full map (M) |
+| `src/hud/` | DOM HUD: the title card as loading screen, location names, score, prompt, speedometer, minimap, full map (M) |
 | `src/tools/` | the map pipeline (`build-map.ts`), the downloaders (`fetch-osm.ts`, `fetch-rt.ts`) and a top-down preview renderer |
+| `src/boot.ts` | browser entry: downloads the map with progress, then imports the game |
 | `src/main.ts` | browser host: builds the scene, makes the runtime, runs the fixed loop |
-| `index.html` | canvas, HUD markup and title card |
+| `index.html` | canvas, HUD markup and title card (the loading screen) |
 | `lab.html` | the audio audition page (dev server only) |
 | `data/raw/` | pinned map inputs: OSM extract, Regione Toscana CTR and LiDAR |
 | `docs/` | architecture, map pipeline, gameplay and audio notes; `docs/standards/` holds the checks for each part of the game |
@@ -176,7 +177,7 @@ Rebuild the map from the pinned inputs with one command:
 pnpm map
 ```
 
-The build reads only `data/raw` and takes about 8s. Its output is deterministic: with the same inputs, `monzone.bin` (6.7 MB, gzipped) comes out byte-identical on the same OS; a Linux and a macOS build differ only in the gzip header's OS byte, and gunzip to the same bytes. Never edit `monzone.bin` by hand.
+The build reads only `data/raw` and takes about 8s. Its output is deterministic: with the same inputs, `monzone.bin` (6.7 MB, gzipped) gunzips to the same bytes on every machine, and comes out byte-identical with the same Node build (another zlib or OS compresses differently). Never edit `monzone.bin` by hand.
 
 The inputs in `data/raw` are:
 

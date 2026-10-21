@@ -162,7 +162,7 @@ type Box = readonly [number, number, number, number]
  */
 export const staticGrid = (count: number, boxOf: (item: number) => Box, cellSize: number) => {
   if (!(cellSize > 0)) throw new Error(`cell size must be > 0, got ${cellSize}`)
-  // Each box asked for once (`boxOf` allocates, and the trees are a million items): minX, minY, maxX, maxY at 4i.
+  // Each box asked for once, not again per cell pass: minX, minY, maxX, maxY at 4i (≈ 32 MB, freed once built, for the million trees).
   const boxes = new Float64Array(count * 4)
   let x0 = 0, y0 = 0, x1 = 0, y1 = 0
   for (let i = 0; i < count; i++) {

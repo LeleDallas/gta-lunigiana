@@ -103,5 +103,5 @@ export const rasterCover = (map: Pick<MonzoneMap, "heightmap" | "areas" | "water
 export const coverName = (value: number): Cover => COVERS[value] ?? "meadow"
 
 let shared: Uint8Array | undefined
-/** `rasterCover(MAP)`, built on first use and shared by the renderer and the audio host (≈ 80 ms, 4.9 MB); never write to it. */
+/** `rasterCover(MAP)`, built on first use and shared by the renderer and the audio host (≈ 105 ms, 4.9 MB); never write to it. */
 export const mapCover = (): Uint8Array => (shared ??= rasterCover(MAP))

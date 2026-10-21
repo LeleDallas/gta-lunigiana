@@ -624,8 +624,9 @@ On foot H does nothing. The title card lists it.
 ## Start, pause and hidden tabs
 
 - **Autoplay.** Browsers allow audio only after a user gesture, so the AudioContext is made on the
-  first trusted `keydown`, `pointerdown` or `touchend` with user activation: the same first key
-  that dismisses the title card (Esc does not count). Until then nothing plays and no sound time
+  first trusted `keydown`, `pointerdown` or `touchend` with user activation once the speaker exists
+  (made during the last loading steps): normally the key that dismisses the title card (Esc does
+  not count). Until then nothing plays and no sound time
   passes. The gesture's own task builds only the context, the noise kit and the mixer. The kit's
   samples take ≈ 17 ms in Node; ≈ 7 of them are the gust signal, which turns each sine by a
   rotation per sample instead of calling `Math.sin` (three times slower). Each one-shot then
@@ -702,8 +703,8 @@ functions (`synth/world.test.ts` imports them to check).
 
 ### In a browser
 
-1. `pnpm dev`, open http://localhost:5173 and press a key: it dismisses the title card and starts
-   the sound.
+1. `pnpm dev`, open http://localhost:5173 and, once the title card says "Press any key", press a
+   key: it dismisses the card and starts the sound.
 2. In the console (dev builds only), `gta.audio.context()?.state` should read `"running"`, and
    `gta.audio.level()` returns the master's RMS in dBFS (−100 when silent). `gta.audio.speaker` is
    the speaker: wrap its `hold` and `play` to count requests or check placements.

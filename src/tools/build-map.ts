@@ -1,7 +1,8 @@
 // Builds src/sim/map/monzone.bin from data/raw: OSM (fetch-osm.ts) and the Regione
 // Toscana CTR 1:2000, LiDAR DTM and land cover (data/raw/rt, written by fetch-rt.ts).
-// Run: node src/tools/build-map.ts  (pnpm map), from any directory. Output is deterministic,
-// but for the gzip header's OS byte (macOS and Linux builds differ there; gunzipped, never).
+// Run: node src/tools/build-map.ts  (pnpm map), from any directory. Output is deterministic:
+// gunzipped, the same bytes everywhere; gzipped, the same file with the same Node build (another
+// zlib or OS writes other compressed bytes).
 import { writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { gzipSync } from "node:zlib"

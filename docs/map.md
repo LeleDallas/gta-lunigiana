@@ -2,9 +2,9 @@
 
 `pnpm map` runs `src/tools/build-map.ts`. It turns the pinned inputs in `data/raw` into
 `src/sim/map/monzone.bin`, the only map file the game loads (6.7 MB, see
-[File format](#file-format)). The build is deterministic (two runs on one machine give
-byte-identical files; gzip writes the building OS into its header, so a Linux build differs from
-a macOS one in that byte, never once gunzipped) and takes about 8 s. It prints a lap time per stage
+[File format](#file-format)). The build is deterministic (gunzipped, its output is the same bytes
+on every machine; the gzipped file is byte-identical with the same Node build, while another zlib
+or OS writes other compressed bytes) and takes about 8 s. It prints a lap time per stage
 and a summary: counts, the steepest grade per road class, and the size of each part of the file.
 Inputs and attribution are in the [README](../README.md).
 

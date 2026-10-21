@@ -108,10 +108,10 @@ export const moveCar = (model: VehicleModel, pose: PoseValue, heading: number, d
   return sound ? { position, blocked } : undefined
 }
 
-/** Whether a vehicle of `model` at `pose` overlaps no drive wall (by more than `slack`); pass `circles` when already at hand for `pose.angle`. */
-export const carClear = (model: VehicleModel, pose: PoseValue, slack = 0, circles = carCircles(model, pose.angle)): boolean => {
+/** Whether a vehicle of `model` at `pose` overlaps no drive wall (by more than `slack`). */
+export const carClear = (model: VehicleModel, pose: PoseValue, slack = 0): boolean => {
   const segs = wallsAlong("drive", pose.x, pose.y, 0, 0, VEHICLES[model].length / 2 + 1)
-  return depthIn(segs, pose, circles, carRadius(model)) <= slack
+  return depthIn(segs, pose, carCircles(model, pose.angle), carRadius(model)) <= slack
 }
 
 const CENTRE: ReadonlyArray<Vec2.Vec2> = [Vec2.zero]
