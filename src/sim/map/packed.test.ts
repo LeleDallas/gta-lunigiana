@@ -27,6 +27,6 @@ test("packMap and decodeMap round-trip the map file: negative values, the widest
     spawns: { player: { x: 1, y: 2, angle: -0.5 }, parked: [{ x: 3, y: 4, angle: 1 }] }
   }
   assert.deepEqual(plain(decodeMap(packMap(map).file)), plain(map))
-  assert.throws(() => packMap({ ...map, trees: [...Array.from(map.trees), 32617, 0, 1] }), /trees: 32767 at 6 does not fit/)
+  assert.throws(() => packMap({ ...map, trees: [...Array.from(map.trees), 32617, 0, 1] }), /trees: 32767 at 6 is 32768 from the value 3 back, too far for 2 bytes/)
   assert.throws(() => packMap({ ...map, heightmap: { ...map.heightmap, data: [0, 0, 0, 0, 0, 40000] } }), /heightmap: 40000 at 5 does not fit int16/)
 })

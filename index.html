@@ -53,6 +53,17 @@
         <p class="fine">Map data © OpenStreetMap contributors (ODbL)<br />Fonte dei dati: Regione Toscana – CTR 1:2000, Rilievi LIDAR,<br />Uso e copertura del suolo (CC BY 4.0), DTM 10x10 (CC BY 3.0 IT)</p>
       </div>
     </div>
+    <script>
+      // boot.ts reports every failure from its first line on; this covers the scripts themselves not
+      // loading (a network error, or a page cached from before a deploy asking for removed assets).
+      addEventListener("error", (event) => {
+        if (!(event.target instanceof HTMLScriptElement)) return
+        const message = document.getElementById("title-error"), retry = document.getElementById("title-retry")
+        message.textContent = "Failed to start: the game's scripts did not load"
+        message.hidden = retry.hidden = false
+        retry.onclick = () => location.reload()
+      }, true)
+    </script>
     <script type="module" src="/src/boot.ts"></script>
   </body>
 </html>

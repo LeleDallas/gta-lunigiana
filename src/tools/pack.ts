@@ -10,7 +10,8 @@ const pack = (values: ArrayLike<number>, size: 2 | 4, stride: number, what: stri
   const n = values.length, out = Buffer.alloc(n * size)
   for (let k = 0; k < n; k++) {
     const v = values[k]!, d = v - (k >= stride ? values[k - stride]! : 0), z = d < 0 ? -2 * d - 1 : 2 * d
-    if (!Number.isInteger(v) || v < -(2 ** 31) || v >= 2 ** 31 || z >= 2 ** (8 * size)) throw new Error(`${what}: ${v} at ${k} does not fit`)
+    if (!Number.isInteger(v) || v < -(2 ** 31) || v >= 2 ** 31) throw new Error(`${what}: ${v} at ${k} is not an int32`)
+    if (z >= 2 ** (8 * size)) throw new Error(`${what}: ${v} at ${k} is ${d} from the value ${stride} back, too far for ${size} bytes`)
     for (let p = 0; p < size; p++) out[p * n + k] = Math.floor(z / 256 ** p) % 256
   }
   return out

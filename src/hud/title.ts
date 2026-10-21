@@ -16,10 +16,18 @@ export const element = (document: Document, id: string): HTMLElement => {
 
 /**
  * Resolves after the browser has had a chance to paint the card (and to deliver input queued
- * behind the last step): the next animation frame, or 100 ms in a background tab where frames stop.
+ * behind the last step): after the next animation frame. A background tab has no frames and slows
+ * timers to about one a second, so there it resolves on a message, at once; 100 ms covers a tab
+ * hidden while waiting for its frame.
  */
-export const paint = (): Promise<void> =>
+const paint = (): Promise<void> =>
   new Promise((done) => {
+    if (document.hidden) {
+      const channel = new MessageChannel()
+      channel.port1.onmessage = () => done()
+      channel.port2.postMessage(undefined)
+      return
+    }
     requestAnimationFrame(() => setTimeout(done))
     setTimeout(done, 100)
   })
@@ -52,6 +60,8 @@ export const loadFailed = (document: Document, error: unknown): void => {
   message.textContent = `Failed to start: ${error instanceof Error ? error.message : String(error)}`
   message.hidden = retry.hidden = false
   retry.addEventListener("click", () => document.location.reload(), { once: true })
+  // The game's keyboard (made late in start-up) cancels Enter and Space at the window: keep them on the button.
+  retry.addEventListener("keydown", (event) => event.stopPropagation())
   retry.focus()
 }
 

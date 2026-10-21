@@ -23,6 +23,16 @@ test("grains and gusts stay in range", () => {
   for (let seed = 0; seed < 100; seed++) assert.equal(Math.max(...gustSamples(8000, seeded(seed)).map(Math.abs)), 1, `seed ${seed}`)
 })
 
+test("the gust signal is its sines' sum, normalised: the per-sample rotation does not drift", () => {
+  const n = 512000, random = seeded(5), g = gustSamples(n, seeded(5))
+  const parts = [2, 5, 9, 17, 31].map((k) => ({ a: 1 / Math.sqrt(k), w: (2 * Math.PI * k) / n, phase: random() * 2 * Math.PI }))
+  const exact = Array.from({ length: n }, (_, i) => parts.reduce((v, p) => v + p.a * Math.sin(p.w * i + p.phase), 0))
+  const peak = exact.reduce((m, v) => Math.max(m, Math.abs(v)), 0)
+  let worst = 0
+  for (let i = 0; i < n; i++) worst = Math.max(worst, Math.abs(g[i]! - exact[i]! / peak))
+  assert.ok(worst < 1e-6, `off by ${worst}`)
+})
+
 test("smoothstep clamps and eases", () => {
   assert.equal(smoothstep(0, 1, -1), 0)
   assert.equal(smoothstep(0, 1, 2), 1)

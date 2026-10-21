@@ -264,7 +264,8 @@ is the largest connected component of every edge except tunnels.
 - **Trees**: a jittered lattice at one tree per 50 m² inside forest areas. Trees stay out of other
   areas, buildings (plus 2 m), roads (w/2 + 2 m), stream beds and the rail (6 m). Sparse trees
   also line the banks of the wider streams. No cap: about 1 012 000 trees, positions rounded to 1 m
-  (at most one tree per spot) and a scale of 0.8–1.3 (1.7 MB of the gzipped map file). Placement uses a fixed hash, not a random generator.
+  (at most one tree per spot) and a scale of 0.8–1.3 (1.7 MB of the gzipped map file). Placement
+  uses a fixed hash, not a random generator.
 - **Player spawn**: the Via Cesare Battisti sidewalk nearest the Carabinieri station, with 1.3 m
   clear of walk and drive walls.
 - **Parked spots**: one per 8 buildings (797) on the right kerb of tertiary, unclassified and
@@ -354,7 +355,9 @@ straight line between them), bridge and underpass clearances, no perched water, 
 widths, and valid names, classes, styles, area kinds and districts (each of those villages is
 its own HUD name, Equi Terme's station and spa included, and Monte Sagro and Pizzo d'Uccello
 name themselves; CTR street names cased like "Via XX Settembre" and "Via Castel dell'Aquila").
-Run `pnpm test` after every `pnpm map`.
+Run `pnpm test` after every `pnpm map`. `src/sim/map/packed.test.ts` round-trips a small map
+through `packMap` and `decodeMap` (negative values, the widest 2-byte deltas, an empty section, a
+newline inside a name) and checks that a value or delta too big for its section throws.
 
 `node src/tools/preview-map.ts [pxPerM=1] [minX,minY,maxX,maxY] [out.png]` draws a top-down PNG of
 the built map. It writes `.research/map-preview.png` by default.

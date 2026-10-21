@@ -138,24 +138,29 @@ and asks for a key only once the first frame is drawn.
 4. `main.ts` builds the rest in steps with top-level `await`, each named on the card: the land
    cover (`mapCover`), the world (`new World`), then the HUD, the runtime, `setup` and the first
    audio tick, then every chunk of the first view.
-5. Before the loop starts, `main.ts` drops the presses of keys hit while loading (held keys stay
-   held, as `pausable` does). After the first frame (its shader compiles included), it arms M and
-   calls `titleReady`. The card then swaps the bar for "Press any key" and hides on the next key
-   or click.
+5. `main.ts` draws the first frame itself, shader compiles included: a throw there reaches the
+   card, where inside the loop's animation frame it would stop the loop behind "Press any key".
+   It then drops the presses of keys hit while loading (held keys stay held, as `pausable` does),
+   starts the loop, arms M and calls `titleReady`. The card swaps the bar for "Press any key" and
+   hides on the next key or click.
 6. If any step throws (the download, a missing WebGL), the card keeps the step's name, shows the
    error (`role="alert"`) and a Retry button that reloads; a failed module import stays failed
-   until a reload.
+   until a reload. Retry stops Enter and Space from reaching the game's keyboard, which cancels
+   them at the window. When the scripts themselves fail to load (a network error, or an
+   `index.html` cached from before a deploy asking for removed assets), a small inline script in
+   `index.html` shows the same error and Retry.
 
 The step name is a polite live region, so screen readers hear each step; the byte count beside it
-is not, so chunks stay quiet. In a background tab, where animation frames stop, each paint waits
-100 ms instead.
+is not, so chunks stay quiet. A background tab has no animation frames and slows timers to about
+one a second, so there each step yields on a `MessageChannel` message instead (eight steps would
+otherwise add ≈ 8 s).
 
 Measured with the production build in headless Chrome on an M4 Pro, 1280×720:
 
 | Case | Before | After |
 |---|---|---|
-| local server | first frame at 2.2 s | "Press any key" at 0.76 s |
-| 4× CPU, 1.5 MB/s | the 15 MB script in at 9.8 s (a dead "Press any key" until then), one 3.5 s task, first frame at 13.5 s | map in at 4.6 s, ready at 7.3 s, longest task 0.69 s ("Planning traffic") |
+| local server | first frame at 1.9 s; JS heap after GC 117 MB | "Press any key" at 0.63 s; 88 MB |
+| 4× CPU, 1.5 MB/s | the 15 MB script in at 9.8 s (a dead "Press any key" until then), one 3.5 s task, first frame at 13.5 s | map in at 4.6 s, ready at 7.1 s, longest task 0.64 s |
 
 ## Host loop
 
@@ -218,8 +223,7 @@ Streaming:
   Colognola, Campiglione and Viano): 20–37 chunks loaded, chunk builds ≈ 0.25 ms on average and
   under 3 ms at worst, first frame after ≈ 0.6–0.85 s, JS heap ≈ 185 MB (was ≈ 550 MB building the
   whole map), no frame over 30 ms, 60 fps. Widened to the whole valley (7.8 × 10 km, 3.3× the
-  area), a production build loads in ≈ 0.9 s (0.8 s before) with ≈ 245 MB of JS heap after GC
-  (93 MB before); chunks per view do not grow.
+  area), chunks per view do not grow; load times and heap are under [Start-up](#start-up).
 
 The pixel pipeline (`src/render/pipeline.ts`):
 
@@ -259,9 +263,9 @@ hands them as plain `Heard` data to the `Audio` service.
 `main.ts` provides the director (`src/audio/director`, plain TypeScript), which runs the outdoor
 acoustics and drives the Web Audio speaker (`src/audio/speaker.ts`) and its synths
 (`src/audio/synth`). The speaker starts its AudioContext on the first key or click once it exists
-(made during the last loading steps, so normally the one that dismisses the title card), and suspends it while the full map is open or the tab is hidden. In dev
-builds `gta.audio` exposes the speaker, its output level and the context. Everything else is in
-[audio.md](audio.md).
+(made during the last loading steps, so normally the one that dismisses the title card), and
+suspends it while the full map is open or the tab is hidden. In dev builds `gta.audio` exposes the
+speaker, its output level and the context. Everything else is in [audio.md](audio.md).
 
 ## HUD
 

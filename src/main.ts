@@ -21,7 +21,7 @@ import { VEHICLE_SHOTS, VEHICLE_VOICES } from "./audio/synth/vehicles.ts"
 import { WORLD_SHOTS, WORLD_VOICES } from "./audio/synth/world.ts"
 import type { Shots, Voices } from "./audio/types.ts"
 import { makeHud, pausable, toggleMapOnKey } from "./hud/hud.ts"
-import { paint, step, titleReady } from "./hud/title.ts"
+import { step, titleReady } from "./hud/title.ts"
 import { groundY, terrainY } from "./render/ground.ts"
 import { blend, makeRegistries, People, render, RenderClock, Vehicles } from "./render/index.ts"
 import { mapCover } from "./render/landcover.ts"
@@ -141,6 +141,9 @@ const draw = (frame: FixedLoop.Frame): void => {
   hud.update(player, x, y, angle, view.yaw)
 }
 
+// The first frame here, shader compiles included: one that throws lands on the card (boot.ts),
+// where in the loop's animation frame it would stop the loop behind "Press any key".
+draw({ elapsedSeconds: 0, fixedSteps: 0, alpha: 0, droppedSeconds: 0 })
 // Keys pressed while loading arrive during the steps: drop their presses (held keys stay held).
 keyboard.snapshot()
 const loop = FixedLoop.start({
@@ -157,7 +160,6 @@ const loop = FixedLoop.start({
   onFailure: (failure) => console.error("loop stopped", failure)
 })
 if (!loop.ok) throw new Error(`loop: ${JSON.stringify(loop.error)}`)
-await paint() // the first frame, shader compiles included
 toggleMapOnKey(window, hud)
 titleReady(window)
 
