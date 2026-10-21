@@ -23,8 +23,12 @@ export interface Mixer extends Bus {
 export const SILENCE_DB = -100
 
 const MASTER = 0.8
-/** A gentle limiter rather than the squashing defaults (synthesis.md §1.1, physics.md §9). */
-const LIMITER = { threshold: -6, knee: 6, ratio: 12, attack: 0.003, release: 0.25 } as const
+/**
+ * A gentle limiter rather than the squashing defaults (synthesis.md §1.1, physics.md §9). TUNED: a 1 ms attack, so a crash
+ * (crest ~10 dB) driven 15–25 dB over, as one a few metres away or the player's own is, peaks near −0.3 dBFS at worst; at
+ * 3 ms its transients got through to +0.1…+2.4 dBFS and clipped.
+ */
+const LIMITER = { threshold: -6, knee: 6, ratio: 12, attack: 0.001, release: 0.25 } as const
 /**
  * The compressor's built-in makeup gain for LIMITER, dB (spec: (1 / curve(1))^0.6; measured 2.14 in
  * Chrome; re-measure when LIMITER changes). Trimmed off after it, so quiet mixes keep MASTER and a

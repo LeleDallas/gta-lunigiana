@@ -72,7 +72,7 @@ test("driving: entering a parked car, the up key accelerates toward maxSpeed and
   assert.ok(view()!.pose.angle > heading + 0.3, `left turns counter-clockwise: ${heading} -> ${view()!.pose.angle}`)
 })
 
-test("driving into a building: the car stops at the wall without tunnelling, loses its speed, and the hit is a wall Impact where its nose meets the wall", () => {
+test("driving into a building: the car stops at the wall without tunnelling, loses its speed, and the hit is a wall Impact as fast as the car was, where its nose meets the wall", () => {
   // Square on to an 11 m house wall on Via Cesare Battisti, 18.15 m to first contact.
   const car = { x: -433.525, y: 433.24, angle: 1.386 }
   const { run, view, world, heard } = start([...press(0, "action"), { frame: 2, press: ["up"] }], [door(car), { cars: [parkedCar("panda", 0xf2efe6, car)] }])
@@ -86,10 +86,11 @@ test("driving into a building: the car stops at the wall without tunnelling, los
   const hit = frames.findIndex((f) => f.speed === fastest)
   assert.ok(fastest > 12, `fastest ${fastest}`)
   assert.ok(Math.min(...frames.slice(hit, hit + 10).map((f) => f.speed)) < fastest * 0.5, "the hit costs speed")
-  // The speed lost in one step: what the step travelled before contact counts as kept, so it is less than the speed at contact.
+  // Regression: the speed at contact (one step's throttle over the fastest frame), not the speed lost in the step, which
+  // is less by what the step travelled before contact (7.1 m/s here, then 4.4 the next step), so a hit read as two softer ones.
   const hardest = heard.impacts.reduce((a, b) => (b.speed > a.speed ? b : a))
   assert.deepEqual([hardest.hit, hardest.car, hardest.mass, hardest.other], ["wall", id, VEHICLES.panda.mass, undefined])
-  assert.ok(hardest.speed > 5 && hardest.speed < fastest, `hit at ${hardest.speed} m/s`)
+  assert.ok(Math.abs(hardest.speed - fastest) < 0.3, `hit at ${hardest.speed} m/s, ${fastest} m/s at most`)
   // The contact point: the nose, half a length ahead of the centre, on the axis the car has kept since (it only bounced back along it).
   const { pose } = frames.at(-1)!
   const across = (p: { readonly x: number; readonly y: number }) => (p.y - pose.y) * Ops.cos(pose.angle) - (p.x - pose.x) * Ops.sin(pose.angle)

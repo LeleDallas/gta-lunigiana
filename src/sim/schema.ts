@@ -96,7 +96,8 @@ export const View = Descriptor.ConstructedResource(Decode.struct({ turns: Decode
 /**
  * A vehicle hit something this step: a wall, another vehicle or a person (`other`, their entity
  * ids), where (the contact point on a wall or between two vehicles, the person's position), how
- * hard (m/s) and with how much relative mass behind it. Not saved; the audio schedule plays it.
+ * hard (the closing speed at contact, m/s) and with how much relative mass behind it. Not saved; the
+ * audio schedule plays it.
  */
 export const Impact = Descriptor.Event<{
   readonly hit: "wall" | "car" | "person"

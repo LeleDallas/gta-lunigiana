@@ -102,7 +102,10 @@ export const VehiclePhysics = Game.System("Lunigiana/VehiclePhysics", {
       const into = Vec2.normalizeOr(lost, Vec2.zero)
       if (impact > NOISE) {
         const at = contact(spec, moved.position.x, moved.position.y, turned === undefined ? pose.angle : angle, into)
-        events.impact.emit({ hit: "wall", x: at.x, y: at.y, speed: impact, mass: spec.mass, car: entity.id })
+        // How hard it hit: the velocity into the wall at contact. The speed lost this step is less by what the step
+        // travelled before contact, and the rest is lost next step: one hit would read as two softer ones.
+        const speed = Math.max(impact, vx * into.x + vy * into.y)
+        events.impact.emit({ hit: "wall", x: at.x, y: at.y, speed, mass: spec.mass, car: entity.id })
       }
       const keep = Math.max(0.2, 1 - IMPACT_LOSS * impact)
       // Never faster than before the hit (push-outs from a rotation can add speed).

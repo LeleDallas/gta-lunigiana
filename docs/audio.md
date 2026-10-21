@@ -25,10 +25,12 @@ components, Input (horn key) ──────┴─► audio schedule (Lunigia
 1. **Simulation events** (`src/sim/schema.ts`). Two events carry moments that leave no trace in
    the world's state:
    - `Impact` (`hit`, `x`, `y`, `speed`, `mass`, `car`, `other?`): a vehicle hit something this
-     step. `VehiclePhysics` emits `wall` for every drive-wall hit faster than 0.05 m/s, with the
-     speed lost into the wall (a car wedged so that no move fits emits its whole speed), at the
-     contact point: the car's centre plus the direction of the lost velocity (the velocity, when
-     wedged) times the body's reach that way, |u·f|·L/2 + |u·s|·W/2 for its L × W box.
+     step. `VehiclePhysics` emits `wall` for every drive-wall hit that costs over 0.05 m/s, with the
+     car's velocity into the wall at contact (a car wedged so that no move fits emits its whole
+     speed). The speed lost in the step would be less by what the step travelled before contact,
+     the rest lost the next step, so one hit would read as two softer ones: a 15 m/s hit as 7 and
+     4 m/s. The contact point is the car's centre plus the direction of the lost velocity (the
+     velocity, when wedged) times the body's reach that way, |u·f|·L/2 + |u·s|·W/2 for its L × W box.
      `Contacts` emits `car` when two vehicles close on each other: the closing speed, the reduced
      mass 1/(1/m₁ + 1/m₂), at the contact point (`car` and `other` follow query order, not who
      struck whom). It emits `person` for each knockdown: the car's speed before a pin stops it, the
@@ -86,8 +88,9 @@ components, Input (horn key) ──────┴─► audio schedule (Lunigia
    shift in cents into the synth's detunes. Gain, pan, send and pitch glide with a 50 ms time
    constant, the cutoff with 100 ms. The mixer (`mixer.ts`) sums the dry signals and the reverb
    return into a master gain (0.8), then a limiter (threshold −6 dBFS, knee 6 dB, ratio 12, attack
-   3 ms, release 250 ms, its built-in makeup gain of 2.14 dB trimmed off), an analyser for the
-   level meter, and the output.
+   1 ms, release 250 ms, its built-in makeup gain of 2.14 dB trimmed off), an analyser for the
+   level meter, and the output. The 1 ms attack is for crashes: their transients got through a
+   3 ms attack to +0.1…+2.4 dBFS (see [Calibration and mix](#calibration-and-mix)).
 
 ## Where state lives
 
@@ -472,8 +475,11 @@ noise (1.4 s each, made once per sample rate in `prepare`: 11–28 ms, 2.6 MB); 
 recurrence step a sample until it falls 60 dB (or to −80 dBFS). In Node on this machine, over 20
 seeds: a Panda into a house at 14 m/s renders in 3.8 ms (median; 4.2 worst), the heaviest (the
 guard rail, a tree, the wreck) in 7–9 ms (12 worst); in headless Chrome 3.6 ms and 6–7 ms (8
-worst), a play with its buffer 7–8 ms, an echo of it nothing, and no long task. ponytail: the
-render runs on the main thread; move it to a Worker if the browser shows long tasks.
+worst), a play with its buffer 7–8 ms, an echo of it nothing, and no long task. In the game
+(headless Chrome, `?seed=3`, about 350 crashes of traffic and of the player's car into houses,
+stone, trees, banks and parked cars) a play took 2.4 ms (median; 4.8 for nine in ten, 8.1 at most)
+and no frame had a long task. ponytail: the render runs on the main thread; move it to a Worker if
+the browser shows long tasks.
 
 The bells are the tallest church or tower of each district, 22 in all. A tower of 10 m or less
 rings an 800 Hz prime; taller towers ring lower, down to 400 Hz at 30 m.
@@ -531,7 +537,17 @@ before the pan, and a panned one lower):
 - the loudest near sounds go past gain 1 and the master limiter holds them near −2 dBFS: the
   player's own horn and siren (about 19 and 17.5 dB over, so the limiter takes up to 11 dB and the
   rest of the mix dips while they sound), a crash a few metres away, a honk 10 m away, and the
-  door slam and starter heard from the seat.
+  door slam and starter heard from the seat;
+- crashes, as the sample peak of either channel (the game's own chain rendered offline, the median
+  of six renders; the game's own hits matched them): a Panda into a house at 10 m/s peaks −2.4 dBFS
+  5 m away (−2.2 off to a side; the meter reads −12) and −15.5 30 m away (−27 on the meter);
+  5 m/s −4.8 and −23.5; 15 and 20 m/s −1.7 and −1.6 at 5 m, −12.6 and −9.7 at 30 m; a Panda–Panda,
+  a tree, a bank, the guard rail and a stone wall at 10 m/s −2.1 to −3.7 at 5 m and −12 to −20 at
+  30 m. The player's own crash plays 21–26 dB over gain 1 (no cabin, 2–3 m from the contact point)
+  and peaks −0.3 to −2 dBFS from 10 m/s (a hard-panned one at 15 m/s once in six at +0.6), −7 at a
+  2 m/s bump. The limiter's 1 ms attack holds them there: with 3 ms their transients got through
+  to +0.1…+2.4 dBFS and clipped, while 6 dB less `LEVELS.crash` moved the near peaks by only
+  0.3–1.5 dB (it is the limiter's overshoot, not the level), so the level stays at 115 dB(A).
 
 ## Controls
 
@@ -602,7 +618,7 @@ functions (`synth/world.test.ts` imports them to check).
 
 | File | Checks |
 |---|---|
-| `src/sim/index.test.ts`, `src/sim/walls.test.ts` | the events: a car driven into a building is a `wall` Impact where its nose meets the wall; a car rolling into a parked one a `car` Impact at the closing speed, the reduced mass and where the bumpers meet; a knockdown one `person` Impact faster than `KNOCK_SPEED`; a car pinning the player a `person` Impact as fast as the car was; a car blocked by a parked one honks once per stuck episode, `HONK_STEPS` before each time it backs up |
+| `src/sim/index.test.ts`, `src/sim/walls.test.ts` | the events: a car driven into a building is a `wall` Impact as fast as the car was, where its nose meets the wall; a car rolling into a parked one a `car` Impact at the closing speed, the reduced mass and where the bumpers meet; a knockdown one `person` Impact faster than `KNOCK_SPEED`; a car pinning the player a `person` Impact as fast as the car was; a car blocked by a parked one honks once per stuck episode, `HONK_STEPS` before each time it backs up |
 | `src/audio/index.test.ts` | `Hear`: the listener on foot and at the wheel with the horn held, AI traffic running while standing, an untouched car heard only while it moves, impacts (with the struck vehicle's model and zone; none for a vehicle gone since) then honks each heard once, an Ape rolling into a parked Panda front on rear |
 | `src/render/index.test.ts` | every system of the render and audio schedules declares no writes |
 | `src/audio/acoustics.test.ts` | the laws: the line source against the exact table, the air cutoffs, Doppler, the pan, diffraction, ground, foliage, masking, the mix calibration |
@@ -628,6 +644,13 @@ standing at the spawn −40 to −42 dBFS, walking there with step peaks up to �
 Lucido in the clear −25, in the Carabinieri Giulia idling −30 and driving with the siren on −10.5
 (peaks −3.5), in a stolen Panda idling −29, at 18–22 m/s −14 and honking −13 (peaks −3.5); no console errors and no
 non-finite placement or param. On the audition page "Render all" gives 76 rows, none flagged.
+Crashes (a Panda driven by CDP keys into a house, a stone wall, a tree and a bank at 5–15 m/s and
+into parked cars at 9–15 m/s, `gta.audio.level()` and each channel's sample peak every 20 ms): the
+played speed is the car's at contact (wall hits within 0.3 m/s of it, an oblique tree hit 0.5 under;
+before the sim reported it, a 15 m/s hit played as 2.9 then 9.9 m/s); from the seat each peaks −0.3 to
+−1.9 dBFS (the meter −12 to −14 over a cabin at −15 to −20 under throttle); on foot 6.6 m from an
+11.4 m/s hit −2.8 (the meter −10), 10.5 m from a 5.1 m/s one −9.8; a play's render 1–8 ms, no long
+task, no console error, no non-finite placement.
 
 ## Known limits and tuning
 
@@ -661,6 +684,9 @@ non-finite placement or param. On the audition page "Render all" gives 76 rows, 
   recordings themselves vary). A parking bump's crest is about 15 dB, a bumper tap's (13.7–15.2),
   not under 15. Nobody has listened to them blind against the recordings yet.
 - **Crashes render on the main thread** when they play: 2–9 ms each (up to ~12 ms at worst).
+- **Traffic brushes houses.** Near Monzone station (`?seed=3`) AI cars hit house walls about ten
+  times a minute (mostly a side at 1.5–8 m/s where a lane passes close to a facade), and each hit
+  is a crash: distant bumps, now and then a loud one in a nearby street.
 - **What a crash leaves out:** a parked car's alarm, a stuck horn, the engine stalling, tyre
   scrub after the hit, a hanging part swinging; the zone is front, side or rear (no corners).
 - **A scrape's level follows speed only.** The sim reports no contact force, so a car pressed hard
