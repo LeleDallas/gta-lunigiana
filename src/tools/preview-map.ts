@@ -1,4 +1,4 @@
-// Top-down debug render of src/sim/map/monzone.json -> .research/map-preview.png.
+// Top-down debug render of src/sim/map/monzone.bin -> .research/map-preview.png.
 // Usage: node src/tools/preview-map.ts [pxPerM=1] [minX,minY,maxX,maxY] [out.png]
 import { mkdirSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"

@@ -1,14 +1,16 @@
 # The map
 
 `pnpm map` runs `src/tools/build-map.ts`. It turns the pinned inputs in `data/raw` into
-`src/sim/map/monzone.json`, the only map file the game loads. The build is deterministic (two runs
-give byte-identical files) and takes about 7.5 s. It prints a lap time per stage and a summary:
-counts, the steepest grade per road class, and the size of each section. Inputs and attribution
-are in the [README](../README.md).
+`src/sim/map/monzone.bin`, the only map file the game loads (6.7 MB, see
+[File format](#file-format)). The build is deterministic (two runs on one machine give
+byte-identical files; gzip writes the building OS into its header, so a Linux build differs from
+a macOS one in that byte, never once gunzipped) and takes about 8 s. It prints a lap time per stage
+and a summary: counts, the steepest grade per road class, and the size of each part of the file.
+Inputs and attribution are in the [README](../README.md).
 
 `src/sim/map/kinds.ts` holds the vocabulary that the build and the game share: road classes and
 their default widths, building styles, area kinds, and the tree-trunk size. It imports no data, so the
-build can use it before `monzone.json` exists.
+build can use it before `monzone.bin` exists.
 
 ## Pipeline
 
@@ -262,7 +264,7 @@ is the largest connected component of every edge except tunnels.
 - **Trees**: a jittered lattice at one tree per 50 m² inside forest areas. Trees stay out of other
   areas, buildings (plus 2 m), roads (w/2 + 2 m), stream beds and the rail (6 m). Sparse trees
   also line the banks of the wider streams. No cap: about 1 012 000 trees, positions rounded to 1 m
-  (at most one tree per spot) and a scale of 0.8–1.3 (7.9 MB packed). Placement uses a fixed hash, not a random generator.
+  (at most one tree per spot) and a scale of 0.8–1.3 (1.7 MB of the gzipped map file). Placement uses a fixed hash, not a random generator.
 - **Player spawn**: the Via Cesare Battisti sidewalk nearest the Carabinieri station, with 1.3 m
   clear of walk and drive walls.
 - **Parked spots**: one per 8 buildings (797) on the right kerb of tertiary, unclassified and
@@ -285,19 +287,25 @@ is the largest connected component of every edge except tunnels.
   clamped to 80–400 m. `districtAt` picks the disc the point is relatively closest to, or the
   nearest rim outside every disc.
 
-## JSON format
+## File format
 
-`MonzoneMapJson` in `src/sim/map/index.ts` is the schema of the file, `MonzoneMap` the decoded
+`monzone.bin` is gzip (level 9) of one JSON line, a newline, then four packed sections. The game
+loads it as one asset: the browser host downloads and gunzips it and hands the bytes to
+`provideMap` (`src/sim/map/packed.ts`) before anything imports the map module; Node (the tests, the
+tools, `ritmo-devtools lint`) reads it from disk. It is 6.7 MB, 28.5 MB gunzipped. Gzipped on its
+own, the JSON line is 1.5 MB, the heightmap 2.8 MB, the walls 0.7 MB and the trees 1.7 MB. The
+base64 JSON it replaced was 36 MB, 14.4 MB gzipped.
+
+`MonzoneMapJson` in `src/sim/map/index.ts` is the schema of the JSON line, `MonzoneMap` the decoded
 map the game reads. Polylines and rings are flat `[x0, y0, x1, y1, ...]` arrays. Rings are open:
-outer rings counter-clockwise, holes clockwise. About 36 MB: heightmap 12.7 MB, walls 10.5 MB,
-trees 7.9 MB, buildings 1.1 MB.
+outer rings counter-clockwise, holes clockwise.
 
 | Field | Contents |
 |---|---|
 | `version` | `1` |
 | `origin`, `mPerDeg` | projection origin (lat, lon) and metres per degree |
 | `bounds` | play area `minX`, `minY`, `maxX`, `maxY` (m) |
-| `heightmap` | `cell` (4 m), `cols`, `rows`, `x0`, `y0`, `data`: packed integer decimetres, row-major, row 0 = south |
+| `heightmap` | `cell` (4 m), `cols`, `rows`, `x0`, `y0`; the nodes (integer decimetres, row-major, row 0 = south) are the first packed section |
 | `roads` | `id`, `cls`, `name?`, `ref?`, `w`, `surface`, `oneway?`, `bridge?`, `tunnel?`, `layer?`, `pts`, `z` (surface elevation per vertex) |
 | `buildings` | `id` (OSM id, or negative for the CTR), `kind`, `name?`, `h` (wall height above `z0`), `z0` (lowest ground under the footprint), `style`, `ruins?`, `tint`, `outer`, `holes?` |
 | `water` | `id`, `kind` (`river` or `stream`), `name?`, `w`, `pts`, `z` (water surface per vertex) |
@@ -307,16 +315,24 @@ trees 7.9 MB, buildings 1.1 MB.
 | `pois` | `id`, `kind` (`key=value` or `area:<kind>`), `name?`, `x`, `y` |
 | `districts` | `name`, `x`, `y`, `r` |
 | `graph` | `xy` (node coordinates), `edges` (flat `a, b, roadIndex` triples), `traffic`, `walk` (edge indices) |
-| `walls` | `walk`, `drive`: packed `ax, ay, bx, by` segments |
-| `trees` | packed `x, y, scale` triples |
+| `walls` | `walk`, `drive`: segment counts; the `ax, ay, bx, by` segments are the second and third packed sections |
+| `trees` | tree count; the `x, y, scale` triples are the last packed section |
 | `spawns` | `player` and `parked`: `{ x, y, angle }` |
 
-The packed sections are base64 strings of little-endian integers (`src/tools/pack.ts` encodes,
-`src/sim/map/packed.ts` decodes; the build throws if a value does not fit). The heightmap is
-int16 decimetres with each row delta-coded from its first node. Walls are uint32 decimetres from
-a point 100 m south-west of the bounds' corner (the play area spans more than 16 bits of
-decimetres). Trees stand on whole metres, so they are uint16 metres from the same corner, with
-the scale in hundredths. Decoding is exact: the same numbers a one-decimal JSON array would give.
+The packed sections follow the newline in file order: heightmap, walk walls, drive walls, trees
+(`packMap` in `src/tools/pack.ts` encodes, `decodeMap` in `src/sim/map/packed.ts` decodes; the
+build throws if a value does not fit). Each holds n integers as the zigzag-coded difference
+(0, −1, 1, −2... stored as 0, 1, 2, 3...) from the value `stride` places back, split into byte
+planes: the low byte of every value, then the next byte of every value. Neighbours differ little
+and like bytes sit together, which is what gzip compresses best.
+
+| Section | Integers | Bytes | Stride |
+|---|---|---|---|
+| heightmap | decimetres (int16), each row delta-coded from its first node | 2 | `cols`: the node to the south |
+| walls | decimetres from a point 100 m south-west of the bounds' corner | 4 | 2: the previous x or y |
+| trees | whole metres from the same corner (trees stand on whole metres), the scale in hundredths | 2 | 3: the previous tree |
+
+Decoding is exact: the same numbers a one-decimal JSON array would give.
 
 Profiled roads and rail carry extra points where the elevation bends between OSM vertices (dips
 under the rail, crests). Graph edges run a → b in the OSM way direction, so a `oneway` road may
@@ -324,7 +340,7 @@ only be driven from a to b. Game code reads the map through `src/sim/map/index.t
 `graph`, `heightAt`, `wallsNear`, `districtAt`, `roadClassOf` and `buildingStyleOf`, plus two
 broad phases the sim and the audio host share: `buildingsIn` over the building boxes
 (`buildingBoxes`, indexed like `MAP.buildings`) and `treesIn` over the trees. It never reads the
-raw JSON.
+file itself.
 
 ## Checks and tools
 

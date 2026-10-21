@@ -145,7 +145,7 @@ Every script runs with `pnpm`:
 | `pnpm typecheck` | `tsc` (no emit) |
 | `pnpm lint` | `oxlint` with the Ritmo plugin, then `ritmo-devtools lint src/sim/index.ts` |
 | `pnpm test` | `node --test` over `src/**/*.test.ts` |
-| `pnpm map` | rebuilds `src/sim/map/monzone.json` from `data/raw` |
+| `pnpm map` | rebuilds `src/sim/map/monzone.bin` from `data/raw` |
 | `pnpm fetch-osm` | downloads the OpenStreetMap extract again into `data/raw/lunigiana.osm.gz` |
 | `pnpm fetch-rt` | downloads the Regione Toscana sources again into `data/raw/rt` |
 
@@ -157,7 +157,7 @@ The simulation, the browser hosts and the map tools live in separate folders:
 |---|---|
 | `src/sim/` | the simulation: Ritmo schema, systems, collision, routes, tuning. Headless and deterministic |
 | `src/sim/systems/` | one file per system group (spawn, enter/exit, foot, drive, traffic, pedestrians, physics, contacts, populate) |
-| `src/sim/map/` | the generated map (`monzone.json`), its types and lookups (heights, walls, road graph) |
+| `src/sim/map/` | the generated map (`monzone.bin`), its decoder, types and lookups (heights, walls, road graph) |
 | `src/render/` | Three.js host code: pixel pipeline, static world meshes, actor meshes, the render schedule |
 | `src/audio/` | Web Audio host code: the audio schedule, the acoustics director, the speaker and mixer, the synths, the audition page |
 | `src/hud/` | DOM HUD: location names, score, prompt, speedometer, minimap, full map (M) |
@@ -176,7 +176,7 @@ Rebuild the map from the pinned inputs with one command:
 pnpm map
 ```
 
-The build reads only `data/raw` and takes about 7.5s. Its output is deterministic: with the same inputs, `monzone.json` (about 36 MB) comes out byte-identical. Never edit `monzone.json` by hand.
+The build reads only `data/raw` and takes about 8s. Its output is deterministic: with the same inputs, `monzone.bin` (6.7 MB, gzipped) comes out byte-identical on the same OS; a Linux and a macOS build differ only in the gzip header's OS byte, and gunzip to the same bytes. Never edit `monzone.bin` by hand.
 
 The inputs in `data/raw` are:
 
@@ -192,7 +192,7 @@ Downloading the OSM data again pulls current edits, so the map changes; the file
 
 The map uses open data under these licences:
 
-- **OpenStreetMap**: map data © OpenStreetMap contributors, available under the [Open Database License (ODbL) 1.0](https://www.openstreetmap.org/copyright). `monzone.json` is a derived database and stays under the ODbL.
+- **OpenStreetMap**: map data © OpenStreetMap contributors, available under the [Open Database License (ODbL) 1.0](https://www.openstreetmap.org/copyright). `monzone.bin` is a derived database and stays under the ODbL.
 - **Regione Toscana**: buildings, road surfaces, elevation and land cover, “Fonte dei dati: Regione Toscana – Rilievi LIDAR”, the Carta Tecnica Regionale 1:2000 and the Uso e copertura del suolo 2019, under [Creative Commons Attribution 4.0](https://creativecommons.org/licenses/by/4.0/), and the DTM 10x10 metri, under [Creative Commons Attribution 3.0 Italia](https://creativecommons.org/licenses/by/3.0/it/), from the [Geoscopio cartoteca](https://www502.regione.toscana.it/geoscopio/cartoteca.html).
 
 The game shows these credits on the title card and in the HUD.
@@ -205,7 +205,7 @@ The `docs/` folder explains how the game works:
 
 - [docs/architecture.md](docs/architecture.md): simulation and host, schedules, state, input, rendering, audio, HUD and checks
 - [docs/audio.md](docs/audio.md): how the game sounds and why: data flow, the acoustics, every sound, the calibration, the audition page and tests
-- [docs/map.md](docs/map.md): the map pipeline, the JSON format and the data’s limits
+- [docs/map.md](docs/map.md): the map pipeline, the file format and the data’s limits
 - [docs/gameplay.md](docs/gameplay.md): on foot, vehicles, traffic, pedestrians, score and tuning
 
 [AGENTS.md](AGENTS.md) routes coding agents to [CODING_STANDARDS.md](CODING_STANDARDS.md), the workflow every change follows, and to the checks for each part of the game in [docs/standards/](docs/standards/).

@@ -1,40 +1,53 @@
-// Encoders for the packed sections of monzone.json; the format and the decoders are in
-// src/sim/map/packed.ts. Every value must fit its integer type, or the build throws.
+// Encoder of monzone.bin (before gzip); the format and the decoder (`decodeMap`) are in
+// src/sim/map/packed.ts. Every value must fit its section, or the build throws.
+import type { MonzoneMap, MonzoneMapJson } from "../sim/map/index.ts"
 import { packOrigin, treeOrigin } from "../sim/map/packed.ts"
 
 type Corner = { readonly minX: number; readonly minY: number }
 
-const RANGE = { int16: [-32768, 32767], uint16: [0, 65535], uint32: [0, 2 ** 32 - 1] } as const
-
-/** Little-endian base64 of `values`, each checked against `type`. */
-const base64 = (values: ArrayLike<number>, type: keyof typeof RANGE, what: string): string => {
-  const [lo, hi] = RANGE[type], size = type === "uint32" ? 4 : 2
-  const buf = Buffer.alloc(values.length * size)
-  for (let k = 0; k < values.length; k++) {
-    const v = values[k]!
-    if (!Number.isInteger(v) || v < lo || v > hi) throw new Error(`${what}: ${v} at ${k} does not fit ${type}`)
-    if (type === "int16") buf.writeInt16LE(v, 2 * k)
-    else if (type === "uint16") buf.writeUInt16LE(v, 2 * k)
-    else buf.writeUInt32LE(v, 4 * k)
+/** `values` as `size` byte planes of zigzag deltas from the value `stride` back, each an int32 whose delta fits. */
+const pack = (values: ArrayLike<number>, size: 2 | 4, stride: number, what: string): Buffer => {
+  const n = values.length, out = Buffer.alloc(n * size)
+  for (let k = 0; k < n; k++) {
+    const v = values[k]!, d = v - (k >= stride ? values[k - stride]! : 0), z = d < 0 ? -2 * d - 1 : 2 * d
+    if (!Number.isInteger(v) || v < -(2 ** 31) || v >= 2 ** 31 || z >= 2 ** (8 * size)) throw new Error(`${what}: ${v} at ${k} does not fit`)
+    for (let p = 0; p < size; p++) out[p * n + k] = Math.floor(z / 256 ** p) % 256
   }
-  return buf.toString("base64")
+  return out
 }
 
-/** Integer decimetres, rows of `cols` values each delta-coded from its first. */
-export const packRows = (dm: ArrayLike<number>, cols: number): string =>
-  base64(Array.from(dm, (v, k) => (k % cols === 0 ? v : v - dm[k - 1]!)), "int16", "heightmap")
+/** Integer decimetres (int16: the game keeps them in an `Int16Array`), rows of `cols` values each delta-coded from its first. */
+const packRows = (dm: ArrayLike<number>, cols: number): Buffer =>
+  pack(Array.from(dm, (v, k) => {
+    if (v < -32768 || v > 32767) throw new Error(`heightmap: ${v} at ${k} does not fit int16`)
+    return k % cols === 0 ? v : v - dm[k - 1]!
+  }), 2, cols, "heightmap")
 
 /** Wall segments (ax, ay, bx, by) as decimetres from `packOrigin(bounds)`. */
-export const packWalls = (flat: ArrayLike<number>, bounds: Corner, what: string): string => {
+const packWalls = (flat: ArrayLike<number>, bounds: Corner, what: string): Buffer => {
   const o = packOrigin(bounds)
-  return base64(Array.from(flat, (v, k) => Math.round(v * 10) - (k % 2 === 0 ? o.x : o.y)), "uint32", what)
+  return pack(Array.from(flat, (v, k) => Math.round(v * 10) - (k % 2 === 0 ? o.x : o.y)), 4, 2, what)
 }
 
 /** Trees (x, y, scale) on whole metres: metres from `treeOrigin(bounds)`, the scale in hundredths. */
-export const packTrees = (flat: ArrayLike<number>, bounds: Corner): string => {
+const packTrees = (flat: ArrayLike<number>, bounds: Corner): Buffer => {
   const o = treeOrigin(bounds)
-  return base64(Array.from(flat, (v, k) => {
+  return pack(Array.from(flat, (v, k) => {
     const c = k % 3
     return c === 2 ? Math.round(v * 100) : v - (c === 0 ? o.x : o.y)
-  }), "uint16", "trees")
+  }), 2, 3, "trees")
+}
+
+/** The gunzipped map file `decodeMap` reads back into `map`, and the bytes of each of its parts. */
+export const packMap = (map: MonzoneMap): { readonly file: Buffer; readonly sizes: Readonly<Record<string, number>> } => {
+  const { heightmap: { data, ...heightmap }, walls, trees, bounds } = map
+  const json: MonzoneMapJson = { ...map, heightmap, walls: { walk: walls.walk.length / 4, drive: walls.drive.length / 4 }, trees: trees.length / 3 }
+  const parts = { // file order
+    json: Buffer.from(`${JSON.stringify(json)}\n`),
+    heightmap: packRows(data, heightmap.cols),
+    walk: packWalls(walls.walk, bounds, "walk walls"),
+    drive: packWalls(walls.drive, bounds, "drive walls"),
+    trees: packTrees(trees, bounds)
+  }
+  return { file: Buffer.concat(Object.values(parts)), sizes: Object.fromEntries(Object.entries(parts).map(([part, b]) => [part, b.length])) }
 }
