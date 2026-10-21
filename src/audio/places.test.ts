@@ -9,6 +9,8 @@ import { ambienceAt, bells, birdSpot, dogsNear, echoesAt, forestAlong, streetAt,
 /** A small deterministic random source, so the checks never flake. */
 const seeded = (seed: number) => () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 2 ** 32)
 const FOREST = { x: 500, y: -400 }, MEADOW = { x: -329, y: 1078 }, GRAGNOLA = { x: -1751.2, y: 3360.4 }, EQUI = { x: 1804.9, y: 721 }
+/** Monzone's street where the game starts, in sight of slopes steeper than 35° but not rock. */
+const SPAWN = { x: -412.6, y: 437.8 }
 
 test("surfaces: road carriageways by their OSM surface, the forest floor, a meadow", () => {
   // Midway along the longest segment of the first road of each surface, away from any junction.
@@ -111,14 +113,15 @@ test("streets: Gragnola's centre is enclosed, a meadow is open; the forest lines
   assert.equal(forestAlong(MEADOW.x, MEADOW.y, MEADOW.x + 40, MEADOW.y), 0)
 })
 
-test("echoes at Equi Terme come off the slopes around it, finite and in range; none on the open meadow", () => {
+test("echoes at Equi Terme come off the rock faces around it, finite and in range, 10 dB lost on the rock; none on the open meadow or off slopes short of rock", () => {
   const echoes = echoesAt(EQUI.x, EQUI.y)
   assert.ok(echoes.length >= 1 && echoes.length <= 2)
   for (const { delay, loss, pan } of echoes) {
     assert.ok(delay >= 80 / SPEED_OF_SOUND && delay <= 800 / SPEED_OF_SOUND, `${delay} s`)
-    assert.ok(Number.isFinite(loss) && loss > 40 && Math.abs(pan) <= 0.85)
+    assert.ok(Number.isFinite(loss) && loss >= 20 * Math.log10(SPEED_OF_SOUND * delay) + 10 && Math.abs(pan) <= 0.85, `${loss} dB`)
   }
   assert.deepEqual(echoesAt(MEADOW.x, MEADOW.y), [])
+  assert.deepEqual(echoesAt(SPAWN.x, SPAWN.y), [])
 })
 
 test("one bell per settlement, lower in taller towers", () => {

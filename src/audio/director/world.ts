@@ -2,7 +2,7 @@
  * The valley around the listener: the wind and cricket beds, running water, birds in the trees,
  * farm dogs, and the church bells striking the hours from the village towers within earshot.
  * Rivers and the wind raise the masking floor every other sound is heard against; the streets
- * around the listener set the reverb room.
+ * around the listener set the reverb send.
  *
  * @module audio/director/world
  */
@@ -14,7 +14,7 @@ import { cricketsQuiet } from "../synth/nature.ts"
 import type { OneShot } from "../types.ts"
 import type { Frame } from "./frame.ts"
 import type { Ears, Hearing } from "./hearing.ts"
-import { BEDS, HEIGHT, LEVELS, REVERB, TOWERS, WATER_R_MIN, windDb } from "./levels.ts"
+import { BEDS, HEIGHT, LEVELS, TOWERS, WATER_R_MIN, windDb } from "./levels.ts"
 import { RUN } from "./people.ts"
 
 /** The local wall-clock time the bells follow. */
@@ -55,12 +55,13 @@ export const makeWorld = (clock: () => WallClock) => {
 
   /**
    * The bed of `db` dB(A) at the ears, whose voice plays `under` dB under its nominal by itself: everywhere at once,
-   * through the cabin when inside. Its level is compressed like any source's, so the gain gives back what the voice took.
+   * through the cabin when inside, and diffuse already (no reverb send). Its level is compressed like any source's, so
+   * the gain gives back what the voice took.
    */
   const bed = (frame: Frame, db: number, under: number): Hearing => {
     const cabin = frame.inside === undefined ? undefined : CABIN[frame.inside]
     return {
-      placement: { gain: mixGain(db, cabin?.loss ?? 0) * dbToGain(under), pan: 0, cutoff: cabin?.cutoff ?? 20000, cents: 0, wet: REVERB.bed },
+      placement: { gain: mixGain(db, cabin?.loss ?? 0) * dbToGain(under), pan: 0, cutoff: cabin?.cutoff ?? 20000, cents: 0, wet: 0 },
       level: db - (cabin?.loss ?? 0),
       audible: true,
       r: 0,
@@ -87,11 +88,11 @@ export const makeWorld = (clock: () => WallClock) => {
       const { ears, now, dt, random } = frame
       const wind = windDb(strength)
       frame.hold("wind", { kind: "wind", strength, forest }, bed(frame, wind, BEDS.wind - wind))
-      // Tree crickets sing in the meadows, not in the villages.
+      // Tree crickets sing in the meadows, not in the villages: a bed, with no reverb send.
       const density = Math.max(0, open - built)
       if (density > 0) {
         const crickets = frame.path(undefined, ears, { db: BEDS.crickets, rMin: 1 }, { quiet: cricketsQuiet(density) })
-        frame.hold("crickets", { kind: "crickets", density }, { ...crickets, placement: { ...crickets.placement, wet: REVERB.bed } })
+        frame.hold("crickets", { kind: "crickets", density }, { ...crickets, placement: { ...crickets.placement, wet: 0 } })
       }
 
       // The level looked up holds the distance cue: it passes as the source level back to 1 m, the spreading as the loss

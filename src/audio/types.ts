@@ -219,12 +219,6 @@ export type Voices = { readonly [K in Continuous["kind"]]: VoiceFactory<Extract<
 /** A synth for every one-shot kind. */
 export type Shots = { readonly [K in OneShot["kind"]]: Shot<Extract<OneShot, { readonly kind: K }>> }
 
-/** The acoustic character around the listener, for the shared reverb. */
-export interface Room {
-  /** 0: open valley (long, faint tail) … 1: a narrow stone street (short, dense, louder). */
-  readonly street: number
-}
-
 /** What the director plays through. The Web Audio implementation is `makeSpeaker`; tests record calls. */
 export interface Speaker {
   /** Context time in seconds: the clock one-shots are scheduled on. */
@@ -233,6 +227,6 @@ export interface Speaker {
   readonly hold: (key: string, sound: Continuous, at: Placement) => void
   /** Plays `sound` `delay` seconds from now. */
   readonly play: (sound: OneShot, at: Placement, delay: number) => void
-  /** Ends the frame: every voice not held since the last flush fades out; the reverb follows `room`. */
-  readonly flush: (room: Room) => void
+  /** Ends the frame: every voice not held since the last flush fades out. */
+  readonly flush: () => void
 }

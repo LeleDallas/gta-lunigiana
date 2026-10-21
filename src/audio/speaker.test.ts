@@ -21,7 +21,7 @@ test("the speaker stays silent and inert until a trusted gesture", (t) => {
   const at = { gain: 1, pan: 0, cutoff: 20000, cents: 0, wet: 0 }
   speaker.hold("car:1", { kind: "siren" }, at)
   speaker.play({ kind: "bark", big: true }, at, 0)
-  speaker.flush({ street: 0 })
+  speaker.flush()
   speaker.pause(true)
   assert.equal(speaker.context(), undefined)
   assert.equal(speaker.now(), 0)

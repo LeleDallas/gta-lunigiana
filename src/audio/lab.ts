@@ -15,7 +15,7 @@ import { VEHICLE_MODELS, type VehicleModel } from "../sim/vehicles.ts"
 import { AMBIENT_DB, CABIN, type Cabin, dbToGain, EAR_HEIGHT, gainToDb } from "./acoustics.ts"
 import { makeKit } from "./buffers.ts"
 import { hear, type Hearing } from "./director/hearing.ts"
-import { BEDS, ENGINE, type Level, LEVELS, OWN_ENGINE_DB, REVERB, WATER_R_MIN, windDb } from "./director/levels.ts"
+import { BEDS, ENGINE, type Level, LEVELS, OWN_ENGINE_DB, WATER_R_MIN, windDb } from "./director/levels.ts"
 import { type Emitter, makeEmitter } from "./emitter.ts"
 import { measure } from "./measure.ts"
 import { makeMixer, type Mixer } from "./mixer.ts"
@@ -39,9 +39,9 @@ const { right: SCREEN_RIGHT, up: SCREEN_UP } = screenAxes(0)
 const WATER_DB = { fountain: 65, stream: 61, river: 76 } as const satisfies Record<WaterBody, number>
 
 /**
- * A source's calibration; `wet` marks one heard at the ears, with the director's fixed reverb send; `under`, a bed whose
- * voice plays that many dB under its nominal by itself, which its gain gives back (world.ts); `quiet`, a crash that plays that
- * many dB under its nominal, which masking counts (vehicles.ts).
+ * A source's calibration; `wet` marks one heard at the ears, with the director's reverb send for it (none); `under`, a bed
+ * whose voice plays that many dB under its nominal by itself, which its gain gives back (world.ts); `quiet`, a crash that
+ * plays that many dB under its nominal, which masking counts (vehicles.ts).
  */
 type Calibration = Level & { readonly wet?: number; readonly under?: number; readonly quiet?: number }
 
@@ -50,8 +50,8 @@ const sourceOf = (sound: Sound): Calibration =>
   sound.kind === "engine" ? (sound.inside ? { db: OWN_ENGINE_DB, rMin: 1, wet: 0 } : ENGINE[sound.model])
   : sound.kind === "crash" ? { ...LEVELS.crash, quiet: crashQuiet(sound) }
   : sound.kind === "water" ? { db: WATER_DB[sound.body], rMin: WATER_R_MIN }
-  : sound.kind === "wind" ? { db: windDb(sound.strength), rMin: 1, wet: REVERB.bed, under: BEDS.wind - windDb(sound.strength) }
-  : sound.kind === "crickets" ? { db: BEDS.crickets, rMin: 1, wet: REVERB.bed }
+  : sound.kind === "wind" ? { db: windDb(sound.strength), rMin: 1, wet: 0, under: BEDS.wind - windDb(sound.strength) }
+  : sound.kind === "crickets" ? { db: BEDS.crickets, rMin: 1, wet: 0 }
   : LEVELS[sound.kind]
 
 /** The listener's side of the page's controls: the source `r` m away towards `side` (−1 screen-left … 1 screen-right), their cabin and street. */
@@ -411,7 +411,7 @@ const build = (): void => {
   })
 }
 
-/** Every frame: the readouts, the held voices' params and placements, the room, the meter. */
+/** Every frame: the readouts, the held voices' params and placements, the meter. */
 const frame = (): void => {
   // First, so a synth that throws costs one frame, not the loop.
   requestAnimationFrame(frame)
@@ -430,7 +430,6 @@ const frame = (): void => {
       held.emitter.place(heard(sound, at).hearing.placement, now)
       held.voice.update(sound, now)
     }
-    live.mixer.room({ street: at.street }, now)
     const level = live.mixer.level()
     byId<HTMLMeterElement>("meter").value = level
     byId("meter-shown").textContent = `${level.toFixed(1)} dBFS`
