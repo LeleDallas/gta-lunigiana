@@ -209,7 +209,7 @@ Sounds of the player's own car are heard from inside it:
 
 - the engine has its own fixed level (68 dB(A), centred, no Doppler), and its voice switches to
   the cabin tone behind the firewall (a 2.5 kHz lowpass and +4 dB at 120 Hz);
-- the horn and siren pass half the cabin (7.5 dB, a 5.3 kHz lowpass);
+- the horn (in the grille) and the siren (on the roof) pass the whole cabin, like any outside sound;
 - its crashes, scrapes, doors, starter and the thud of a person it hits pass none;
 - the tyres, the truck's beeper and the beds pass the whole cabin.
 
@@ -338,9 +338,10 @@ rings an 800 Hz prime; taller towers ring lower, down to 400 Hz at 30 m.
   Every synth peaks near 0.5 (−6 dBFS) at the loudest params it is meant for and scales itself
   with its physical params: an engine idles about 20 dB under full load at the redline, tyres
   follow the rolling law, a crash its speed. The level in the table is the one at that peak.
-- `BEDS`: the wind and cricket beds at the ears at full strength and density. `WALK_DB`, `windDb`
-  and `cricketsQuiet`: how far the step, wind and crickets synths play under that, so masking
-  counts the sound actually played.
+- `BEDS`: the wind and cricket beds at the ears at full strength and density. `windDb` (here),
+  `cricketsQuiet` (`synth/nature.ts`) and `WALK_DB` (`synth/steps.ts`): how far the wind,
+  crickets and walking-step synths play under that, so masking counts the sound actually played.
+  The last two live beside the synths they describe, derived from the same numbers.
 - `HEIGHT`, `WATER_R_MIN`: source heights and the water's 1 m clamp.
 - `CAPS`, `KEEP_DB`, `TOWERS`: the voice caps and their hysteresis.
 - `DELAY_FROM` (40 m), `REVERB`, `ECHO` and `echoes(sound)`: delay, reverb sends and echoes.
@@ -357,15 +358,17 @@ A number in the table moves one kind against the others and nothing else.
 
 The beds and water are known by their level at the ears, so that level is what is compressed:
 
-- the wind at its strength, 60 + 40·log10(strength) dB(A). Its voice already plays that far under
-  its nominal by itself, so the bed's gain gives back what the compression leaves of it;
+- the wind at its strength, 60 + 40·log10(strength) dB(A). Its voice (body and leaves alike follow
+  strength²) already plays that far under its nominal by itself, so the bed's gain gives back what the compression leaves of it;
 - water at the line-source level `places` finds at the ears, with only the obstacles and the cabin
   as losses, so a river 200 m away is not compressed as if it were a louder source 1 m away.
 
-The crickets' density moves their level by under 10 dB and is played as is.
+The crickets' density moves their level by up to about 12 dB (fewer singers in a quieter chorus)
+and is played as is.
 
 What comes out, on the game's meter (`gta.audio.level()`, the master's RMS over 43 ms of the mono
-downmix, which reads a centred voice 3 dB under either channel):
+downmix (L + R) / 2, which reads a centred voice at its per-channel level, 3 dB under the voice
+before the pan, and a panned one lower):
 
 - on foot in Monzone's street the valley sits near −40 dBFS (the wind bed at the 35 dB(A)
   background, the Lucido behind the houses), a meadow near −36, a windy ridge near −31;
@@ -394,7 +397,9 @@ On foot H does nothing. The title card lists it.
 - **Autoplay.** Browsers allow audio only after a user gesture, so the AudioContext is made on the
   first trusted `keydown`, `pointerdown` or `touchend` with user activation: the same first key
   that dismisses the title card (Esc does not count). Until then nothing plays and no sound time
-  passes. A later gesture resumes a context the browser has left suspended or interrupted (Safari,
+  passes. The gesture's own task builds only the context, the noise kit and the mixer; each
+  one-shot then pre-renders its buffers in a task of its own, so the first key costs no long
+  freeze. A later gesture resumes a context the browser has left suspended or interrupted (Safari,
   Firefox).
 - **Pause.** While the full map (M) is open, `main.ts` calls `speaker.pause(true)` every frame,
   which suspends the context, and skips the frame, so the audio schedule does not run either.
@@ -428,7 +433,8 @@ own emitter and mixer:
 The page places every sound with the director's own facts: the levels from `levels.ts` through
 `hear` in `hearing.ts`, the source at ear height over open, flat ground with nothing in the way, no
 Doppler, masked against 35 dB(A), and the wind bed compressed at its strength as `world.ts` does.
-Only water is a stand-in: a point source at its bank level + 6 dB, where the game takes each body's
+Only water is a stand-in: a point source, the river (the Lucido) and the stream (a 4 m one) at their
+2 m bank level + 6 dB and the fountain at its 1 m level, where the game takes each body's
 line-source level at the listener.
 
 ## Tests
@@ -459,18 +465,16 @@ functions (`synth/world.test.ts` imports them to check).
 3. The Ritmo monitor (backslash) lists the audio schedule beside `update` and `render`.
 
 Measured in headless Chrome (`?seed=3`, keys sent over CDP, `gta.audio.level()` every 100 ms):
-standing at the spawn −40 dBFS, walking there with step peaks up to −20, 15 m from the Lucido in
-the clear −25, in the Carabinieri Giulia idling −30 and with the siren on −10 (peaks −2), in a
-stolen Panda idling −29, at 18–22 m/s −14 and honking −13.5 (peaks −2); no console errors and no
+standing at the spawn −40 to −42 dBFS, walking there with step peaks up to −20, 15 m from the
+Lucido in the clear −25, in the Carabinieri Giulia idling −30 and driving with the siren on −10.5
+(peaks −3.5), in a stolen Panda idling −29, at 18–22 m/s −14 and honking −13 (peaks −3.5); no console errors and no
 non-finite placement or param. On the audition page "Render all" gives 59 rows, none flagged.
 
 ## Known limits and tuning
 
-- **The loudest near sounds lean on the limiter.** The player's own horn and siren pass only half
-  the cabin (`vehicles.ts`) and play some 18 dB over gain 1, so the limiter takes up to 11 dB while
-  they sound and everything else dips with them. A horn mounted in the grille passes the whole
-  cabin; that share (1, with its 1.4 kHz lowpass) would bring the horn to about −4 dBFS with about
-  4 dB of limiting.
+- **The loudest near sounds touch the limiter.** The player's own horn and siren pass the whole
+  cabin, yet still play over gain 1, so the limiter takes a few dB while they sound (peaks near
+  −3.5 dBFS) and the rest of the mix dips that much with them.
 - **Beds against traffic.** Compressing the beds at their level lifts a quiet valley more than a
   car 10 m away (whose 20 dB of spreading stays physical): a car cruising past 10 m away stands
   some 10 dB over a village street's bed on the meter and 6 dB over a meadow's, not the physical

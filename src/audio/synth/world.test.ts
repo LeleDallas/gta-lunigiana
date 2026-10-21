@@ -3,7 +3,7 @@ import { test } from "node:test"
 
 import { SPRINT_SPEED, WALK_SPEED } from "../../sim/tuning.ts"
 import { unit } from "./graph.ts"
-import { echemeRate } from "./nature.ts"
+import { cricketsQuiet, echemeRate } from "./nature.ts"
 import { stepRate } from "./steps.ts"
 import { WORLD_SHOTS, WORLD_VOICES } from "./world.ts"
 
@@ -21,6 +21,12 @@ test("footsteps fall twice a second at a walk and three times at a sprint", () =
 
 test("synth params clamp to 0…1, NaN to silence rather than a throwing AudioParam", () => {
   assert.deepEqual([-1, 0.3, 2, Number.NaN].map(unit), [0, 0.3, 1, 0])
+})
+
+test("the crickets' masking law follows the voice: 0 dB under at full density, about 12 dB under at the sparsest", () => {
+  assert.equal(cricketsQuiet(1), 0)
+  assert.ok(Math.abs(cricketsQuiet(0.5) - 4.9) < 0.1 && Math.abs(cricketsQuiet(0.1) - 11.7) < 0.1, `${cricketsQuiet(0.5)} ${cricketsQuiet(0.1)}`)
+  assert.ok(cricketsQuiet(0.01) < 12.2)
 })
 
 test("tree crickets chirp once a second at 22 °C, slower in the October afternoon, not at all in the cold", () => {

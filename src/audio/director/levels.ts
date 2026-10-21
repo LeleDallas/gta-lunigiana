@@ -52,19 +52,14 @@ export const LEVELS = {
   bell: { db: 118, rMin: 5 }
 } as const satisfies Record<Exclude<Continuous["kind"] | OneShot["kind"], "engine" | "water" | "wind" | "crickets">, Level>
 
-/** The step synth plays a walking step this many dB under a running one: it counts for masking (the synth applies it to the sound). */
-export const WALK_DB = 4
-
 /** Water's level comes from places (the line source at the listener); its size is the 1 m that level is clamped at. */
 export const WATER_R_MIN = 1
 
 /** The beds, dB(A) at the listener at full strength / density (the voices scale themselves below that). */
 export const BEDS = { wind: 60, crickets: 42 } as const
 
-/** The wind voice's body follows strength², so its level falls 40 dB per decade of strength. */
+/** The wind voice (body and leaves) follows strength², so its level falls 40 dB per decade of strength. */
 export const windDb = (strength: number): number => BEDS.wind + 40 * Math.log10(Math.max(0.05, strength))
-/** The crickets fall about 20 dB per decade of density (fewer singers, a quieter chorus). */
-export const cricketsQuiet = (density: number): number => -20 * Math.log10(Math.max(0.05, density))
 
 /** Source heights above their ground, m: a vehicle's body, a person (feet to mouth), and water lifted out of its carved bed. */
 export const HEIGHT = { vehicle: 0.8, person: 1, water: 2 } as const

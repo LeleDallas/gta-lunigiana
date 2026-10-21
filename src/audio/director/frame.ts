@@ -10,15 +10,15 @@
 import { groundY, yOf } from "../../render/ground.ts"
 import { heightAt } from "../../sim/map/index.ts"
 import type { VehicleModel } from "../../sim/vehicles.ts"
-import { airCutoff, audibility, type Cabin, CABIN, dbToGain, SPEED_OF_SOUND, spreading } from "../acoustics.ts"
+import { airCutoff, audibility, CABIN, dbToGain, SPEED_OF_SOUND, spreading } from "../acoustics.ts"
 import type { Echo } from "../places.ts"
 import type { Continuous, Heard, OneShot, Placement, Speaker } from "../types.ts"
 import { type Ears, hear, type Hearing, SILENT, type Source } from "./hearing.ts"
 import { CAPS, ECHO, echoes, KEEP_DB, LEVELS, type Level } from "./levels.ts"
 import type { Between, Occluder } from "./occluder.ts"
 
-/** How a path is heard: Doppler-shifted (vehicles), `share` of the listener's cabin in the way (1; 0.5 for their own horn), `quiet` dB under the nominal peak. */
-interface Way { readonly doppler?: boolean; readonly share?: number; readonly quiet?: number }
+/** How a path is heard: Doppler-shifted (vehicles), through the listener's `cabin` (unless false: their own car's crash, scrape, doors), `quiet` dB under the nominal peak. */
+interface Way { readonly doppler?: boolean; readonly cabin?: boolean; readonly quiet?: number }
 
 /** What the director's parts see and do this frame. */
 export interface Frame {
@@ -29,9 +29,8 @@ export interface Frame {
   readonly ears: Ears
   /** The model of the vehicle the listener sits in. */
   readonly inside: VehicleModel | undefined
-  /** The masking floor at the ears, dB(A), and how enclosed they are (0…1). */
+  /** The masking floor at the ears, dB(A). */
   readonly ambient: number
-  readonly street: number
   readonly random: () => number
   /** How `source` reaches the ears; `key` caches its obstacles (none for sounds of the listener's own car or body). */
   readonly path: (key: string | undefined, source: Source, level: Level, way?: Way) => Hearing
@@ -72,9 +71,6 @@ const CLEAR: Between = { delta: 0, forest: 0 }
 /** A placement Web Audio accepts: a non-finite one would mute its kind for the session. */
 const finite = (p: Placement): boolean => Number.isFinite(p.gain + p.pan + p.cutoff + p.cents + p.wet)
 
-/** `share` of `cabin`'s insertion loss, its lowpass opening up log-wise as the share falls. */
-const scaled = (cabin: Cabin, share: number): Cabin => (share === 1 ? cabin : { loss: cabin.loss * share, cutoff: 20000 * (cabin.cutoff / 20000) ** share })
-
 /** This frame's view and requests. */
 export const makeFrame = (setup: Setup): Frame => {
   const { ears, inside, ambient, street, speaker, occluder, now } = setup
@@ -105,11 +101,10 @@ export const makeFrame = (setup: Setup): Frame => {
     ears,
     inside,
     ambient,
-    street,
     random: setup.random,
     path: (key, source, level, way = {}) => {
       if (!setup.live) return SILENT
-      const through = cabin === undefined ? undefined : scaled(cabin, way.share ?? 1)
+      const through = way.cabin === false ? undefined : cabin
       // Obstacles only take away: a source masked even in the clear is not worth measuring.
       const r = Math.hypot(source.x - ears.x, source.y - ears.y, source.z - ears.z)
       if (audibility(level.db - (way.quiet ?? 0) - spreading(r, level.rMin) - (through?.loss ?? 0), ambient) === 0) return SILENT

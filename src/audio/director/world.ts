@@ -10,10 +10,12 @@ import { hash01 } from "../../tools/geometry.ts"
 import { AMBIENT_DB, audibility, CABIN, dbToGain, EAR_HEIGHT, mixGain, spreading, sumDb } from "../acoustics.ts"
 import { smoothstep } from "../buffers.ts"
 import { ambienceAt, type Bell, bells, birdSpot, type Dog, dogsNear, streetAt, waterNear, type WaterHeard } from "../places.ts"
+import { cricketsQuiet } from "../synth/nature.ts"
 import type { OneShot } from "../types.ts"
 import type { Frame } from "./frame.ts"
 import type { Ears, Hearing } from "./hearing.ts"
-import { BEDS, cricketsQuiet, HEIGHT, LEVELS, REVERB, TOWERS, WATER_R_MIN, windDb } from "./levels.ts"
+import { BEDS, HEIGHT, LEVELS, REVERB, TOWERS, WATER_R_MIN, windDb } from "./levels.ts"
+import { RUN } from "./people.ts"
 
 /** The local wall-clock time the bells follow. */
 export interface WallClock { readonly hour: number; readonly minute: number; readonly second: number }
@@ -30,7 +32,7 @@ const STILL = 10 ** ((AMBIENT_DB - BEDS.wind) / 40)
 const BIRDS = { forest: 0.3, houses: 0.05 } as const, GARDENS = 0.05
 const SPECIES = [["robin", 0.35], ["tit", 0.3], ["blackbird", 0.2], ["chaffinch", 0.15]] as const satisfies ReadonlyArray<readonly [Extract<OneShot, { readonly kind: "bird" }>["species"], number]>
 /** A dog barks every `BARK_MEAN` s on average, `EXCITED`× as often while the listener runs (or drives) within `EXCITED_NEAR` m. */
-const BARK_MEAN = 45, EXCITED = 4, EXCITED_NEAR = 30, RUNNING = 3.5
+const BARK_MEAN = 45, EXCITED = 4, EXCITED_NEAR = 30
 /** Hour strokes are this far apart (s); each tower starts up to `TOWER_LAG` s late (its own, stable); a stroke is scheduled `STROKE_AHEAD` s early. */
 const STROKE_GAP = 2.5, TOWER_LAG = 6, STROKE_AHEAD = 0.1
 
@@ -111,7 +113,7 @@ export const makeWorld = (clock: () => WallClock) => {
         }
       }
 
-      const listener = frame.heard.listener, busy = listener.car !== undefined || Math.hypot(listener.vx, listener.vy) > RUNNING
+      const listener = frame.heard.listener, busy = listener.car !== undefined || Math.hypot(listener.vx, listener.vy) > RUN
       for (const dog of near?.dogs ?? []) {
         const excited = busy && Math.hypot(dog.x - ears.x, dog.y - ears.y) < EXCITED_NEAR
         if (fires(random, (excited ? EXCITED : 1) / BARK_MEAN, dt)) frame.play({ kind: "bark", big: dog.big }, frame.path(dog.key, dog, LEVELS.bark))

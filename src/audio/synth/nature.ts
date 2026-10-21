@@ -46,7 +46,8 @@ export const wind: VoiceFactory<Extract<Continuous, { readonly kind: "wind" }>> 
       band.frequency.setTargetAtTime(250 + 400 * w, now, tau)
       bandGust.gain.setTargetAtTime(150 * w, now, tau)
       whistle.gain.setTargetAtTime(8 * smoothstep(0.4, 1, w), now, tau)
-      leaves.gain.setTargetAtTime(0.35 * unit(sound.forest) * (0.3 + w), now, tau)
+      // Like the body, the leaves follow strength², so the bed's level law (`windDb`) holds for the whole voice.
+      leaves.gain.setTargetAtTime(0.455 * unit(sound.forest) * w2, now, tau)
       // The first update lands at once (the outlet fades the voice in); later ones glide.
       tau = WIND_TAU
     },
@@ -68,6 +69,15 @@ const SINGERS = 6
 /** How far ahead echemes are scheduled, s. */
 const LOOKAHEAD = 0.3
 
+/** The chorus gain at `density`: fuller as more sing. */
+const chorusAt = (density: number): number => 0.6 + 0.4 * density
+
+/** How far (dB) the voice plays under full density at `density`: fewer singers (adding incoherently) in a quieter chorus. */
+export const cricketsQuiet = (density: number): number => {
+  const d = unit(density)
+  return 10 * Math.log10(SINGERS / Math.max(1, Math.ceil(d * SINGERS))) - 20 * Math.log10(chorusAt(d))
+}
+
 /** Tree crickets around the listener: `density` 0…1 sets how many sing and how loud. */
 export const crickets: VoiceFactory<Extract<Continuous, { readonly kind: "crickets" }>> = ({ ctx, out }) => {
   const level = outlet(ctx, out), chorus = new GainNode(ctx, { gain: 0 })
@@ -86,7 +96,7 @@ export const crickets: VoiceFactory<Extract<Continuous, { readonly kind: "cricke
   return {
     update: (sound, now) => {
       const density = unit(sound.density)
-      chorus.gain.setTargetAtTime(0.6 + 0.4 * density, now, 0.5)
+      chorus.gain.setTargetAtTime(chorusAt(density), now, 0.5)
       for (const singer of singers.slice(0, Math.ceil(density * SINGERS))) {
         // A cricket that was quiet (or fell behind) starts again somewhere in its next cycle.
         if (singer.next < now) singer.next = now + Math.random() / CRICKET_RATE

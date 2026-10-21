@@ -46,9 +46,12 @@ const SLOT = 0.7
 /** Footfalls per second at `speed` m/s on foot: 2 at a walk (2.2 m/s), 3 at a sprint (5.5 m/s). */
 export const stepRate = (speed: number): number => Math.min(3.4, Math.max(1.2, 2 + (speed - 2.2) / 3.3))
 
-/** Schedules one step on `tread`: the heel, then the ball (sooner when running, which is also 4 dB louder and 20 % brighter). */
+/** A walking step plays this many dB under a running one (the director's masking counts it too). */
+export const WALK_DB = 4
+
+/** Schedules one step on `tread`: the heel, then the ball (sooner when running, which is also `WALK_DB` louder and 20 % brighter). */
 const footfall = (oc: OfflineAudioContext, kit: Kit, tread: Tread, run: boolean): void => {
-  const out = oc.destination, louder = run ? 10 ** (4 / 20) : 1, bright = run ? 1.2 : 1
+  const out = oc.destination, louder = run ? 10 ** (WALK_DB / 20) : 1, bright = run ? 1.2 : 1
   for (const [t, weight] of [[0, 1], [run ? 0.04 : 0.09, 0.6]] as const) {
     const a = weight * louder
     ping(oc, out, t, 110, tread.thump * a, 0.012)

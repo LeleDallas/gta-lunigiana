@@ -80,8 +80,11 @@ export const makeSpeaker = (host: Window, voices: Voices, shots: Shots): Speaker
     const ctx = new AudioContext()
     try {
       const kit = makeKit(ctx), mixer = makeMixer(ctx)
-      // All at once; a throw inside `prepare` rejects like a failed render.
-      for (const [kind, shot] of Object.entries(shots)) Promise.resolve().then(() => shot.prepare?.(ctx, kit)).catch((error: unknown) => fail(kind, error))
+      // Each in its own task, so building the offline graphs never stalls the gesture's frame; a throw inside
+      // `prepare` rejects like a failed render.
+      for (const [kind, shot] of Object.entries(shots)) {
+        host.setTimeout(() => void Promise.resolve().then(() => shot.prepare?.(ctx, kit)).catch((error: unknown) => fail(kind, error)), 0)
+      }
       return { ctx, kit, mixer }
     } catch (error) {
       // A context left running would hold the audio device for the rest of the session.

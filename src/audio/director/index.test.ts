@@ -3,7 +3,7 @@ import { test } from "node:test"
 
 import type { VehicleModel } from "../../sim/vehicles.ts"
 import { screenAxes } from "../../sim/view.ts"
-import { AMBIENT_DB, dbToGain, SPEED_OF_SOUND } from "../acoustics.ts"
+import { AMBIENT_DB, CABIN, dbToGain, SPEED_OF_SOUND } from "../acoustics.ts"
 import { bells } from "../places.ts"
 import { stepRate } from "../synth/steps.ts"
 import type { Continuous, Happening, Heard, HeardPerson, HeardVehicle, OneShot, Placement, Speaker } from "../types.ts"
@@ -233,9 +233,11 @@ test("in the Carabinieri car a horn press toggles the siren; in the Panda the ho
   const panda = rig()
   const horns = [false, true, true, false].map((horn) => {
     panda.hear(world(MEADOW, { vehicles: [car(8, "panda", MEADOW, { mine: true })], horn }, 8))
-    return panda.held().has("horn:8")
+    return panda.held().get("horn:8")?.at
   })
-  assert.deepEqual(horns, [false, true, true, false])
+  assert.deepEqual(horns.map((at) => at !== undefined), [false, true, true, false])
+  // The horn sits in the grille, outside the cabin: the driver hears it through the whole body.
+  assert.equal(horns[1]!.cutoff, CABIN.panda.cutoff)
 })
 
 test("bells: at 15:00 the nearby tower strikes three times 2.5 s apart, at 15:30 once, never twice in the same minute; only the loudest towers ring", () => {
@@ -272,7 +274,7 @@ test("by the Torrente Lucido at Monzone station a water voice plays; on a dry ri
   assert.ok(![...ridge.held().values()].some(({ sound }) => sound.kind === "water"))
 })
 
-test("the valley is never silent: in Monzone's sheltered street the wind blows at the rural background; the Lucido 15 m away in the clear plays near full, far louder and brighter than behind the houses", () => {
+test("the valley is never silent: in Monzone's sheltered street the wind blows at the rural background; the Lucido 15 m away in the clear plays near full, far louder and brighter than behind the houses, where it still plays (a river never masks itself)", () => {
   const street = rig()
   street.hear(world(SPAWN), 2)
   const wind = street.held().get("wind")?.sound
@@ -282,12 +284,6 @@ test("the valley is never silent: in Monzone's sheltered street the wind blows a
   const near = bank.held().get("water:Torrente Lucido")!.at, behind = street.held().get("water:Torrente Lucido")!.at
   assert.ok(near.gain > dbToGain(-6) && near.gain > behind.gain * dbToGain(15), `${near.gain} vs ${behind.gain}`)
   assert.ok(near.cutoff > 2 * behind.cutoff, `${near.cutoff} vs ${behind.cutoff} Hz`)
-})
-
-test("the Lucido behind the houses of Monzone still sounds: a river masks other sounds as loud as it is heard, never itself", () => {
-  const director = rig()
-  director.hear(world(SPAWN), 2)
-  assert.equal(director.held().has("water:Torrente Lucido"), true)
 })
 
 test("twenty running cars around: only the eight loudest, nearest engines play, and near-equals do not swap", () => {

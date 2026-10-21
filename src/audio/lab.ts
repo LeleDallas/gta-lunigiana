@@ -31,8 +31,9 @@ type Body = Extract<Continuous, { readonly kind: "water" }>["body"]
 /** The screen axes on the ground, with the view in its home seat. */
 const { right: SCREEN_RIGHT, up: SCREEN_UP } = screenAxes(0)
 
-// ponytail: water as a point source at its bank level + 6 dB; the director takes each body's line-source level at the listener from places.
-const WATER_DB = { fountain: 65, stream: 70, river: 76 } as const satisfies Record<Body, number>
+// ponytail: water as a point source: the river (the Lucido) and the stream (a 4 m one) at their 2 m bank level + 6 dB, the fountain at
+// its 1 m level; the director takes each body's line-source level at the listener from places.
+const WATER_DB = { fountain: 65, stream: 61, river: 76 } as const satisfies Record<Body, number>
 
 /** A source's calibration; `wet` marks one heard at the ears, with the director's fixed reverb send; `under`, a bed whose voice plays that many dB under its nominal by itself, which its gain gives back (world.ts). */
 type Calibration = Level & { readonly wet?: number; readonly under?: number }

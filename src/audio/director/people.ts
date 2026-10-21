@@ -9,15 +9,17 @@
 import { hash01 } from "../../tools/geometry.ts"
 import { EAR_HEIGHT } from "../acoustics.ts"
 import { surfaceAt } from "../places.ts"
-import { stepRate } from "../synth/steps.ts"
+import { stepRate, WALK_DB } from "../synth/steps.ts"
 import type { HeardPerson } from "../types.ts"
 import { type Frame, groundAt } from "./frame.ts"
-import { HEIGHT, LEVELS, WALK_DB } from "./levels.ts"
+import { HEIGHT, LEVELS } from "./levels.ts"
 
 /** A frame's move longer than this (m) is a jump, not walking. */
 const JUMP = 3
-/** Running from this speed, m/s; the cadence of slower movers is taken at this speed (shuffling). */
-const RUN = 3.5, SHUFFLE = 0.5
+/** Running from this speed, m/s (it also sets the dogs off). */
+export const RUN = 3.5
+/** The cadence of slower movers is taken at this speed, m/s (shuffling). */
+const SHUFFLE = 0.5
 /** A carjacked driver this near the listener (m) shouts at them; one voice cue per person per `CUE_GAP` s. */
 const SHOUT_NEAR = 15, CUE_GAP = 4
 /** Under this voice a fleeing pedestrian screams, else shouts. */

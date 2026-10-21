@@ -2,7 +2,8 @@
  * Every vehicle sound: engines (the listener's own from the driver's seat), tyres, horns and the
  * Carabinieri siren, the truck's reversing beeper, crashes, scrapes along walls and people hit,
  * AI honks, and the doors and starter of the listener getting in and out. Sounds of the listener's
- * own car are heard from inside it: its crash through no cabin, its horn and siren through half.
+ * own car are heard from inside it: its crash, scrape and doors through no cabin, its horn and siren
+ * (out by the grille, up on the roof) through all of it.
  *
  * @module audio/director/vehicles
  */
@@ -56,17 +57,16 @@ export const makeVehicles = () => {
       const byId = new Map(heard.vehicles.map((v) => [v.id, v]))
       // Own sounds come from the car the ears sit in: no occlusion key.
       const keyOf = (id: number) => (id === mine ? undefined : `car:${id}`)
-      const shareOf = (id: number, share: number) => (id === mine ? share : 1)
 
       // Getting in: the door, and the starter if the engine was off; getting out: the door where the listener now stands.
       if (car === undefined && mine !== undefined) {
         const v = byId.get(mine)
         if (v !== undefined) {
-          const at = sourceOf(v), door = frame.path(undefined, at, LEVELS.door, { share: 0 })
+          const at = sourceOf(v), door = frame.path(undefined, at, LEVELS.door, { cabin: false })
           frame.play({ kind: "door", model: v.model, open: true }, door)
           frame.play({ kind: "door", model: v.model, open: false }, door, DOOR_CLOSES)
           if (!running.has(mine)) {
-            frame.play({ kind: "ignition", model: v.model }, frame.path(undefined, at, LEVELS.ignition, { share: 0 }))
+            frame.play({ kind: "ignition", model: v.model }, frame.path(undefined, at, LEVELS.ignition, { cabin: false }))
             cranking.set(mine, now + CRANK[v.model].seconds)
           }
         }
@@ -90,7 +90,7 @@ export const makeVehicles = () => {
         if (hit.speed < HARDER * last) continue
         for (const id of [hit.car, hit.other]) if (id !== undefined) crashes.set(id, { at: now, speed: hit.speed })
         const own = hit.car === mine || hit.other === mine
-        const at = frame.path(own ? undefined : `car:${hit.car}`, { x: hit.x, y: hit.y, z: groundAt(hit.x, hit.y) + HEIGHT.vehicle }, LEVELS.crash, { share: own ? 0 : 1 })
+        const at = frame.path(own ? undefined : `car:${hit.car}`, { x: hit.x, y: hit.y, z: groundAt(hit.x, hit.y) + HEIGHT.vehicle }, LEVELS.crash, { cabin: !own })
         frame.play({ kind: "crash", speed: hit.speed, mass: hit.mass }, at)
       }
       for (const h of heard.happenings) {
@@ -98,7 +98,7 @@ export const makeVehicles = () => {
           frame.play({ kind: "honk", model: h.model }, frame.path(`car:${h.car}`, { x: h.x, y: h.y, z: groundAt(h.x, h.y) + HEIGHT.vehicle }, LEVELS.honk))
         } else if (h.hit === "person") {
           const who = h.other ?? h.car, key = `person:${who}`, at = { x: h.x, y: h.y, z: groundAt(h.x, h.y) + HEIGHT.person }
-          frame.play({ kind: "thud", speed: h.speed }, frame.path(key, at, LEVELS.thud, { share: h.car === mine ? 0 : 1 }))
+          frame.play({ kind: "thud", speed: h.speed }, frame.path(key, at, LEVELS.thud, { cabin: h.car !== mine }))
           frame.play({ kind: "groan", voice: hash01(who) }, frame.path(key, at, LEVELS.groan), GROAN_AFTER)
         }
       }
@@ -126,11 +126,11 @@ export const makeVehicles = () => {
           frame.hold(`tyres:${v.id}`, tyres, frame.path(key, at, LEVELS.tyres, { doppler: true }))
         }
         if (v.mine && heard.horn && v.model !== "carabinieri") {
-          frame.hold(`horn:${v.id}`, { kind: "horn", model: v.model }, frame.path(key, at, LEVELS.horn, { doppler: true, share: shareOf(v.id, 0.5) }))
+          frame.hold(`horn:${v.id}`, { kind: "horn", model: v.model }, frame.path(key, at, LEVELS.horn, { doppler: true }))
         }
-        if (sirens.has(v.id)) frame.hold(`siren:${v.id}`, { kind: "siren" }, frame.path(key, at, LEVELS.siren, { doppler: true, share: shareOf(v.id, 0.5) }))
+        if (sirens.has(v.id)) frame.hold(`siren:${v.id}`, { kind: "siren" }, frame.path(key, at, LEVELS.siren, { doppler: true }))
         if (v.running && v.model === "truck" && forward < REVERSING) frame.hold(`beeper:${v.id}`, { kind: "beeper" }, frame.path(key, at, LEVELS.beeper, { doppler: true }))
-        if (scrapes.has(v.id)) frame.hold(`scrape:${v.id}`, { kind: "scrape", speed }, frame.path(key, at, LEVELS.scrape, { doppler: true, share: shareOf(v.id, 0) }))
+        if (scrapes.has(v.id)) frame.hold(`scrape:${v.id}`, { kind: "scrape", speed }, frame.path(key, at, LEVELS.scrape, { doppler: true, cabin: v.id !== mine }))
       }
 
       car = mine
