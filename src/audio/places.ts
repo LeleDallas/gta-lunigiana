@@ -1,7 +1,7 @@
 /**
  * What the map around the listener sounds like: the surface under a foot or a tyre, the mix of
- * forest, open ground and village (the ambience beds), how enclosed a street is (the reverb room),
- * forest along a path (foliage loss), steep slopes that echo, and the fixed places that make
+ * forest, open ground and village (the ambience beds), how enclosed a street is (the reverb send),
+ * forest along a path (foliage loss), rock faces that echo, and the fixed places that make
  * sound: church bells, farm dogs, birds in the trees. Running water is in places/water.ts.
  * Off the roads everything reads the renderer's land-cover raster (`mapCover`, built once and
  * shared); the other structures are built on their first query.
@@ -157,20 +157,20 @@ export const forestAlong = (ax: number, ay: number, bx: number, by: number): num
   return (forest * length) / n
 }
 
-/** A discrete echo of a loud sound off a slope: seconds after the direct sound, dB below its 1 m level, and where it comes from. */
+/** A discrete echo of a loud sound off a rock face: seconds after the direct sound, dB below its 1 m level, and where it comes from. */
 export interface Echo { readonly delay: number; readonly loss: number; readonly pan: number }
 
 /** Echoing faces are searched in `AZIMUTHS` directions from `ECHO_NEAR` to `ECHO_FAR` m every `ECHO_STEP` m (physics.md §7: distinct echoes from 17 m on). */
 const AZIMUTHS = 16, ECHO_NEAR = 40, ECHO_FAR = 400, ECHO_STEP = 8
-/** A face climbs at least this steeply (35°) and stands this many metres above the ears; past `ROCK_SLOPE` (50°) it is bare rock, as painted. */
-const FACE_SLOPE = 0.7, FACE_RISE = 10, ROCK_SLOPE = 1.2
-/** Reflection loss of rock and of a forested slope, dB, and air absorption at 1 kHz, dB/m (ISO 9613-1, 15 °C / 70 %). */
-const ROCK_DB = 6, FOREST_DB = 15, AIR_DB = 0.0041
+/** A face is bare rock, as painted: it climbs at least this steeply (50°; a gentler slope sends sound to the sky) and stands this many metres above the ears. */
+const FACE_SLOPE = 1.2, FACE_RISE = 10
+/** Reflection loss of a rock face, dB (a cliff scatters more than it mirrors: Pieren and Wunderli 2011), and air absorption at 1 kHz, dB/m (ISO 9613-1, 15 °C / 70 %). */
+const ROCK_DB = 10, AIR_DB = 0.0041
 
 /**
- * Up to two echoes at (x, y), strongest first, from steep slopes 40–400 m away that the listener
- * can see, at least 45° apart: delay 2d/c, loss 20·log10(2d) + air absorption + reflection loss.
- * Empty in open country or among buildings (which are not searched).
+ * Up to two echoes at (x, y), strongest first, from rock faces 40–400 m away that the listener can
+ * see, at least 45° apart: delay 2d/c, loss 20·log10(2d) + air absorption + reflection loss. Empty
+ * where no rock is in sight (buildings are not searched).
  */
 export const echoesAt = (x: number, y: number): ReadonlyArray<Echo> => {
   const ear = heightAt(x, y) + EAR_HEIGHT, faces: Array<{ readonly k: number; readonly d: number; readonly dx: number; readonly dy: number; readonly loss: number }> = []
@@ -182,8 +182,7 @@ export const echoesAt = (x: number, y: number): ReadonlyArray<Echo> => {
       const z = heightAt(x + ux * d, y + uy * d), slope = (z - previous) / ECHO_STEP, sight = (z - ear) / d
       previous = z
       if (d >= ECHO_NEAR && sight >= horizon && slope >= FACE_SLOPE && z - ear >= FACE_RISE) {
-        const rock = slope >= ROCK_SLOPE || coverAt(x + ux * d, y + uy * d) !== "forest"
-        faces.push({ k, d, dx: ux * d, dy: uy * d, loss: 20 * Math.log10(2 * d) + AIR_DB * 2 * d + (rock ? ROCK_DB : FOREST_DB) })
+        faces.push({ k, d, dx: ux * d, dy: uy * d, loss: 20 * Math.log10(2 * d) + AIR_DB * 2 * d + ROCK_DB })
         break
       }
       horizon = Math.max(horizon, sight)

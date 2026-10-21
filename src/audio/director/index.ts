@@ -1,10 +1,10 @@
 /**
  * The director: the brain of proximity and physical behaviour between the `Heard` frames of the
  * audio schedule and a `Speaker`. Each frame it finds the listener's ears (and the cabin around
- * them), the masking floor and the reverb room, lets its vehicle, people and world parts place
- * every sound through the acoustic chain (hearing.ts), keeps the loudest voices of each kind up to
- * their caps, and flushes the speaker. Pure TypeScript: Node tests drive it with a recording
- * speaker, a seeded random source and a fake wall clock.
+ * them), the masking floor, how enclosed the street is and the rock faces that echo, lets its
+ * vehicle, people and world parts place every sound through the acoustic chain (hearing.ts), keeps
+ * the loudest voices of each kind up to their caps, and flushes the speaker. Pure TypeScript: Node
+ * tests drive it with a recording speaker, a seeded random source and a fake wall clock.
  *
  * Time is the speaker's: before its context exists (and while it is suspended) no time passes;
  * the director still tracks who sits where, but measures and plays nothing.
@@ -24,7 +24,7 @@ export type { WallClock } from "./world.ts"
 
 /** A frame longer than this (s) is a stall, not time passing. */
 const MAX_DT = 0.25
-/** Echoing slopes are looked up again after this long (s) or this far (m). */
+/** Echoing rock faces are looked up again after this long (s) or this far (m). */
 const ECHOES_EVERY = 1, ECHOES_MOVED = 10
 
 /** The local time of day. */
@@ -67,7 +67,7 @@ export const makeDirector = (
       world.hear(frame)
       if (live) occluder.refresh(now)
       held = commit(offers, speaker, held)
-      speaker.flush({ street })
+      speaker.flush()
     }
   }
 }

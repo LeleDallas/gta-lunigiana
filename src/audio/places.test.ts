@@ -40,7 +40,7 @@ test("streets: Gragnola's centre is enclosed, a meadow is open; the forest lines
   assert.equal(forestAlong(MEADOW.x, MEADOW.y, MEADOW.x + 40, MEADOW.y), 0)
 })
 
-test("echoes at Equi Terme come off the slopes around it, finite and in range; none on the open meadow", () => {
+test("echoes at Equi Terme come off the rock faces around it, finite and in range; none on the open meadow", () => {
   const echoes = echoesAt(EQUI.x, EQUI.y)
   assert.ok(echoes.length >= 1 && echoes.length <= 2)
   for (const { delay, loss, pan } of echoes) {

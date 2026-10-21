@@ -5,7 +5,7 @@
  * number here moves one kind against the others and nothing else.
  *
  * Flags, by kind: vehicle voices Doppler-shift (water and the beds are static); every one-shot
- * waits its travel time past `DELAY_FROM`; `echoes` says which one-shots answer off the slopes;
+ * waits its travel time past `DELAY_FROM`; `echoes` says which one-shots answer off rock faces;
  * every positional source is occluded (the listener's own car and the beds are not).
  *
  * @module audio/director/levels
@@ -79,16 +79,18 @@ export const TOWERS = 4
 export const DELAY_FROM = 40
 
 /**
- * The reverb send (physics.md §7, on a mixer whose full send is 12 dB under dry): `open` dB in the
- * open valley, `street` dB more in a narrow street; wetter with distance (the direct sound falls 6 dB
- * per doubling, the reverberant field less) from `near` m up to `far`×; `cabin`× inside a vehicle;
- * `bed` for the diffuse beds.
+ * The reverb send, on a mixer whose full send returns 12 dB under dry. None in the open, where nothing
+ * scatters sound back (an open field's late energy is 15 dB and more under the direct sound). In a
+ * street, street² of `db` dB at `ref` m (the tail leaks out of every gap in the facades), 3 dB wetter
+ * per doubling of distance from `near` to `far` m: along a street the reverberant field falls like a
+ * line source's, the direct sound like a point's (Thomas et al. 2013). `cabin`× inside a vehicle,
+ * whose own noise masks the tail.
  */
-export const REVERB = { open: -12, street: 12, near: 10, far: 4, cabin: 0.25, bed: 0.1 } as const
+export const REVERB = { db: 8, ref: 10, near: 2.5, far: 40, cabin: 0.25 } as const
 
-/** Slope echoes: at least `minLoss` dB under the direct sound, `wet`× its reverb send. */
-export const ECHO = { minLoss: 6, wet: 2 } as const
+/** An echo plays at least this many dB under the direct sound: a rock face's own reflection loss (places.ts). */
+export const ECHO_MIN_DB = 10
 
-/** Loud impulsive one-shots answer off the slopes: a crash from 6 m/s, honks, barks, voices and bells (physics.md §7). */
+/** Loud impulsive one-shots answer off rock faces: a crash from 6 m/s, honks, barks, voices and bells (physics.md §7). */
 export const echoes = (sound: OneShot): boolean =>
   sound.kind === "crash" ? sound.speed >= 6 : sound.kind === "honk" || sound.kind === "bark" || sound.kind === "shout" || sound.kind === "scream" || sound.kind === "bell"

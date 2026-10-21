@@ -56,7 +56,7 @@ components, Input (horn key) ──────┴─► audio schedule (Lunigia
    - places the ears 1.6 m above the ground under the listener (a bridge deck, not the river under
      it) and notes the cabin around them;
    - asks the world part for the masking floor and how enclosed the street is (`world.ts`), and
-     every 1 s or 10 m looks up the slopes that echo;
+     every 1 s or 10 m looks up the rock faces that echo;
    - lets its vehicle (`vehicles.ts`), people (`people.ts`) and world (`world.ts`) parts place
      their sounds through the acoustic chain (`hearing.ts`);
    - plays one-shots at once (with their echoes), and keeps the loudest offered continuous voices
@@ -117,7 +117,7 @@ summed and converted once:
   [Calibration and mix](#calibration-and-mix));
 - lowpass = the lowest of the air, diffraction and cabin cutoffs;
 - pitch = the Doppler shift (vehicle voices only);
-- reverb send = from the street around the ears and the distance.
+- reverb send = from the street around the ears and the distance; none in the open.
 
 Distances are three-dimensional. The ears are 1.6 m above the ground; sources stand at their own
 height above theirs: a vehicle 0.8 m, a person 1 m, water 2 m (lifted out of its carved bed), a
@@ -260,32 +260,54 @@ earshot ring (`TOWERS`).
 
 ### Echoes
 
-Loud impulsive one-shots answer off the slopes (`echoesAt` in `places.ts`): crashes from 6 m/s,
+Loud impulsive one-shots answer off rock faces (`echoesAt` in `places.ts`): crashes from 6 m/s,
 honks, barks, shouts, screams and bells. The search runs along 16 directions from 40 to 400 m in
 8 m steps and takes the first face the listener can see (rising above every sight line before it)
-that climbs at least 35° and stands at least 10 m above the ears. Up to two echoes play, the
-strongest first and at least 45° apart:
+that climbs at least 50°, the slope the terrain paints as bare rock, and stands at least 10 m above
+the ears. A gentler slope, grassed or wooded, mirrors sound up into the sky and scatters back too
+little to hear (even a forest edge returns 16–31 dB under the direct sound), so it does not echo.
+Rock is in sight from about a quarter of the map. Up to two echoes play, the strongest first and
+at least 45° apart:
 
 - delay 2d/c after the direct sound;
-- loss 20·log10(2d) + air absorption (0.0041 dB/m at 1 kHz) + reflection: 6 dB off bare rock (a
-  face steeper than 50°, or not forested), 15 dB off a wooded slope; always at least 6 dB under
-  the direct sound;
+- loss 20·log10(2d) + air absorption (0.0041 dB/m at 1 kHz) + 10 dB off the rock; always at least
+  10 dB under the direct sound (natural cliffs return 10–20 dB under it), which is what a distant
+  source's echo gets;
+- times the open share around the ears, 1 − street: facades hide the faces, so a narrow street
+  hears none;
 - panned toward the face, low-passed at the direct sound's cutoff or the echo path's air cutoff,
-  whichever is lower, with twice the direct sound's reverb send;
+  whichever is lower, with the direct sound's reverb send (none in the open);
 - skipped when the masking rule would cull it.
 
-Buildings are not echo faces, so village streets get reverb, not echoes.
+Buildings are not echo faces: village streets get reverb, not echoes.
 
 ### Street reverb
 
+Reverb is sound scattered back by the surfaces around the listener, and outdoors only facades
+return enough of it to hear. Over open ground the energy that arrives after the direct sound stays
+15 dB and more under it (the ground's own reflection, under 2 ms late, is the ground effect), and
+in a forest the tail sits about 30 dB under the direct sound 10 m away. So the fields, the woods and
+the open valley play dry.
+
 `streetAt` measures how enclosed the ears are: 8 directions out to 15 m, each counting the facade it
 meets by its height above the listener's ground (4 m and more count fully). The mean, 0 (open) to 1
-(a narrow stone street), eases with a 0.5 s time constant and crossfades (equal power) two
-generated impulse responses: the open valley's (2.6 s long, RT60 2 s, 30 ms pre-delay) and a stone
-street's (1.2 s, RT60 0.9 s, 10 ms). A fully wet send returns 12 dB under the dry sound. Each
-source's send is −12 dB in the open and 0 dB in a narrow street, rising with distance from 10 m up
-to 4× at 40 m (the direct sound falls 6 dB per doubling, the reverberant field less), and a
-quarter inside a vehicle. The beds send 0.1.
+(a narrow stone street), eases with a 0.5 s time constant. The mixer has one reverb, a generated
+stone street's impulse response (1.2 s long, RT60 1 s, 12 ms pre-delay: the first facade's return
+across a 4 m lane), and a fully wet send returns 12 dB under the dry sound. Each source's send
+(`REVERB`) is
+
+wet = street² · 10^(8/20) · √(r / 10), with r clamped to 2.5–40 m
+
+- **Distance.** In a narrow street the reverb returns 10 dB under the dry sound 2.5 m away, 4 dB
+  under at 10 m and 2 dB over from 40 m. Along a street the reverberant field falls like a line
+  source's and the direct sound like a point's, so the reverb gains 3 dB on it per doubling.
+- **Gaps.** The tail leaks out of every gap in the facades, hence street²: a straight lane open at
+  both ends (0.75) is 5 dB drier, a lane with gaps (0.5) 12 dB, a single wall (0.3) 21 dB, which is
+  as good as dry.
+- **Cabin and beds.** Inside a vehicle the send is a quarter (the cabin's own noise masks the
+  tail). The wind and cricket beds are diffuse already and send nothing.
+
+Held voices glide their send as the street eases, so walking into a village fades the reverb in.
 
 ### Stereo
 
@@ -344,7 +366,8 @@ rings an 800 Hz prime; taller towers ring lower, down to 400 Hz at 30 m.
   The last two live beside the synths they describe, derived from the same numbers.
 - `HEIGHT`, `WATER_R_MIN`: source heights and the water's 1 m clamp.
 - `CAPS`, `KEEP_DB`, `TOWERS`: the voice caps and their hysteresis.
-- `DELAY_FROM` (40 m), `REVERB`, `ECHO` and `echoes(sound)`: delay, reverb sends and echoes.
+- `DELAY_FROM` (40 m), `REVERB`, `ECHO_MIN_DB` and `echoes(sound)`: delay, the reverb send and
+  echoes.
 
 `mixGain` (`acoustics.ts`) turns a level into a gain. Real levels span 54 dB from a running step
 to a horn, too much for a game mix, so only the source levels are compressed, around 120 dB(A) by 0.6;
@@ -416,7 +439,8 @@ On foot H does nothing. The title card lists it.
 own emitter and mixer:
 
 - **Listener:** the distance (a logarithmic slider, 0.5 m to 2 km), the side of the screen, a cabin
-  (none or a model), the street room, and the master level meter.
+  (none or a model), how enclosed the street is (it sets the reverb send), and the master level
+  meter.
 - **One panel per kind:** each continuous kind has Hold / Release and each one-shot Play, with a
   control for every param (sliders, menus, checkboxes). Each panel shows how its sound is heard at
   that spot: the level at 1 m (at the ears for the beds) and at the listener, the gain, pan,
@@ -450,9 +474,9 @@ functions (`synth/world.test.ts` imports them to check).
 | `src/audio/acoustics.test.ts` | the laws: the line source against the exact table, the air cutoffs, Doppler, the pan, diffraction, ground, foliage, masking, the mix calibration |
 | `src/audio/occlusion.test.ts` | path differences on real map spots: a flat meadow, Monzone Alto's 30 m tower, a bell over its own walls, Monte San Giorgio between its flanks |
 | `src/audio/places.test.ts`, `src/audio/places/water.test.ts` | surfaces, ambience shares, streets, echoes at Equi Terme, bells, dogs and birds, the Torrente Lucido from Monzone station, the Fontana di Aiola |
-| `src/audio/director/index.test.ts` | the director on a recording speaker at real map spots: proximity (in the open and behind a ridge), a building's muffling, Doppler, step cadence, travel delay, crash merging and scrapes, echoes, nothing before the context, the cabin, getting in and out, horn and siren, the bells, water and its masking, the valley's never-silent bed and the river 15 m away against behind the houses, voice caps and their hysteresis, flee cues |
-| `src/audio/director/hearing.test.ts`, `occluder.test.ts` | the reverb send; the obstacle cache's refresh and forgetting |
-| `src/audio/speaker.test.ts`, `mixer.test.ts`, `buffers.test.ts`, `measure.test.ts` | the one-shot cap, the speaker inert until a trusted gesture, the reverb crossfade, the level meter, seamless noise loops, the render measurements |
+| `src/audio/director/index.test.ts` | the director on a recording speaker at real map spots: proximity (in the open and behind a ridge), a building's muffling, Doppler, step cadence, travel delay, crash merging and scrapes, echoes off a rock face and hidden in a street, the reverb dry in the open and wet in a walled street, nothing before the context, the cabin, getting in and out, horn and siren, the bells, water and its masking, the valley's never-silent bed and the river 15 m away against behind the houses, voice caps and their hysteresis, flee cues |
+| `src/audio/director/hearing.test.ts`, `occluder.test.ts` | the reverb send: none in the open, in a street by distance (capped), gaps and the cabin; the obstacle cache's refresh and forgetting |
+| `src/audio/speaker.test.ts`, `mixer.test.ts`, `buffers.test.ts`, `measure.test.ts` | the one-shot cap, the speaker inert until a trusted gesture, the level meter, seamless noise loops, the render measurements |
 | `src/audio/gearbox.test.ts`, `src/audio/synth/*.test.ts` | gearbox shifts; the engine, tyre and crash laws; step and cricket rates; bubbles at their Minnaert frequency; synth params clamped, NaN to silence |
 
 ### In a browser
@@ -486,7 +510,10 @@ non-finite placement or param. On the audition page "Render all" gives 59 rows, 
   idling car is culled later than physics says.
 - **One edge.** Only the worst edge on the path counts, capped at 15 dB: two rows of houses are no
   quieter than one. Trees cost foliage loss but do not diffract.
-- **Echoes inherit the direct path's occlusion**, and only terrain faces echo.
+- **Echoes inherit the direct path's occlusion**, and only rock faces echo.
+- **The reverb is the listener's street.** A source in a street heard from outside it plays dry:
+  its street's tail, escaping through the street's mouth, is left out. Every street shares one
+  reverb time; only the send scales.
 - **Bells follow the computer's clock**, not a game time of day. A ring that falls before the
   audio starts is skipped.
 - **Fixed weather:** 15 °C, 70 % humidity, an October afternoon. No night, no wind direction.
@@ -500,18 +527,20 @@ Where to tune:
 
 | Where | What |
 |---|---|
-| `src/audio/director/levels.ts` | every source level and size, heights, caps and hysteresis, the bell towers, delay, reverb and echo sends |
+| `src/audio/director/levels.ts` | every source level and size, heights, caps and hysteresis, the bell towers, delay, the reverb send and the echo floor |
 | `src/audio/acoustics.ts` | `AMBIENT_DB`, `CABIN`, the mix rule (`L_REF`, `K`, `FULL_SCALE`), the air and diffraction tables |
 | `src/audio/director/vehicles.ts` | when tyres roll, the beeper sounds, a hit crashes or scrapes, hits merge; the groan and door timings; how much of the cabin the own horn and siren pass |
 | `src/audio/director/people.ts` | jumps, running, the shout radius and the cue gap |
 | `src/audio/director/world.ts` | the wind law and its floor (`STILL`), the beds and water compressed at their level, birds, dogs, the bell strokes, how often water and dogs are looked up |
 | `src/audio/director/occluder.ts` | the obstacle refresh rate, per-frame budget and forgetting |
-| `src/audio/places.ts`, `src/audio/places/water.ts` | surfaces, ambience, street probes, the echo search, bells, dogs, bird trees; water power, fountains and the Cascata |
-| `src/audio/mixer.ts`, `src/audio/speaker.ts` | master gain, limiter, the two reverbs and their return; the one-shot cap |
+| `src/audio/places.ts`, `src/audio/places/water.ts` | surfaces, ambience, street probes, the echo search and the rock's reflection loss, bells, dogs, bird trees; water power, fountains and the Cascata |
+| `src/audio/mixer.ts`, `src/audio/speaker.ts` | master gain, limiter, the street reverb and its return; the one-shot cap |
 | `src/audio/gearbox.ts`, `src/audio/synth/*.ts` | each synth's own table: gear ratios, engines, horns, tyre grounds, treads, voices, calls, bubbles |
 
 Sources for the numbers: ISO 9613-1 (air absorption) and ISO 9613-2 (ground effect, foliage),
-Maekawa's barrier chart (diffraction), ITU-R BT.1359 (audio lag), D.M. 20/03/1979 (the siren),
-CNOSSOS-EU (tyre rolling noise), van den Doel 2005 (bubbles), Farnell, *Designing Sound*
-(footsteps, wind), Peterson and Barney 1952 (vowel formants), Arnal et al. 2015 (the roughness of
-screams) and Dolbear's law (cricket rate).
+Maekawa's barrier chart (diffraction), Thomas et al. 2013 (reverb in streets and in the open),
+Picaut et al. 2005 (a street's reverb time), Huisman and Attenborough 1991 (forest reverb), Pieren
+and Wunderli 2011 (cliff echoes), Wunderli and Salomons 2009 (forest edges), ITU-R BT.1359 (audio
+lag), D.M. 20/03/1979 (the siren), CNOSSOS-EU (tyre rolling noise), van den Doel 2005 (bubbles),
+Farnell, *Designing Sound* (footsteps, wind), Peterson and Barney 1952 (vowel formants), Arnal et
+al. 2015 (the roughness of screams) and Dolbear's law (cricket rate).

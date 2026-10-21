@@ -4,24 +4,25 @@ import { test } from "node:test"
 import type { VehicleModel } from "../../sim/vehicles.ts"
 import { screenAxes } from "../../sim/view.ts"
 import { AMBIENT_DB, CABIN, dbToGain, SPEED_OF_SOUND } from "../acoustics.ts"
-import { bells } from "../places.ts"
+import { bells, streetAt } from "../places.ts"
 import { stepRate } from "../synth/steps.ts"
 import type { Continuous, Happening, Heard, HeardPerson, HeardVehicle, OneShot, Placement, Speaker } from "../types.ts"
 import { makeDirector, type WallClock } from "./index.ts"
-import { TOWERS, windDb } from "./levels.ts"
+import { ECHO_MIN_DB, TOWERS, windDb } from "./levels.ts"
 
 /**
  * Real map spots (found by probing the map): a treeless meadow on Monte dei Bianchi clear for 300 m to the south and
  * screen-right, a lane at Pian del Molino with a 10.7 m building 30 m east and open ground 30 m north-west, a wooded
  * ridge above Aiola (900 m) with no water within 400 m, Monzone station 68 m from the Torrente Lucido, a street
  * 50 m from Monzone Alto's tower, the woods above Isolano, in earshot of eleven bell towers, and the street of Monzone
- * where the game starts, 50 m from the Lucido behind the houses, with slopes to echo off; a bank 15 m from the Lucido
- * with nothing in the way, and the two flanks of Monte San Giorgio, 400 m apart.
+ * where the game starts, 50 m from the Lucido behind the houses; a bank 15 m from the Lucido with nothing in the way,
+ * the two flanks of Monte San Giorgio, 400 m apart (the west one in the open under a rock face), and Gragnola's centre,
+ * walled in on every side.
  */
 const MEADOW = { x: -329, y: 1078 }, STREET = { x: -916.6, y: 1706.8 }, BEHIND = { x: -886.6, y: 1706.8 }, OPEN = { x: -937.8, y: 1728 }
 const RIDGE = { x: 1600, y: -494.5 }, STATION = { x: -494, y: 437 }, BELFRY = { x: -41.8, y: -306.6 }
 const HILLSIDE = { x: -950, y: 71 }, SPAWN = { x: -412.6, y: 437.8 }, BANK = { x: -418.6, y: 395.8 }
-const WEST_FLANK = { x: 785.7, y: -563.4 }, EAST_FLANK = { x: 1185.7, y: -563.4 }
+const WEST_FLANK = { x: 785.7, y: -563.4 }, EAST_FLANK = { x: 1185.7, y: -563.4 }, GRAGNOLA = { x: -1751.2, y: 3360.4 }
 const FRAME = 1 / 60
 /** Screen-right on the ground, with the view in its home seat. */
 const SCREEN_RIGHT = screenAxes(0).right
@@ -166,16 +167,34 @@ test("a wall hit split over two steps crashes once, a 1.5× harder one at once a
   assert.equal(director.take("crash").length, 0)
 })
 
-test("a hard crash answers off the slopes, later and fainter; a soft one does not", () => {
-  const crash = (speed: number) => {
+test("a hard crash answers off a rock face, later, fainter and dry in the open; in a street only the open share of it; a soft one does not", () => {
+  const crash = (spot: { readonly x: number; readonly y: number }, speed: number, metres = 10) => {
     const director = rig()
-    const at = away(SPAWN, 10, SOUTH)
-    director.hear(world(SPAWN, { vehicles: [car(1, "panda", at)], happenings: [{ kind: "impact", hit: "wall", x: at.x, y: at.y, speed, mass: 1100, car: 1 }] }))
+    const at = away(spot, metres, SOUTH)
+    director.hear(world(spot, { vehicles: [car(1, "panda", at)], happenings: [{ kind: "impact", hit: "wall", x: at.x, y: at.y, speed, mass: 1100, car: 1 }] }))
     return director.take("crash")
   }
-  const [direct, ...echoes] = crash(10)
-  assert.ok(echoes.length > 0 && echoes.every((e) => e.delay > direct!.delay + 0.1 && e.at.gain < direct!.at.gain / 2), `${echoes.length} echoes`)
-  assert.equal(crash(4).length, 1)
+  const [direct, ...echoes] = crash(WEST_FLANK, 10)
+  assert.ok(echoes.length > 0 && echoes.every((e) => e.delay > direct!.delay + 0.1 && e.at.gain < direct!.at.gain / 2 && e.at.wet === 0), `${echoes.length} echoes`)
+  // From 100 m the direct sound has spread as far as the echo off the face 40 m away: that echo plays the face's own loss under it, times the open share.
+  const [walled, ...hidden] = crash(BELFRY, 10, 100), open = 1 - streetAt(BELFRY.x, BELFRY.y), most = dbToGain(-ECHO_MIN_DB) * open
+  assert.ok(open < 0.5 && hidden.length > 0, `${hidden.length} echoes, ${open} open`)
+  assert.ok(Math.abs(hidden[0]!.at.gain / walled!.at.gain - most) < 1e-9)
+  assert.ok(hidden.every((e) => e.at.gain / walled!.at.gain < most + 1e-9 && e.at.wet === walled!.at.wet))
+  assert.equal(crash(WEST_FLANK, 4).length, 1)
+})
+
+test("the reverb follows the surroundings: a honk in the open meadow plays dry, in Gragnola's walled centre wet; the beds stay dry", () => {
+  const honk = (spot: { readonly x: number; readonly y: number }) => {
+    const director = rig()
+    const at = away(spot, 10, SOUTH)
+    director.hear(world(spot, { happenings: [{ kind: "honk", car: 1, model: "panda", x: at.x, y: at.y }] }))
+    assert.equal(director.held().get("wind")?.at.wet, 0)
+    return director.take("honk")
+  }
+  const open = honk(MEADOW), walled = honk(GRAGNOLA)
+  assert.ok(open.length === 1 && open[0]!.at.wet === 0, JSON.stringify(open))
+  assert.ok(walled.length > 0 && walled[0]!.at.wet > 1, JSON.stringify(walled))
 })
 
 test("before the audio context runs nothing is measured or played, but who sits where is still tracked", () => {

@@ -3,8 +3,8 @@
  * Spreading, the ground effect, foliage, the worst edge in the way and the listener's cabin set the
  * level at the ears; the masking rule fades and culls it against the ambient floor; air, the edge
  * and the cabin set the lowpass; the motion of both ends sets the Doppler shift; the street around
- * the listener and the distance set the reverb send. No map lookups here (the caller measures the
- * ground and the obstacles), so the audition page hears through the same chain.
+ * the listener and the distance set the reverb send (none in the open). No map lookups here (the
+ * caller measures the ground and the obstacles), so the audition page hears through the same chain.
  *
  * @module audio/director/hearing
  */
@@ -66,7 +66,8 @@ export const hear = (path: Path): Hearing => {
   const loss = spreading(r, path.rMin) + groundLoss(r, path.height) + foliageLoss(path.forest) + edge.loss + (cabin?.loss ?? 0)
   const level = path.db - (path.quiet ?? 0) - loss
   const fade = audibility(level, path.ambient)
-  const wet = dbToGain(REVERB.open + REVERB.street * path.street) * Math.min(REVERB.far, Math.max(1, r / REVERB.near)) * (cabin === undefined ? 1 : REVERB.cabin)
+  const reach = Math.min(REVERB.far, Math.max(REVERB.near, r)) / REVERB.ref
+  const wet = path.street ** 2 * dbToGain(REVERB.db) * Math.sqrt(reach) * (cabin === undefined ? 1 : REVERB.cabin)
   return {
     placement: {
       gain: mixGain(path.db, loss) * fade,

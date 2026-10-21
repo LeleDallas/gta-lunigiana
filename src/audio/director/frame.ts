@@ -2,7 +2,7 @@
  * One frame of the director, shared by its vehicle, people and world parts: the listener's ears
  * and surroundings, where things stand (`groundAt`), the way from any source to them (`path`, with
  * the ground under it and its obstacles, cached per key), and the frame's requests. One-shots play
- * at once, loud ones with their echoes off the slopes; continuous voices are offered (`hold`) and
+ * at once, loud ones with their echoes off rock faces; continuous voices are offered (`hold`) and
  * `commit` keeps the loudest of each kind up to its cap.
  *
  * @module audio/director/frame
@@ -10,11 +10,11 @@
 import { groundY, yOf } from "../../render/ground.ts"
 import { heightAt } from "../../sim/map/index.ts"
 import type { VehicleModel } from "../../sim/vehicles.ts"
-import { airCutoff, audibility, CABIN, dbToGain, SPEED_OF_SOUND, spreading } from "../acoustics.ts"
+import { airCutoff, audibility, CABIN, dbToGain, gainToDb, SPEED_OF_SOUND, spreading } from "../acoustics.ts"
 import type { Echo } from "../places.ts"
 import type { Continuous, Heard, OneShot, Placement, Speaker } from "../types.ts"
 import { type Ears, hear, type Hearing, SILENT, type Source } from "./hearing.ts"
-import { CAPS, ECHO, echoes, KEEP_DB, LEVELS, type Level } from "./levels.ts"
+import { CAPS, ECHO_MIN_DB, echoes, KEEP_DB, LEVELS, type Level } from "./levels.ts"
 import type { Between, Occluder } from "./occluder.ts"
 
 /** How a path is heard: Doppler-shifted (vehicles), through the listener's `cabin` (unless false: their own car's crash, scrape, doors), `quiet` dB under the nominal peak. */
@@ -81,15 +81,16 @@ export const makeFrame = (setup: Setup): Frame => {
     speaker.play(sound, at.placement, delay)
     if (!echoes(sound)) return
     for (const echo of setup.echoes) {
-      // The echo's extra way past the direct sound, never closer than `minLoss` under it.
-      const extra = Math.max(ECHO.minLoss, echo.loss - spreading(at.r, LEVELS[sound.kind].rMin))
+      // The echo's extra way past the direct sound, never closer than `ECHO_MIN_DB` under it; in a street the facades
+      // hide all but the open share of the faces.
+      const extra = Math.max(ECHO_MIN_DB, echo.loss - spreading(at.r, LEVELS[sound.kind].rMin)) - gainToDb(1 - street)
       if (audibility(at.level - extra, ambient) === 0) continue
       const placement = {
         gain: at.placement.gain * dbToGain(-extra),
         pan: echo.pan,
         cutoff: Math.min(at.placement.cutoff, airCutoff(echo.delay * SPEED_OF_SOUND)),
         cents: 0,
-        wet: at.placement.wet * ECHO.wet
+        wet: at.placement.wet
       }
       if (finite(placement)) speaker.play(sound, placement, delay + echo.delay)
     }

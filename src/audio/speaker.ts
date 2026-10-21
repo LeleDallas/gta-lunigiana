@@ -177,7 +177,7 @@ export const makeSpeaker = (host: Window, voices: Voices, shots: Shots): Speaker
         fail(sound.kind, error)
       }
     },
-    flush: (room) => {
+    flush: () => {
       if (live === undefined) return
       const now = live.ctx.currentTime
       for (const [key, entry] of holding) {
@@ -187,7 +187,6 @@ export const makeSpeaker = (host: Window, voices: Voices, shots: Shots): Speaker
           holding.delete(key)
         }
       }
-      live.mixer.room(room, now)
     },
     pause: (next) => {
       if (next === paused) return

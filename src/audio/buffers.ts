@@ -68,7 +68,7 @@ export const gustSamples = (n: number, random: () => number = Math.random): Floa
 }
 
 /** A stereo reverb impulse response: decorrelated noise, darkening, decaying 60 dB in `rt60` s after `preDelay` s. */
-export const impulseResponse = (ctx: BaseAudioContext, seconds: number, rt60: number, preDelay = 0.012): AudioBuffer => {
+export const impulseResponse = (ctx: BaseAudioContext, seconds: number, rt60: number, preDelay: number): AudioBuffer => {
   const rate = ctx.sampleRate, n = Math.floor(rate * seconds), ir = ctx.createBuffer(2, n, rate)
   for (let c = 0; c < 2; c++) {
     const d = ir.getChannelData(c)
