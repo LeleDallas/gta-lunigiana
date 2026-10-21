@@ -1,24 +1,19 @@
 /**
- * Vehicle impacts and handling sounds (synthesis.md §4, §6). The fixed ones are rendered once per
- * context with an OfflineAudioContext and normalised; playing one costs a buffer source and a gain.
+ * Vehicle impacts and handling sounds (synthesis.md §4, §6); the crash has its own renderer
+ * (`synth/crash/`). These are rendered once per context with an OfflineAudioContext and
+ * normalised; playing one costs a buffer source and a gain.
  *
- * - `crash`: three tiers by impact speed × three variants. Light: a 90→38 Hz thump, a low body
- *   thud and trim rattling; medium adds the metal crunch and ringing panels (free-free bar modes
- *   1 : 2.756 : 5.404 : 8.933); heavy adds breaking glass. Loudness follows (speed / 15)^1.2, and
- *   heavier masses play slower, so lower. Only `speed` and `mass` count: the bodies, what they
- *   hit, the surface and the cabin are for the crash renderer that replaces it.
  * - `thud`: a vehicle hitting a person, kept tasteful: a low thump and a cloth swish, no crunch.
  * - `door`: per model open (two latch clicks, the seal) and close (thump, latch, panel ring).
  * - `ignition`: the starter whirring with a dip at every compression, then the engine catching:
  *   the real engine synth flaring and settling, fading as the running engine voice takes over.
- * - `scrape` (a voice): metal grinding along a wall, ringing panels and grit, louder with speed;
- *   the same along every material.
+ * - `scrape` (a voice): metal grinding along a wall, ringing panels (free-free bar modes
+ *   1 : 2.756 : 5.404 : 8.933) and grit, louder with speed; the same along every material.
  *
  * @module audio/synth/impacts
  */
 import { VEHICLE_MODELS, type VehicleModel } from "../../sim/vehicles.ts"
 import { bufferOf, loop } from "../buffers.ts"
-import { gainToDb } from "../acoustics.ts"
 import type { Continuous, Kit, OneShot, Shot, VoiceFactory } from "../types.ts"
 import { engine, ENGINES } from "./engine.ts"
 import { bake, fadeOut, glide, jitter, normalise, perContext, pick, playBuffer, strike } from "./graph.ts"
@@ -26,19 +21,7 @@ import { bake, fadeOut, glide, jitter, normalise, perContext, pick, playBuffer, 
 /** Free-free bar mode ratios: the panels' inharmonic ring. */
 const BAR = [1, 2.756, 5.404, 8.933] as const
 
-/** How heavy each crash tier's render is: light, medium, heavy. */
-const TIERS = [0.15, 0.55, 1] as const
 const VARIANTS = 3
-
-/** The crash law: the tier (light below 4 m/s, heavy from 10), the gain (a floor keeps bumps audible), the playback rate (heavier is lower). */
-export const crashLaw = (speed: number, mass: number): { readonly tier: number; readonly gain: number; readonly rate: number } => ({
-  tier: speed < 4 ? 0 : speed < 10 ? 1 : 2,
-  gain: Math.max(0.1, Math.min(1, (Math.max(0, speed) / 15) ** 1.2)),
-  rate: Math.min(1.15, Math.max(0.8, Math.max(0.05, mass) ** -0.12))
-})
-
-/** How far (dB) a crash plays under its nominal peak, so masking counts the level played. ponytail: the old law's gain, until the crash renderer brings its own. */
-export const crashQuiet = (sound: Extract<OneShot, { readonly kind: "crash" }>): number => gainToDb(1 / crashLaw(sound.speed, sound.mass).gain)
 
 /** A baked sound for `ctx`, scaled to peak at `peak`. */
 const peaking = (ctx: BaseAudioContext, peak: number) => (samples: Float32Array<ArrayBuffer>): AudioBuffer => {
@@ -56,44 +39,6 @@ const sweep = (ctx: BaseAudioContext, from: number, to: number, seconds: number)
   osc.frequency.exponentialRampToValueAtTime(to, seconds)
   osc.start()
   return osc
-}
-
-const renderCrash = (rate: number, kit: Kit, heavy: number) => bake(rate, 0.6 + heavy * 1.2, (ctx) => {
-  const out = ctx.destination
-  strike(ctx, sweep(ctx, 90, 38, 0.12), out, 0, 0.9, 0.06)
-  strike(ctx, filtered(ctx, kit.brown, { type: "lowpass", frequency: 250 }), out, 0, 0.8, 0.05)
-  for (let i = 0; i < 8; i++) {
-    strike(ctx, filtered(ctx, kit.white, { type: "bandpass", frequency: 2000 + 2500 * Math.random(), Q: 4 }), out, 0.01 + 0.2 * Math.random() ** 2, 0.15, 0.004)
-  }
-  if (heavy > 0.25) {
-    strike(ctx, filtered(ctx, kit.white, { type: "bandpass", frequency: 1400 + 1200 * heavy, Q: 0.9 }), out, 0.005, 0.6 * heavy, 0.04 + 0.09 * heavy)
-    const f0 = 140 + Math.random() * 160
-    BAR.forEach((ratio, i) => {
-      const panel = new OscillatorNode(ctx, { frequency: f0 * ratio * jitter(0.02) })
-      panel.start()
-      strike(ctx, panel, out, 0.004, [0.3, 0.2, 0.12, 0.07][i]! * heavy, [0.22, 0.15, 0.1, 0.06][i]! * (0.5 + heavy))
-    })
-  }
-  if (heavy > 0.6) for (let i = 0; i < 25; i++) {
-    const t = 0.01 + 0.4 * Math.random() ** 2, glass = new OscillatorNode(ctx, { frequency: 2000 + 5000 * Math.random() })
-    glass.start(t)
-    strike(ctx, glass, out, t, 0.03 + 0.05 * Math.random(), 0.008 + 0.04 * Math.random())
-  }
-})
-
-const crashes = perContext((ctx, kit) => Promise.all(TIERS.map((heavy) => Promise.all(
-  Array.from({ length: VARIANTS }, () => renderCrash(ctx.sampleRate, kit, heavy).then(peaking(ctx, 0.5)))
-))))
-
-/** A vehicle hitting a wall, another vehicle or a parked car. */
-export const crash: Shot<Extract<OneShot, { readonly kind: "crash" }>> = {
-  prepare: crashes.prepare,
-  play: (io, sound, when) => {
-    const tiers = crashes.get(io.ctx)
-    if (!tiers) return when
-    const law = crashLaw(sound.speed, sound.mass)
-    return playBuffer(io, pick(tiers[law.tier]!), when, law.rate * jitter(0.06), law.gain)
-  }
 }
 
 const renderThud = (rate: number, kit: Kit) => bake(rate, 0.4, (ctx) => {

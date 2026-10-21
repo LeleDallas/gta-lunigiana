@@ -207,13 +207,13 @@ test("a wall crash heard on foot is not the listener's own: the building in the 
   assert.ok(behind.sound.kind === "crash" && !behind.sound.inside)
 })
 
-test("a 2 m/s bump plays quieter than a 20 m/s crash, so masking culls it nearer: both at full gain 300 m away, only the crash 1.2 km away", () => {
+test("a 2 m/s bump plays quieter than a 20 m/s crash, so masking culls it nearer: both at full gain 150 m away, only the crash 1.2 km away", () => {
   const gains = (metres: number) => [2, 20].map((speed) => {
     const director = rig()
     director.hear(world(MEADOW, { happenings: [wallHit(away(MEADOW, metres, SOUTH), speed)] }))
     return director.take("crash")[0]?.at.gain
   })
-  const [bump, crash] = gains(300)
+  const [bump, crash] = gains(150)
   assert.ok(bump !== undefined && bump === crash, `${bump} vs ${crash}`)
   const [far, heavy] = gains(1200)
   assert.ok(far === undefined && heavy !== undefined && heavy > 0, `${far} vs ${heavy}`)

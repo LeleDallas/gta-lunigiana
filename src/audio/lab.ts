@@ -19,7 +19,7 @@ import { BEDS, ENGINE, type Level, LEVELS, OWN_ENGINE_DB, REVERB, WATER_R_MIN, w
 import { type Emitter, makeEmitter } from "./emitter.ts"
 import { measure } from "./measure.ts"
 import { makeMixer, type Mixer } from "./mixer.ts"
-import { crashQuiet } from "./synth/impacts.ts"
+import { crashQuiet } from "./synth/crash/index.ts"
 import { VEHICLE_SHOTS, VEHICLE_VOICES } from "./synth/vehicles.ts"
 import { WORLD_SHOTS, WORLD_VOICES } from "./synth/world.ts"
 import type { Continuous, Kit, Material, OneShot, Shot, Shots, Surface, Voice, VoiceFactory, Voices, Zone } from "./types.ts"
