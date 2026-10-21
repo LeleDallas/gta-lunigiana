@@ -1,5 +1,5 @@
 /**
- * Trees: chestnut-like round canopies and some conifers (more of them higher up), one
+ * Trees: chestnut-like round canopies and a few conifers, one
  * InstancedMesh per kind per chunk, built when the chunk streams in. Trees near the map edge are
  * mirrored into the apron so the forest does not stop at the bounds.
  *
@@ -7,7 +7,7 @@
  */
 import { Color, ConeGeometry, CylinderGeometry, IcosahedronGeometry, InstancedMesh, Matrix4, Quaternion, Vector3, type BufferGeometry, type Material } from "three"
 
-import { heightAt, MAP } from "../sim/map/index.ts"
+import { MAP } from "../sim/map/index.ts"
 import { hash01 } from "../tools/geometry.ts"
 import { APRON, chunkOf } from "./chunks.ts"
 import { terrainY } from "./ground.ts"
@@ -32,8 +32,11 @@ const shapes = {
 /** Linear multipliers on the canopy colour: mid, sunlit, shaded. */
 const TINTS = [new Color(1, 1, 1), new Color(1.35, 1.3, 1.1), new Color(0.75, 0.78, 0.72)] as const
 
-/** Conifer share at elevation `z` (m a.s.l.): a few in the valley, about half on the high slopes. */
-const coniferShare = (z: number): number => 0.12 + 0.4 * Math.min(1, Math.max(0, (z - 350) / 300))
+/**
+ * Share of conifers: conifer woods and half the mixed ones are 3% of the woodland around the valley
+ * (Regione Toscana land cover 2019); the rest is chestnut and hop-hornbeam, then beech higher up.
+ */
+const CONIFERS = 0.03
 
 /** Calls `visit` for each tree of MAP.trees and each mirror image of the trees within the apron width of an edge. */
 const eachTree = (visit: (x: number, y: number, scale: number, seed: number) => void): void => {
@@ -55,7 +58,7 @@ type ChunkTrees = Record<TreeKind, Array<number>>
 export const bucketTrees = (): Map<number, ChunkTrees> => {
   const chunks = new Map<number, ChunkTrees>()
   eachTree((x, y, scale, seed) => {
-    const kind: TreeKind = hash01(seed, 11) < coniferShare(heightAt(x, y)) ? "conifer" : "broadleaf"
+    const kind: TreeKind = hash01(seed, 11) < CONIFERS ? "conifer" : "broadleaf"
     const key = chunkOf(x, y)
     let trees = chunks.get(key)
     if (trees === undefined) chunks.set(key, (trees = { broadleaf: [], conifer: [] }))

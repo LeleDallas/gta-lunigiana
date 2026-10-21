@@ -10,7 +10,7 @@ import { parkedCar, randomColor } from "../spawning.ts"
  * Parked cars at setup, Carabinieri included: this many of the map's parked spots, picked at random so they
  * spread over the villages as the spots do (every vehicle costs a little in Contacts and TrafficAI each step).
  */
-export const PARKED = 150
+export const PARKED = 200
 const TRUCKS = 2
 const CARABINIERI_BLUE = 0x1d2b4f
 

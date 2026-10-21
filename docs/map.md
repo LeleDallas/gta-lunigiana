@@ -2,7 +2,7 @@
 
 `pnpm map` runs `src/tools/build-map.ts`. It turns the pinned inputs in `data/raw` into
 `src/sim/map/monzone.json`, the only map file the game loads. The build is deterministic (two runs
-give byte-identical files) and takes about 3.5 s. It prints a lap time per stage and a summary:
+give byte-identical files) and takes about 7.5 s. It prints a lap time per stage and a summary:
 counts, the steepest grade per road class, and the size of each section. Inputs and attribution
 are in the [README](../README.md).
 
@@ -12,7 +12,7 @@ build can use it before `monzone.json` exists.
 
 ## Pipeline
 
-### 1. Sources (`osm.ts`, `ctr.ts`, `shp.ts`, `crs.ts`)
+### 1. Sources (`osm.ts`, `ctr.ts`, `shp.ts`, `ucs.ts`, `crs.ts`)
 
 - **OSM**: `data/raw/lunigiana.osm.gz`, written by `pnpm fetch-osm` (`src/tools/fetch-osm.ts`):
   the play area plus 100 m in 4 × 4 API tiles (the `/map` call stops at 50 000 nodes), then every
@@ -21,32 +21,54 @@ build can use it before `monzone.json` exists.
   Elements are merged by id and written sorted. A regex reader parses the XML into nodes, ways
   and relations, and assembles multipolygon rings from member ways (unclosed chains are dropped).
   OSM gives the road network and its names, water, rail, land use, barriers, POIs and place names.
-- **CTR**: Regione Toscana's Carta Tecnica Regionale 1:2000, 2019 flight, the 16 sheets over the
-  play area (23D11–13, 23D18–21, 23D26–29, 23D34–37, 23D43). `shp.ts` reads the shapefiles;
-  `crs.ts` converts their EPSG:6707 (RDN2008 / UTM 32N) coordinates. The CTR gives the buildings
-  with their surveyed eave elevations, the road surfaces with their street names, and the area
-  each sheet maps (`ctr.ts`). The 2019 sheets map the settled valleys, about 30% of the play area;
-  the mountains between them are unmapped.
-- **LiDAR**: Regione Toscana's 1 m digital terrain model from the 2010 flight (20 tiles), in
-  EPSG:3003 (Monte Mario / Gauss-Boaga west). `crs.ts` converts with the EPSG:1660 datum shift plus
-  a residual of (−0.4, +0.5) m, fitted by matching the LiDAR surface model to the 2019 CTR building
-  outlines.
+- **CTR**: Regione Toscana's Carta Tecnica Regionale 1:2000, 2019 flight, the 25 sheets that map
+  ground in the play area (23D11–15, 23D18–21, 23D26–31, 23D34–37, 23D43, 23D46, 23D47, 23D53–55).
+  `shp.ts` reads the shapefiles; `crs.ts` converts their EPSG:6707 (RDN2008 / UTM 32N)
+  coordinates. The CTR gives the buildings with their surveyed eave elevations, the road surfaces
+  with their street names, and the area each sheet maps (`ctr.ts`). The 2019 sheets map the
+  villages and the settled valley floors (Vinca, Tenerano, Ugliancaldo and the Solco quarries
+  included), about 11% of the play area; the mountains between them are unmapped. A sheet with no
+  garages or road surfaces has no `AGE` or `AVI` layer.
+- **LiDAR**: Regione Toscana's 1 m digital terrain model, in EPSG:3003 (Monte Mario / Gauss-Boaga
+  west): the 2010 flight (46 tiles) everywhere it has data, then the 2012 flight (19 tiles) for the
+  Carrara side of the ridge and Monte Sagro, which 2010 did not fly. `crs.ts` converts with the
+  EPSG:1660 datum shift plus a residual of (−0.4, +0.5) m, fitted by matching the 2010 surface
+  model to the 2019 CTR building outlines. The MATTM 2008 flight (lot 006) adds nothing here and is
+  CC BY-SA, so it is not used.
+- **10 m DTM**: the 0.65 km² neither flight covers (two patches on the slopes south of Tenerano,
+  one in the Sagro quarries) come from Regione Toscana's 10 m DTM of the province of Massa-Carrara
+  (derived from the CTR 1:10 000, CC BY 3.0 IT), bent onto the LiDAR: the LiDAR − DTM residual on
+  the cells around each patch (−47 to +20 m around the biggest) is spread over it by inverse
+  squared distance, so the patch meets the LiDAR without a step.
+- **Land cover**: Regione Toscana's "Uso e copertura del suolo" 1:10 000, 2019 (UCS, CC BY 4.0,
+  0.5 ha minimum unit), from its WFS. OSM maps the woods and the quarries well but only about a
+  fifth of the Apuans' bare rock and half their pastures, so `ucs.ts` adds the open covers: quarries
+  (UCS 131), natural pastures (321), heath and scrub (322), bare rock and cliffs (332) and sparse
+  vegetation (333). Woods, fields and towns stay OSM's.
 
-`pnpm fetch-rt` (`src/tools/fetch-rt.ts`) downloads the CTR sheets and the LiDAR tiles, copies
-the shapefile layers the build reads (`AED`, `AGE`, `AVI`, `AZR`) to `data/raw/rt/ctr`, and
-mosaics the LiDAR into `data/raw/rt/dtm.bin` + `dtm.json`: cropped to the play area plus 32 m,
-averaged to 2 m cells (the game grid is 4 m), stored as int16 decimetres with each row
-delta-coded and deflated (4.3 MB).
+`pnpm fetch-rt` (`src/tools/fetch-rt.ts`) downloads the CTR sheets, the LiDAR tiles, the 10 m DTM
+and the land cover. It copies the shapefile layers the build reads (`AED`, `AGE`, `AVI`, `AZR`) to
+`data/raw/rt/ctr`, and mosaics the LiDAR into `data/raw/rt/dtm.bin` + `dtm.json`: cropped to the
+play area plus 32 m, averaged to 2 m cells (the game grid is 4 m), stored as int16 decimetres
+with each row delta-coded and deflated (15 MB). It writes the kept land-cover polygons, in
+EPSG:3003 to the decimetre, to `data/raw/rt/ucs.json.gz` (`crs.ts` has the inverse transform);
+the WFS box is padded by 500 m, because the server's box filter sometimes drops features near its
+edge.
 
 ### 2. Projection and play area (`geometry.ts`)
 
 Equirectangular around `ORIGIN` (lat 44.16175, lon 10.13), with `M_PER_DEG` = 111115.37 m per
 degree of latitude and 79987.94 m per degree of longitude. x = east, y = north, in metres, rounded
-to 0.1 m. The play area `BOUNDS` is x −2900…2300 m, y −694.5…3900 m (5.2 × 4.6 km; lat
-44.1555–44.1968, lon 10.0937–10.1588): Monzone and Aiola, the Lucido valley down to Gragnola on
-the Aulella, Equi Terme, Codiponte, Casciana, and the hill villages west of the Lucido (Viano,
-Pieve di Viano, Colognola, Campiglione, Vezzanello). Lines are clipped with Liang–Barsky and rings
-with Sutherland–Hodgman.
+to 0.1 m. The play area `BOUNDS` is x −2900…4900 m, y −6100…3900 m (7.8 × 10 km; lat
+44.1069–44.1968, lon 10.0937–10.1913): the whole catchment of the Lucido, ridge to ridge, from its
+mouth in the Aulella below Gragnola up both branches. Up the Vinca branch: the SP59, Vinca and its
+valley to Foce di Vinca, the Garnerone and Foce di Giovo, with Monte Sagro, Monte Borla and their
+quarries on the ridge. Up the Equi branch: Equi Terme, the Solco di Equi and its quarries, Pizzo
+d'Uccello and Ugliancaldo. West of the Lucido: Tenerano and the SP10, Viano, Pieve di Viano,
+Colognola, Campiglione and Vezzanello; Monzone, Aiola, Codiponte and Casciana in the middle. Being
+a rectangle, the area also takes in some of the Aulella side (Argigliano), the Bardine side and the
+Carrara side of the ridge (Campocecina). Lines are clipped with Liang–Barsky and rings with
+Sutherland–Hodgman.
 
 ### 3. Features (`features.ts`)
 
@@ -60,24 +82,32 @@ with Sutherland–Hodgman.
     along a drivable road (skipping 6 m at each end), a station on a surface measures the surface
     across the centreline. Stations with more than 10 m on either side (squares, car parks) are
     skipped. A road with at least half its stations, and three or more, on a surface takes the
-    median width (clamped to 3–12 m), asphalt or dirt by most stations, and the street name most
-    stations share (the CTR's upper-case toponym, cased like "Via Castel dell'Aquila" and "Via
-    XX Settembre"). OSM names stay, and so do specific OSM surfaces (cobblestone, gravel). Roads
+    median width (clamped to 3–12 m) and asphalt or dirt by most stations. It takes the street
+    name most stations share (the CTR's upper-case toponym, cased like "Via Castel dell'Aquila"
+    and "Via XX Settembre") when the same holds for its stations inside the area the sheets map,
+    so a road that runs on into the unmapped mountains keeps the name of its village stretch (Via
+    di Ugliancaldo). OSM names stay, and so do specific OSM surfaces (cobblestone, gravel). Roads
     the CTR does not cover keep their class width (6.5, 5, 4.5, 3.5, 3, 1.5 and 2 m).
   - Roads still unnamed take a street name from `addr:street` votes (the nearest road to most
     addresses with that name).
 - **Water**: every `waterway` except culverts, with a water width, a gravel-bed half-width and a
-  depth. The two rivers are measured on the 2010 orthophoto:
+  depth, measured on the 2010 orthophoto:
 
   | Water | Width | Bed half-width | Depth |
   |---|---|---|---|
   | Torrente Aulella (25–35 m gravel bed at Gragnola, a wooded 10 m channel at Codiponte) | 12 m | 13 m | 2.5 m |
   | Torrente Lucido, river part (Monzone to Gragnola) | 14 m | 11 m | 2.5 m |
-  | Torrente Lucido above Monzone (Vinca branch), Torrente Caldanella (from Equi) | 8 m | 5 m | 1.5 m |
-  | other named streams | 4 m | 3 m | 1 m |
+  | Torrente Lucido (Vinca branch) and Torrente Caldanella (from Equi), ways averaging under 500 m of ground | 8 m | 5 m | 1.5 m |
+  | other named streams, and the Lucido above Vinca | 4 m | 3 m | 1 m |
   | unnamed streams | 2 m | 3 m | 1 m |
 
-  Other rivers would be 2.5 m deep with the stream widths.
+  A way's class comes from its mean LiDAR ground over its vertices, so water is extracted once the
+  terrain is loaded. The Vinca branch shows 6–11 m of open marble gravel below 250 m and 4–6 m up to
+  400 m; from 500 m its bed is under closed canopy. Its way from the source under the Garnerone down
+  to Vinca (mean 826 m) is a beech-wood gully with 3–6 m windows of bed, so it gets 4 m. The
+  Caldanella runs 15–16 m between walls at Equi and 5–9 m of boulders down to Monzone. The Solco di
+  Equi (dry, 5–7 m of gravel in the gorge) and the other named streams keep 4 m. Other rivers would
+  be 2.5 m deep with the stream widths.
 - **Rail**: `railway=rail` (the Lucca–Aulla line), with bridges and tunnels.
 - **Buildings**: the CTR's wherever its sheets map the ground, OSM's elsewhere (an OSM building
   is dropped when its centroid lies in a mapped area).
@@ -91,8 +121,11 @@ with Sutherland–Hodgman.
     elevations), a default by kind (house 6 m, shed 2.5 m, garage 2.6 m, ruin 2.5 m...). The
     CTR's ground elevation is not used: it disagrees with the LiDAR on a quarter of the units.
   - A CTR building inside an OSM footprint takes that building's name, and its style when the
-    CTR only says "building" (the bell tower of San Prospero is an OSM tower).
-  - OSM buildings (outside the CTR's area, about 290 of them): height is the `height` tag clamped
+    CTR only says "building" (the bell tower of San Prospero is an OSM tower) and surveyed no
+    fixed-style unit inside the same footprint: where the CTR maps the church itself, the other
+    units in an OSM church outline are the houses around it (Tenerano, Vinca, Viano).
+  - OSM buildings (outside the CTR's area, about 610 of them: mountain huts, quarry sheds, the
+    Carrara side): height is the `height` tag clamped
     to 2.5–22 m, otherwise 6 m (ruins 2.5 m). Style comes from the tags: `ruin`, `church`,
     `tower`, `station`, `industrial`.
   - Generic buildings are `stone` inside the historic cores (`STONE_CORES`, discs traced on the
@@ -101,26 +134,35 @@ with Sutherland–Hodgman.
     Castello dell'Aquila, Equi Terme's old village under the church, Viano, Pieve di Viano,
     Campiglione, Vezzanello, Colognola, Terma, Isolano, La Rocca di Monzone, Monte dei Bianchi,
     Mezzana, Fazzano, La Giunca-Mozzano, Folegnano, the borgo west of Pian del Molino, Cortila,
-    La Traggiara, Codiponte's borgo south of the Aulella and Casciana. The newer houses along the
+    La Traggiara, Codiponte's borgo south of the Aulella, Casciana, Vinca's borgo around
+    Sant'Andrea and its upper street, Tenerano's ring, Ugliancaldo's castle ring and its borgo down
+    the ridge to Sant'Andrea, and Argigliano's borgo below Santa Maria. The newer houses along the
     main roads (Molina di Equi, Pian del Molino, the SR445 in Gragnola) are plaster.
   - Plaster and stone buildings within 25 m of each other form a hamlet; a hamlet of up to 200
     buildings takes its majority style, so it never splits at a core radius. Bigger clusters
     (Gragnola, Codiponte, Mezzana, Equi Terme) keep the core split, but each terrace block
     (buildings within 6 m) takes its own majority style. `tint` 0–3 comes from a hash of the id.
 - **Areas**: landuse, leisure, amenity, railway platform, historic ruins, grassland and wood
-  polygons, mapped to `AREA_KINDS`, plus pedestrian squares as `paved`. The CTR's asphalt road
-  surfaces are added as `paved` areas: squares, lay-bys and station forecourts.
-- **Barriers**: `barrier=wall`, `barrier=guard_rail` and `natural=cliff` lines.
+  polygons, mapped to `AREA_KINDS`, plus pedestrian squares as `paved`. Mountain covers:
+  `landuse=quarry` is `quarry`, `natural=bare_rock`/`rock` is `rock`, `natural=scree`/`shingle`
+  is `scree` (mostly ravaneti, the quarries' marble waste), `natural=scrub`/`heath` is `scrub`,
+  and `natural=fell`, `landuse=meadow`/`grass` are `grassland`. The UCS land cover adds its
+  quarries, rock (`rock`), sparse vegetation (`sparse`), pastures (`grassland`) and heath
+  (`scrub`). The CTR's asphalt road surfaces are added as `paved` areas: squares, lay-bys and
+  station forecourts.
+- **Barriers**: `barrier=wall`, `barrier=guard_rail` and `natural=cliff` lines. Walls and cliffs
+  are opened wherever a road (not a tunnel) comes within w/2 of them (`openBarriers` in
+  `walls.ts`): OSM draws cliffs across the paths that climb through them and garden walls up to
+  the centreline. Guard rails run along their road and stay whole.
 - **POIs**: tagged nodes (minus guideposts, level crossings, benches and most highway nodes),
   plus named polygons as centroid POIs with kind `area:<kind>`.
 
 ### 4. Heightmap (`terrain.ts`)
 
 The LiDAR terrain is sampled through the projection (computed exactly on a 50 m lattice,
-bilinear in between). Each node of the 4 m grid over the bounds (1301 × 1150 nodes) is the mean
-of a 5 × 5 m square of samples. This grid is carved and flattened by the next steps; profiles and
-water sample the untouched terrain (the "ground"). Elevations run from 147 m (the Aulella below
-Gragnola) to 979 m.
+bilinear in between). Each node of the 4 m grid over the bounds (1951 × 2501 nodes) is the mean
+of a 5 × 5 m square of samples. This grid is carved and flattened by the next steps; profiles and water sample the untouched terrain (the "ground"). Elevations run from 147 m
+(the Aulella below Gragnola) to 1799 m (the north-west ridge of Monte Grondilice).
 
 ### 5. River carving (`water.ts`)
 
@@ -157,9 +199,10 @@ Gragnola) to 979 m.
   cell, so tertiary beats rail and rail beats the rest.
 - Grid nodes inside the wider streams (w ≥ 4 m) are protected: no road writes them. Bridges and
   tunnels write nothing. Paths and steps are not profiled.
-- Rail: level crossings meet the road at its natural level. A road under the rail keeps
-  `maxheight` (4 m when untagged) plus a 1.5 m deck below it. The rail stays at least 3 m above
-  the water it bridges.
+- Rail: level crossings meet the road at its natural level. A road under a rail bridge (or in a
+  tunnel under the rail) keeps `maxheight` (4 m when untagged) plus a 1.5 m deck below it. The
+  rail stays at least 3 m above the water it bridges. A rail tunnel passes under everything: the
+  3.2 km of the line's tunnel from Equi Terme to Argigliano run under the streams on the hillside.
 - A bridge or tunnel no profiled chain covers (paths, steps) is a straight line between its ends.
   Under the rail both ends keep the road clearance, as in a profiled tunnel (the pedestrian
   underpass at Equi Terme station).
@@ -218,32 +261,36 @@ is the largest connected component of every edge except tunnels.
 
 - **Trees**: a jittered lattice at one tree per 50 m² inside forest areas. Trees stay out of other
   areas, buildings (plus 2 m), roads (w/2 + 2 m), stream beds and the rail (6 m). Sparse trees
-  also line the banks of the wider streams. No cap: about 317 000 trees, positions rounded to 1 m
-  (at most one tree per spot) and a scale of 0.8–1.3 (2.5 MB packed). Placement uses a fixed hash, not a random generator.
+  also line the banks of the wider streams. No cap: about 1 012 000 trees, positions rounded to 1 m
+  (at most one tree per spot) and a scale of 0.8–1.3 (7.9 MB packed). Placement uses a fixed hash, not a random generator.
 - **Player spawn**: the Via Cesare Battisti sidewalk nearest the Carabinieri station, with 1.3 m
   clear of walk and drive walls.
-- **Parked spots**: one per 8 buildings (607) on the right kerb of tertiary, unclassified and
+- **Parked spots**: one per 8 buildings (797) on the right kerb of tertiary, unclassified and
   residential roads (not bridges or tunnels), at least 12 m from junctions and 9 m from each
   other, with two or more buildings within 40 m, off every carriageway (tunnels included) and
   clear of walls. The two nearest the Carabinieri station come first (the sim parks their cars
   there); the rest are drawn in hash order from every village's candidates, so each village gets
-  its share. Car parks within 150 m of Monzone station add up to 6 nose-in spots each (615
+  its share. Car parks within 150 m of Monzone station add up to 6 nose-in spots each (805
   spots in all). The sim decides how many cars to park on them.
 - **Districts** (`districts.ts`): 14 hand-placed discs (name, centre, radius) for Monzone's
   station, streets and hill clusters, then a disc per OSM `village` and `hamlet` node outside
-  them (20: Gragnola, Equi Terme, Viano, Colognola, Campiglione...). A `locality` (a named
+  them (26: Gragnola, Equi Terme, Viano, Vinca, Tenerano, Ugliancaldo...), then 35 hand-placed
+  landmark discs for the unpopulated mountains (Monte Sagro, Pizzo d'Uccello, Foce di Vinca, Cava
+  Cattani, Capanna Garnerone..., and the quarries of the Carrara side): peaks, saddles and huts on
+  their OSM nodes, quarries on their pits, localities and ridges centred by hand on the slope they
+  name. None overlaps a village disc. A `locality` (a named
   hillside or field, like I Pianelli above Equi Terme) gets none: it would claim the village's
-  station and spa. Each building
-  outside Monzone's discs goes to the nearest place node within 600 m; the place's disc is centred
-  on its node and covers 90% of those buildings plus 10 m, clamped to 80–400 m. `districtAt`
-  picks the disc the point is relatively closest to, or the nearest rim outside every disc.
+  station and spa. Each building outside Monzone's discs goes to the nearest place node within
+  600 m; the place's disc is centred on its node and covers 90% of those buildings plus 10 m,
+  clamped to 80–400 m. `districtAt` picks the disc the point is relatively closest to, or the
+  nearest rim outside every disc.
 
 ## JSON format
 
 `MonzoneMapJson` in `src/sim/map/index.ts` is the schema of the file, `MonzoneMap` the decoded
 map the game reads. Polylines and rings are flat `[x0, y0, x1, y1, ...]` arrays. Rings are open:
-outer rings counter-clockwise, holes clockwise. About 10.6 MB: heightmap 3.9 MB, trees 2.5 MB,
-walls 2.0 MB, buildings 0.8 MB.
+outer rings counter-clockwise, holes clockwise. About 36 MB: heightmap 12.7 MB, walls 10.5 MB,
+trees 7.9 MB, buildings 1.1 MB.
 
 | Field | Contents |
 |---|---|
@@ -264,11 +311,12 @@ walls 2.0 MB, buildings 0.8 MB.
 | `trees` | packed `x, y, scale` triples |
 | `spawns` | `player` and `parked`: `{ x, y, angle }` |
 
-The packed sections are base64 strings of little-endian 16-bit integers (`src/tools/pack.ts`
-encodes, `src/sim/map/packed.ts` decodes; the build throws if a value does not fit). The
-heightmap is int16 decimetres with each row delta-coded from its first node. Walls and trees are
-uint16 decimetres from a point 100 m south-west of the bounds' corner; a tree's scale is in
-hundredths. Decoding is exact: the same numbers a one-decimal JSON array would give.
+The packed sections are base64 strings of little-endian integers (`src/tools/pack.ts` encodes,
+`src/sim/map/packed.ts` decodes; the build throws if a value does not fit). The heightmap is
+int16 decimetres with each row delta-coded from its first node. Walls are uint32 decimetres from
+a point 100 m south-west of the bounds' corner (the play area spans more than 16 bits of
+decimetres). Trees stand on whole metres, so they are uint16 metres from the same corner, with
+the scale in hundredths. Decoding is exact: the same numbers a one-decimal JSON array would give.
 
 Profiled roads and rail carry extra points where the elevation bends between OSM vertices (dips
 under the rail, crests). Graph edges run a → b in the OSM way direction, so a `oneway` road may
@@ -278,14 +326,17 @@ reads the raw JSON.
 
 ## Checks and tools
 
-`src/sim/map/map.test.ts` checks the built map in about 2.5 s: heightmap coverage, spawns clear
-of walls and off traffic lanes (with parking in each of the five new villages), no walls on
+`src/sim/map/map.test.ts` checks the built map in about 4 s: heightmap coverage, spawns clear
+of walls and off traffic lanes (with parking in each village the map was widened for: Equi
+Terme, Gragnola, Colognola, Campiglione, Viano, Vinca, Ugliancaldo and Tenerano), no walls on
 roads, no drivable road inside a footprint, closed building interiors, one traffic component
-reaching the station, Monzone Alto, Equi Terme, Gragnola, Colognola, Campiglione and Viano,
-grades within 1.5× the class limits, bridge and underpass clearances, no perched water, and
-valid names, classes, styles, area kinds and districts (each of those five villages is its own
-HUD name, Equi Terme's station and spa included; CTR street names cased like "Via XX Settembre"
-and "Via Castel dell'Aquila"). Run `pnpm test` after every `pnpm map`.
+reaching the station, Monzone Alto and each of those villages, grades within 1.5× the class
+limits (a track shortcut pinned at both ends by the bends of one quarry road may only be the
+straight line between them), bridge and underpass clearances, no perched water, the Lucido's
+widths, and valid names, classes, styles, area kinds and districts (each of those villages is
+its own HUD name, Equi Terme's station and spa included, and Monte Sagro and Pizzo d'Uccello
+name themselves; CTR street names cased like "Via XX Settembre" and "Via Castel dell'Aquila").
+Run `pnpm test` after every `pnpm map`.
 
 `node src/tools/preview-map.ts [pxPerM=1] [minX,minY,maxX,maxY] [out.png]` draws a top-down PNG of
 the built map. It writes `.research/map-preview.png` by default.
@@ -294,7 +345,13 @@ the built map. It writes `.research/map-preview.png` by default.
 
 - **The terrain is 4 m.** The LiDAR resolves 1 m (stored at 2 m), but the game grid averages it
   over 4 m cells: terrace walls, steps and narrow road benches are smoothed into slopes. Slopes
-  come from a 12 m baseline. The LiDAR is from 2010, so earthworks since then are missing.
+  come from a 12 m baseline. The LiDAR is from 2010 (2012 on the Carrara side), so earthworks
+  since then are missing: the quarry floors of the Sagro and Solco basins have moved since, and
+  the OSM and UCS quarry outlines (2019–2026) do not match the terrain cut there. The datum
+  residual is fitted on the 2010 flight; the 2012 tiles agree with it within about 0.2 m of
+  elevation, but their horizontal fit is not checked (no CTR buildings stand there). The three
+  10 m DTM patches (south of Tenerano, Cava Bardiglio) are smooth: the 1:10 000 map they come
+  from misses the small relief.
 - **Roads are profiled, not copied.** Road surfaces follow the LiDAR within 0.5 m on Monzone's
   provincial roads (90th percentile), but the steep lanes of the hill villages are steeper than
   the 15% class limit and are fitted up to 3 m off the terrain there. Bridges come from the OSM
@@ -306,15 +363,20 @@ the built map. It writes `.research/map-preview.png` by default.
   minimum-area rectangle, flat otherwise): the CTR gives eave heights, not roof shapes. Small
   units (stairwells, extensions) are separate buildings, so roofs step where the real ones do,
   but every unit gets its own roof.
-- **The CTR is from 2019** and maps only the settled valleys; OSM fills the rest (about 290
-  buildings). Road widths fall back to the class width where the CTR has no road surface (parts
+- **The CTR is from 2019** and maps only the villages and the settled valleys; OSM fills the rest
+  (about 610 buildings: huts, quarry sheds, the Carrara side). Road widths fall back to the class width where the CTR has no road surface (parts
   of the SR445 keep 6.5 m), and a surface that spans several streets lends its name to all of them.
 - **Facade styles are a judgement.** The stone cores are discs traced by eye on the orthophoto;
   many old houses in the cores are plastered in reality, and a whole hamlet of up to 200
   buildings takes one style.
 - **River widths are one value per river.** The Aulella's 12 m water and 26 m bed fit Gragnola
   better than the wooded channel at Codiponte; the gravel bars of the Lucido at Pian del Molino
-  are wider than its 22 m bed. The LiDAR still shapes the banks.
+  are wider than its 22 m bed. The Vinca branch below Vinca is one OSM way, so its 8 m fits the
+  valley floor below the SP59 bridge but not the 3–6 m gorge just below Vinca. The LiDAR still
+  shapes the banks.
+- **Land cover is 1:10 000.** The UCS polygons (0.5 ha minimum) generalise the edge between rock,
+  pasture and wood; tree species are not mapped tree by tree (conifers are a flat 3% of the woods,
+  their share in the UCS woodland around the valley).
 - **Some names only exist on addresses.** The vote can pick the wrong piece of road. Culverted
   waterways are dropped; at-grade crossings imply a culvert instead.
 - **Re-downloading changes the map.** `pnpm fetch-osm` pulls current OSM edits; `data/raw` is the

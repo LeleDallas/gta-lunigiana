@@ -10,8 +10,8 @@ import { screenAxes } from "../sim/view.ts"
 import { roadHex } from "../render/lines.ts"
 import { css, PALETTE } from "../render/palette.ts"
 
-/** Base map pixels per metre. */
-const BASE = 0.5
+/** Base map pixels per metre: the minimap's own scale (90 canvas px over SPAN), so the blit is 1:1. */
+const BASE = 0.3
 /** Metres across the minimap. */
 const SPAN = 300
 
@@ -19,7 +19,8 @@ const SPAN = 300
 const AREA_HEX: Partial<Record<AreaKind, number>> = {
   forest: PALETTE.forest, cemetery: PALETTE.plasterGrey, pitch: PALETTE.forestLight, park: PALETTE.forestLight,
   parking: PALETTE.asphaltWorn, vineyard: PALETTE.grassDry, farmland: PALETTE.grassDry, farmyard: PALETTE.dirtTrack,
-  industrial: PALETTE.stoneMid, platform: PALETTE.asphaltWorn, school: PALETTE.grass, ruins: PALETTE.stoneMid, paved: PALETTE.asphaltWorn
+  industrial: PALETTE.stoneMid, platform: PALETTE.asphaltWorn, school: PALETTE.grass, ruins: PALETTE.stoneMid, paved: PALETTE.asphaltWorn,
+  quarry: PALETTE.marbleWhite, rock: PALETTE.limestone, scree: PALETTE.stoneLight, sparse: PALETTE.grassDry, scrub: PALETTE.forestLight
 }
 
 const HOME_UP = screenAxes(0).up

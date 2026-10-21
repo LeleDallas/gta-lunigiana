@@ -13,7 +13,7 @@ import { PALETTE } from "./palette.ts"
 type Cover = "meadow" | AreaKind | "pebble"
 /** Every cover, in fill order: later kinds draw over earlier ones. */
 const COVERS = [
-  "meadow", "forest", "grassland", "residential", "farmland", "farmyard", "vineyard", "park", "school",
+  "meadow", "forest", "grassland", "scrub", "sparse", "scree", "rock", "quarry", "residential", "farmland", "farmyard", "vineyard", "park", "school",
   "cemetery", "pitch", "parking", "industrial", "paved", "platform", "ruins", "pebble"
 ] as const satisfies ReadonlyArray<Cover>
 
@@ -27,6 +27,11 @@ export const COVER_LOOK = {
   meadow: { base: PALETTE.grass, alt: PALETTE.grassDry, share: 0.3 },
   forest: { base: PALETTE.forestDark, alt: PALETTE.forest, share: 0.35 },
   grassland: { base: PALETTE.grassDry, alt: PALETTE.grass, share: 0.35 },
+  scrub: { base: PALETTE.forestLight, alt: PALETTE.grassDry, share: 0.4 },
+  sparse: { base: PALETTE.grassDry, alt: PALETTE.limestone, share: 0.45 },
+  scree: { base: PALETTE.stoneLight, alt: PALETTE.limestone, share: 0.45 },
+  rock: { base: PALETTE.limestone, alt: PALETTE.stoneLight, share: 0.35 },
+  quarry: { base: PALETTE.marbleWhite, alt: PALETTE.limestone, share: 0.3 },
   residential: { base: PALETTE.grass, alt: PALETTE.grassDry, share: 0.3 },
   farmland: { base: PALETTE.grassDry, alt: PALETTE.dirtTrack, share: 0.5, stripes: true },
   farmyard: { base: PALETTE.dirtTrack, alt: PALETTE.grassDry, share: 0.3 },

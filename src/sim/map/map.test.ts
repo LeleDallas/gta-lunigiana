@@ -61,16 +61,19 @@ const VILLAGES = {
   Gragnola: { x: -1751.2, y: 3360.4 },
   Colognola: { x: -1732.9, y: 1119.4 },
   Campiglione: { x: -2255.9, y: 1473.2 },
-  Viano: { x: -2319.6, y: 58.6 }
+  Viano: { x: -2319.6, y: 58.6 },
+  Vinca: { x: 2273.6, y: -2620.3 },
+  Ugliancaldo: { x: 4157.6, y: 1461.8 },
+  Tenerano: { x: -2169.5, y: -986.6 }
 }
 
 test("bounds and heightmap cover the play area", () => {
-  assert.deepEqual(MAP.bounds, { minX: -2900, minY: -694.5, maxX: 2300, maxY: 3900 })
+  assert.deepEqual(MAP.bounds, { minX: -2900, minY: -6100, maxX: 4900, maxY: 3900 })
   const hm = MAP.heightmap
   assert.equal(hm.data.length, hm.cols * hm.rows)
   assert.ok(hm.x0 <= MAP.bounds.minX && hm.x0 + (hm.cols - 1) * hm.cell >= MAP.bounds.maxX)
   assert.ok(hm.y0 <= MAP.bounds.minY && hm.y0 + (hm.rows - 1) * hm.cell >= MAP.bounds.maxY)
-  assert.ok(Array.from(hm.data).every((v) => Number.isInteger(v) && v > 1400 && v < 10000)) // Gragnola's riverbed to the Apuan ridges
+  assert.ok(Array.from(hm.data).every((v) => Number.isInteger(v) && v > 1400 && v < 18500)) // the Aulella below Gragnola to the Apuan ridge
 })
 
 // Regression: rounded to the metre, neighbouring lattice trees could land on one spot (drawn and collided twice).
@@ -79,7 +82,7 @@ test("trees: inside the bounds, at most one per spot", () => {
   for (let i = 0; i < MAP.trees.length; i += 3) {
     const x = MAP.trees[i]!, y = MAP.trees[i + 1]!
     assert.ok(inside(x, y), `tree at ${x},${y}`)
-    spots.add(x * 8192 + y)
+    spots.add(x * 65536 + y)
   }
   assert.equal(spots.size, MAP.trees.length / 3)
 })
@@ -93,7 +96,7 @@ test("heightAt: station on the valley floor, Monzone Alto on its spur", () => {
 
 test("player spawn and parked cars are inside the bounds, clear of walls and off traffic lanes", () => {
   const spots = [MAP.spawns.player, ...MAP.spawns.parked]
-  assert.ok(MAP.spawns.parked.length >= 500 && MAP.spawns.parked.length <= 700, `${MAP.spawns.parked.length} parked`)
+  assert.ok(MAP.spawns.parked.length >= 700 && MAP.spawns.parked.length <= 950, `${MAP.spawns.parked.length} parked`)
   for (const name of Object.keys(VILLAGES)) assert.ok(MAP.spawns.parked.some((p) => districtAt(p.x, p.y).name === name), `no parking in ${name}`)
   for (const s of spots) {
     assert.ok(inside(s.x, s.y), JSON.stringify(s))
@@ -207,11 +210,20 @@ test("traffic graph: one component reaching the station, Monzone Alto and the vi
 test("profiles: class grades (1.5x relaxed at most), deck and underpass clearances, no perched water", () => {
   // 1.5 x the class limit, plus slack where two junction pins conflict (a straight line between them).
   const limit: Record<string, number> = { tertiary: 0.16, unclassified: 0.24, residential: 0.24, service: 0.31, track: 0.31, rail: 0.0425 }
+  const ends = bucketed(MAP.roads, (r) => r.pts, 0.1)
+  /** Both ends on another road: a link whose two junctions were set by roads profiled before it. */
+  const pinned = (pts: ReadonlyArray<number>) => [0, pts.length - 2].every((i) => {
+    const x = pts[i]!, y = pts[i + 1]!
+    return ends(x, y).some((q) => q.pts !== pts && segsOf(q.pts).some((sg) => segmentDistance(sg, x, y) < 0.1))
+  })
   for (const r of [...MAP.roads, ...MAP.rail.map((q) => ({ ...q, cls: "rail" }))]) {
     const max = limit[r.cls]
     if (max === undefined) continue
     const s = [0]
     for (let i = 1; i < r.z.length; i++) s.push(s[i - 1]! + hypot(r.pts[2 * i]! - r.pts[2 * i - 2]!, r.pts[2 * i + 1]! - r.pts[2 * i - 1]!))
+    // A track shortcut between two bends of one quarry road (Carrara side of the Sagro) can only be the straight line between them.
+    const straight = r.z.every((z, i) => Math.abs(z - r.z[0]! - ((r.z.at(-1)! - r.z[0]!) * s[i]!) / s.at(-1)!) < 0.15)
+    if (r.cls === "track" && straight && pinned(r.pts)) continue
     for (let i = 0; i < r.z.length; i++) for (let j = i + 1; j < r.z.length; j++) if (s[j]! - s[i]! >= 8) {
       const g = Math.abs(r.z[j]! - r.z[i]!) / (s[j]! - s[i]!)
       assert.ok(g <= max, `${r.cls} ${r.id} grade ${(g * 100).toFixed(1)}% at ${r.pts[2 * i]},${r.pts[2 * i + 1]}`)
@@ -241,6 +253,12 @@ test("road names, classes, styles, area kinds and districts", () => {
   assert.ok(MAP.roads.every((r) => (ROAD_CLASSES as ReadonlyArray<string>).includes(r.cls) && r.z.length * 2 === r.pts.length))
   assert.ok(MAP.buildings.every((b) => (BUILDING_STYLES as ReadonlyArray<string>).includes(b.style) && b.tint >= 0 && b.tint <= 3 && b.h >= 1.5 && b.h <= 45))
   assert.ok(MAP.areas.every((a) => isAreaKind(a.kind)), "every area kind is one of AREA_KINDS")
+  // The Regione Toscana land cover: the sparse vegetation of the high slopes (it alone has it) and the bare rock of Pizzo d'Uccello.
+  assert.ok(MAP.areas.some((a) => a.kind === "sparse"), "UCS sparse vegetation")
+  const uccello = MAP.pois.find((p) => p.kind === "natural=peak" && p.name === "Pizzo d'Uccello")!
+  assert.ok(MAP.areas.some((a) => a.kind === "rock" && inRing(uccello.x, uccello.y, a.rings[0]!)), "Pizzo d'Uccello is bare rock")
+  // Regression: running on into the unmapped mountains, the road from Casciana lost the CTR name of its Ugliancaldo stretch.
+  assert.ok(MAP.roads.some((r) => r.name === "Via di Ugliancaldo"), "Via di Ugliancaldo")
   const names = new Set(MAP.districts.map((d) => d.name))
   for (const name of ["Monzone (Stazione)", "Monzone Alto", "Santa Lucia", "Torrignana", "Aiola", "Castello di Aiola", "Novicchia", "Acquanera"]) assert.ok(names.has(name), name)
   const centres = MAP.buildings.map((b) => {
@@ -248,11 +266,18 @@ test("road names, classes, styles, area kinds and districts", () => {
     return { x: b.outer.filter((_, i) => i % 2 === 0).reduce((a, v) => a + v, 0) / n, y: b.outer.filter((_, i) => i % 2 === 1).reduce((a, v) => a + v, 0) / n }
   })
   const covered = centres.filter((c) => MAP.districts.some((d) => hypot(c.x - d.x, c.y - d.y) <= d.r)).length
-  assert.ok(covered >= 0.85 * centres.length, `${covered}/${centres.length} buildings inside a district disc`)
+  // Most buildings are in a village; the rest are farmhouses, mountain huts and quarry sheds.
+  assert.ok(covered >= 0.8 * centres.length, `${covered}/${centres.length} buildings inside a district disc`)
   assert.equal(districtAt(STATION.x, STATION.y).name, "Monzone (Stazione)")
   assert.equal(districtAt(ALTO.x, ALTO.y).name, "Monzone Alto")
   for (const [name, p] of Object.entries(VILLAGES)) assert.equal(districtAt(p.x, p.y).name, name)
   assert.ok(MAP.districts.includes(districtAt(MAP.bounds.maxX, MAP.bounds.minY))) // far corner: nearest rim
+  // Regression: by the nearest rim, the HUD named Vinca on the summits above it; a wide Balzone disc then took Vinca's hairpins.
+  for (const name of ["Monte Sagro", "Pizzo d'Uccello"]) {
+    const peak = MAP.pois.find((p) => p.kind === "natural=peak" && p.name === name)!
+    assert.equal(districtAt(peak.x, peak.y).name, name)
+  }
+  assert.equal(districtAt(1379, -2603).name, "Vinca", "the SP59 hairpins below Vinca")
   // Regression: the I Pianelli locality (a hillside above the railway) took Equi Terme's station and spa.
   for (const p of MAP.pois.filter((q) => q.kind === "railway=station" || q.name === "Terme di Equi")) {
     if (p.name?.includes("Equi") === true) assert.equal(districtAt(p.x, p.y).name, "Equi Terme", `${p.kind} ${p.name}`)
@@ -262,6 +287,12 @@ test("road names, classes, styles, area kinds and districts", () => {
   assert.ok(MAP.roads.every((r) => !/\b(Xx|Ii|Xxiv)\b|\b(Dell|Dall|Sull|Nell)'/.test(r.name ?? "")), "mis-cased street name")
   // Regression: its stone-core disc sat 54 m off the castle, which came out plaster.
   assert.equal(MAP.buildings.find((b) => b.name === "Castello dell'Aquila")?.style, "stone")
+})
+
+// Regression: every way named Torrente Lucido was 8 m wide, up the Vinca valley to its source under the Garnerone.
+test("water: the Lucido is 8 m on the valley floor and 4 m above Vinca", () => {
+  const w = (id: number) => MAP.water.find((o) => o.id === id)?.w
+  assert.deepEqual([w(254825035), w(140780317), w(696231807), w(687230881)], [8, 4, 8, 14])
 })
 
 // Regression: OSM centrelines ran up to 3.5 m inside CTR houses; the walls opened a corridor the house drawn did not show.

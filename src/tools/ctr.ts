@@ -1,7 +1,7 @@
 // Regione Toscana CTR 1:2000 (2019 flight, data/raw/rt/ctr) in local metres, clipped to the play
 // area: buildings with their surveyed eave elevation, road surfaces with their street names, and
 // the area the sheets map. `fetch-rt.ts` writes the files.
-import { readdirSync } from "node:fs"
+import { existsSync, readdirSync } from "node:fs"
 import { join } from "node:path"
 
 import type { BuildingStyle } from "../sim/map/kinds.ts"
@@ -101,8 +101,11 @@ const streetName = (toponym: string): string | undefined => {
 export const readCtr = (dir: string): Ctr => {
   /** Every sheet `fetch-rt.ts` wrote, in name order. */
   const sheets = readdirSync(dir).filter((f) => f.endsWith("_AED.shp.gz")).map((f) => f.slice(0, -"_AED.shp.gz".length)).sort()
-  const layer = (name: string, base = 0) =>
-    sheets.flatMap((sheet) => readShp(join(dir, `${sheet}_${name}`)).map((rec, i) => ({ rec, id: -(Number(sheet.slice(3)) * 1e5 + base + i) })))
+  /** A layer's records over every sheet that has it (a sheet with no garages or road areas has no AGE or AVI). */
+  const layer = (name: string, base = 0) => sheets.flatMap((sheet) => {
+    const path = join(dir, `${sheet}_${name}`)
+    return existsSync(`${path}.shp.gz`) ? readShp(path).map((rec, i) => ({ rec, id: -(Number(sheet.slice(3)) * 1e5 + base + i) })) : []
+  })
   const buildings: Array<CtrBuilding> = []
   for (const { rec, id } of [...layer("AED"), ...layer("AGE", 5e4)]) {
     const code = rec.attrs.Cod_CTR!
@@ -139,12 +142,20 @@ const GENERIC_SURFACES: ReadonlySet<string> = new Set(["asphalt", "unpaved"])
  * Width, surface and name of each road from the CTR road surfaces under it: the median width
  * across the surface (perpendicular to the centreline) at stations every STATION m that lie on a
  * surface, asphalt or dirt by most stations, and the street name most of them share. A road takes
- * them when at least half its stations, and three or more, are on a surface. OSM names and
- * specific OSM surfaces (cobblestone, gravel...) stay.
+ * the width and surface when at least half its stations, and three or more, are on a surface. It
+ * takes the name when that holds for its stations inside the area the sheets map (`mapped`): a
+ * road that runs on into the unmapped mountains keeps the name its village stretch shows. OSM
+ * names and specific OSM surfaces (cobblestone, gravel...) stay.
  */
-export const fitRoads = (roads: ReadonlyArray<{ readonly cls: string; name?: string; w: number; surface: string; readonly pts: ReadonlyArray<V> }>, areas: ReadonlyArray<RoadArea>): void => {
+export const fitRoads = (roads: ReadonlyArray<{ readonly cls: string; name?: string; w: number; surface: string; readonly pts: ReadonlyArray<V> }>, areas: ReadonlyArray<RoadArea>, mapped: ReadonlyArray<ReadonlyArray<number>>): void => {
   const box = areas.map((a) => ringBox(a.rings[0]!))
   const grid = staticGrid(areas.length, (k) => box[k]!, 32)
+  const mappedIn = staticGrid(mapped.length, (k) => ringBox(mapped[k]!), 64)
+  const inMapped = (x: number, y: number): boolean => {
+    let hit = false
+    mappedIn(x, y, x, y, (k) => (hit ||= pointInRing(x, y, mapped[k]!)))
+    return hit
+  }
   /** The surface under (x, y), the first by index on an overlap, or -1. */
   const under = (x: number, y: number): number => {
     let hit = -1
@@ -163,9 +174,10 @@ export const fitRoads = (roads: ReadonlyArray<{ readonly cls: string; name?: str
     if (!SURFACED.has(road.cls)) continue
     const arc = arcLengths(road.pts), length = arc.at(-1)!
     const widths: Array<number> = [], names = new Map<string, number>()
-    let stations = 0, paved = 0
+    let stations = 0, surveyed = 0, paved = 0
     for (let at = END; at <= length - END; at += STATION, stations++) {
       const { x, y, tx, ty } = pointAt(road.pts, arc, at), k = under(x, y)
+      if (k >= 0 || inMapped(x, y)) surveyed++
       if (k < 0) continue
       const left = edge(x, y, -ty, tx), right = edge(x, y, ty, -tx)
       if (left >= REACH || right >= REACH) continue
@@ -174,11 +186,12 @@ export const fitRoads = (roads: ReadonlyArray<{ readonly cls: string; name?: str
       const name = areas[k]!.name
       if (name !== undefined) names.set(name, (names.get(name) ?? 0) + 1)
     }
-    if (widths.length < 3 || widths.length * 2 < stations) continue
+    if (widths.length < 3) continue
+    const [best] = [...names].sort((p, q) => q[1] - p[1] || (p[0] < q[0] ? -1 : 1))
+    if (road.name === undefined && widths.length * 2 >= surveyed && best !== undefined && best[1] * 2 >= widths.length) road.name = best[0]
+    if (widths.length * 2 < stations) continue
     widths.sort((p, q) => p - q)
     road.w = Math.round(Math.min(WIDTH.max, Math.max(WIDTH.min, widths[Math.floor(widths.length / 2)]!)) * 10) / 10
     if (GENERIC_SURFACES.has(road.surface)) road.surface = paved * 2 >= widths.length ? "asphalt" : "unpaved"
-    const [best] = [...names].sort((p, q) => q[1] - p[1] || (p[0] < q[0] ? -1 : 1))
-    if (road.name === undefined && best !== undefined && best[1] * 2 >= widths.length) road.name = best[0]
   }
 }

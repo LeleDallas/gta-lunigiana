@@ -13,7 +13,7 @@ import { Vec2 } from "@typeonce/ritmo-math"
 import { BasicShadowMap, DirectionalLight, HemisphereLight, Object3D, Scene, Vector3, WebGLRenderer } from "three"
 
 import { dismissTitleOnInput, makeHud, pausable, toggleMapOnKey } from "./hud/hud.ts"
-import { groundY } from "./render/ground.ts"
+import { groundY, terrainY } from "./render/ground.ts"
 import { blend, makeRegistries, People, render, RenderClock, Vehicles } from "./render/index.ts"
 import { PALETTE } from "./render/palette.ts"
 import { followSun, PixelView, QUARTER, turnToward, WIDEST_ZOOM, zoomFor } from "./render/pipeline.ts"
@@ -41,9 +41,7 @@ const toSun = new Vector3()
 const sun = new DirectionalLight(0xfff0d8, 2)
 sun.castShadow = true
 sun.shadow.mapSize.set(2048, 2048)
-sun.shadow.bias = -0.0005
-sun.shadow.normalBias = 0.05
-sun.shadow.camera.far = 900
+sun.shadow.normalBias = 0.05 // depth bias and range: followSun
 scene.add(sun, sun.target)
 const world = new World(scene)
 
@@ -117,9 +115,8 @@ const draw = (frame: FixedLoop.Frame): void => {
   camera.placed = true
   const zoom = (camera.zoom = zoomFor(player.vehicle?.speed, camera.zoom))
   view.texelsPerMetre += Math.abs(zoom - view.texelsPerMetre) < 0.01 ? zoom - view.texelsPerMetre : (zoom - view.texelsPerMetre) * (1 - Math.exp(-3 * dt))
-  const { width, depth } = view.ground
-  // The view's ground rectangle turns against the light: its half-diagonal bounds it in every light direction.
-  followSun(sun, view.focus, toSun.copy(HOME_SUN).applyAxisAngle(Object3D.DEFAULT_UP, view.yaw), Math.hypot(width, depth) / 2 + 10)
+  toSun.copy(HOME_SUN).applyAxisAngle(Object3D.DEFAULT_UP, view.yaw)
+  followSun(sun, view.focus, toSun, view.shadowFit(toSun, (gx, gz) => terrainY(gx, -gz)))
   world.update(view.focus, view.yaw, reach(), STREAM_BUDGET_MS)
   view.render(scene)
   hud.update(player, x, y, angle, view.yaw)

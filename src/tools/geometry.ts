@@ -7,8 +7,8 @@ export interface V { readonly x: number; readonly y: number; readonly id?: strin
 
 export const ORIGIN = { lat: 44.16175, lon: 10.13 }
 export const M_PER_DEG = { lat: 111115.37, lon: 79987.94 }
-/** Play area, local metres: lat 44.1555–44.1969, lon 10.0937–10.1588 (Monzone, Equi Terme, Gragnola, Viano...). */
-export const BOUNDS = { minX: -2900, minY: -694.5, maxX: 2300, maxY: 3900 }
+/** Play area, local metres: lat 44.1069–44.1968, lon 10.0937–10.1913. The whole Lucido catchment, ridge to ridge, plus the Aulella side by Gragnola and Codiponte. */
+export const BOUNDS = { minX: -2900, minY: -6100, maxX: 4900, maxY: 3900 }
 
 export const r1 = (v: number): number => Math.round(v * 10) / 10
 export const toLocal = (lat: number, lon: number): P => [(lon - ORIGIN.lon) * M_PER_DEG.lon, (lat - ORIGIN.lat) * M_PER_DEG.lat]
@@ -141,11 +141,20 @@ export const along = (s: ReadonlyArray<number>, z: ArrayLike<number>, at: number
   return z[i - 1]! + (z[i]! - z[i - 1]!) * t
 }
 
+/** Bounding box [minX, minY, maxX, maxY] of a polyline. */
+const lineBox = (l: ReadonlyArray<V>): [number, number, number, number] => {
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity
+  for (const p of l) [x0, y0, x1, y1] = [Math.min(x0, p.x), Math.min(y0, p.y), Math.max(x1, p.x), Math.max(y1, p.y)]
+  return [x0, y0, x1, y1]
+}
+
 export interface Crossing { readonly x: number; readonly y: number; readonly sa: number; readonly sb: number }
 
 /** Points where polylines a and b meet (shared vertices included, duplicates dropped), with the arc length along each. */
 export const crossings = (a: ReadonlyArray<V>, b: ReadonlyArray<V>): Array<Crossing> => {
   const out: Array<Crossing> = []
+  const [ax0, ay0, ax1, ay1] = lineBox(a), [bx0, by0, bx1, by1] = lineBox(b)
+  if (ax0 > bx1 || bx0 > ax1 || ay0 > by1 || by0 > ay1) return out
   const la = arcLengths(a), lb = arcLengths(b)
   for (let i = 0; i + 1 < a.length; i++) for (let j = 0; j + 1 < b.length; j++) {
     const p = a[i]!, q = a[i + 1]!, r = b[j]!, s = b[j + 1]!

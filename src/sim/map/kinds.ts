@@ -45,7 +45,7 @@ export type BuildingStyle = (typeof BUILDING_STYLES)[number]
 /** Land-use kinds the build emits. */
 export const AREA_KINDS = [
   "forest", "cemetery", "pitch", "park", "parking", "vineyard", "farmland", "farmyard", "industrial", "residential", "platform", "school", "ruins",
-  "grassland", "paved"
+  "grassland", "paved", "quarry", "rock", "sparse", "scree", "scrub"
 ] as const
 export type AreaKind = (typeof AREA_KINDS)[number]
 

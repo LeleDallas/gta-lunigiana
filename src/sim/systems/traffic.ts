@@ -5,7 +5,7 @@ import { forwardSpeed, wrapAngle } from "../body.ts"
 import { graph } from "../map/index.ts"
 import {
   allowsModel, alongLane, cruiseSpeed, distanceToEdge, edgeIndex, endNode, facesForward, type Lane, laneOf, lanePoint, laneSide, leadsToDeadEnd,
-  nextTrafficEdge, roadOf
+  nextTrafficEdge, roadOf, walkSide
 } from "../route.ts"
 import { Autopilot, CarInput, Driving, Game, Motion, Person, Pose, Rng, Route, STEP, Time, Traffic, Vehicle } from "../schema.ts"
 import { PERSON_RADIUS } from "../tuning.ts"
@@ -140,9 +140,11 @@ export const TrafficAI = Game.System("Lunigiana/TrafficAI", {
     want = Math.min(want, CORNER_MIN + (cruise - CORNER_MIN) * Math.max(0, Ops.cos(error)))
     const fx = Ops.cos(pose.angle), fy = Ops.sin(pose.angle)
     const range = CONE_BASE + Math.max(0, speed) * CONE_TIME
-    const onRoad = (p: { readonly x: number; readonly y: number }) =>
-      distanceToEdge(route.edge, p.x, p.y) < roadOf(route.edge).w / 2 + PERSON_RADIUS || distanceToEdge(pilot.next, p.x, p.y) < roadOf(pilot.next).w / 2 + PERSON_RADIUS
-    // Whether the nearest thing held back for is a person in the way (ahead of the bumper, on the carriageway), who moves on.
+    // The carriageway or its verge, where walkers keep (`walkSide`).
+    const inWay = (edge: number, p: { readonly x: number; readonly y: number }) =>
+      distanceToEdge(edge, p.x, p.y) < Math.max(roadOf(edge).w / 2, walkSide(roadOf(edge))) + PERSON_RADIUS
+    const onRoad = (p: { readonly x: number; readonly y: number }) => inWay(route.edge, p) || inWay(pilot.next, p)
+    // Whether the nearest thing held back for is a person in the way (ahead of the bumper, on the carriageway or its verge), who moves on.
     let forPerson = false
     for (const other of obstacles) {
       if (other.id === entity.id) continue

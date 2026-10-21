@@ -19,7 +19,7 @@
 import { staticGrid } from "../collide.ts"
 import { BUILDING_STYLES, type BuildingStyle, isRoadClass, pushTrunk, type RoadClass, TRUNK } from "./kinds.ts"
 import raw from "./monzone.json" with { type: "json" }
-import { unpackPoints, unpackRows } from "./packed.ts"
+import { unpackRows, unpackTrees, unpackWalls } from "./packed.ts"
 
 export { AREA_KINDS, type AreaKind, BUILDING_STYLES, type BuildingStyle, isAreaKind, isDrivable, ROAD_CLASSES, type RoadClass } from "./kinds.ts"
 
@@ -150,8 +150,8 @@ const json: MonzoneMapJson = raw
 export const MAP: MonzoneMap = {
   ...json,
   heightmap: { ...json.heightmap, data: unpackRows(json.heightmap.data, json.heightmap.cols) },
-  walls: { walk: unpackPoints(json.walls.walk, json.bounds, 4, 4), drive: unpackPoints(json.walls.drive, json.bounds, 4, 4) },
-  trees: unpackPoints(json.trees, json.bounds, 3, 2)
+  walls: { walk: unpackWalls(json.walls.walk, json.bounds), drive: unpackWalls(json.walls.drive, json.bounds) },
+  trees: unpackTrees(json.trees, json.bounds)
 }
 
 /** The road's class; the build only emits `ROAD_CLASSES` (checked by map.test.ts), anything else reads as "path". */

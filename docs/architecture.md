@@ -23,7 +23,7 @@ keyboard ──► KeyboardInput service ──► CaptureInput ──► Input 
 
 `setup` runs once after the runtime is made:
 
-1. `SpawnWorld` (`systems/spawn.ts`): the player and the parked cars on 150 of the map's parked
+1. `SpawnWorld` (`systems/spawn.ts`): the player and the parked cars on 200 of the map's parked
    spots (`PARKED`), the two Carabinieri cars included.
 2. `applyDeferred`
 
@@ -135,15 +135,15 @@ The render schedule (`src/render/index.ts`) uses `@typeonce/ritmo-render`:
 The static world (`src/render/world.ts`) is cut into 128 m chunks (`src/render/chunks.ts`), and
 only the chunks around the camera exist as meshes. A built chunk has a terrain mesh, a solid mesh
 (buildings, roofs, bridges, platforms), a decal mesh (roads, water, rail) and one `InstancedMesh`
-per tree kind. A 96 m apron of extra chunks continues the terrain, lines and trees beyond the map
+per tree kind. A 192 m apron of extra chunks continues the terrain, lines and trees beyond the map
 bounds. Terrain cells take their colours from the land cover (`src/render/landcover.ts`): the
 map's areas, meadow where none covers a cell, paving where open ground lies within 3 m of both a
 wall and a road's edge (house fronts, sidewalks, alleys), and pebble beds along the wide streams.
 
 Streaming:
 
-- `new World(scene)` prepares, once (≈ 65 ms in Chrome): the land-cover raster for the whole map
-  (≈ 40 ms and 1.5 MB, cheaper than clipping areas per chunk), every static item as a `Piece`
+- `new World(scene)` prepares, once (≈ 190 ms in Node for the whole valley): the land-cover raster
+  for the whole map (≈ 80 ms and 4.9 MB, cheaper than clipping areas per chunk), every static item as a `Piece`
   (an anchor polyline plus a `draw` function), the pieces bucketed per chunk with the range of
   segments that reach it, and the trees bucketed per chunk and kind. A chunk build reads only its
   own bucket; it draws each piece's segments plus one neighbour on each side (for ribbon mitres)
@@ -163,7 +163,9 @@ Streaming:
 - Measured (1280×720 and 2560×1440, focus swept at 40 m/s through Monzone, Equi Terme, Gragnola,
   Colognola, Campiglione and Viano): 20–37 chunks loaded, chunk builds ≈ 0.25 ms on average and
   under 3 ms at worst, first frame after ≈ 0.6–0.85 s, JS heap ≈ 185 MB (was ≈ 550 MB building the
-  whole map), no frame over 30 ms, 60 fps.
+  whole map), no frame over 30 ms, 60 fps. Widened to the whole valley (7.8 × 10 km, 3.3× the
+  area), a production build loads in ≈ 0.9 s (0.8 s before) with ≈ 245 MB of JS heap after GC
+  (93 MB before); chunks per view do not grow.
 
 The pixel pipeline (`src/render/pipeline.ts`):
 
@@ -185,7 +187,14 @@ The pixel pipeline (`src/render/pipeline.ts`):
 - The camera leads the player by 0.6 s of velocity, at most 14 m (`LOOK_AHEAD`), and eases
   toward its target.
 - The sun's shadow box follows the view, snapped to shadow-map texels. The sun turns with the
-  view, so the lit and shaded wall faces look the same whichever way the camera looks.
+  view, so the lit and shaded wall faces look the same whichever way the camera looks. The box
+  covers the ground the view shows (`shadowFit`): a 5 × 5 grid of rays across the view is marched
+  down to the terrain, because a slope falling away from the camera shows ground far past the flat
+  rectangle (at most 300 m across the light) and a valley seen between the view's edges can lie
+  hundreds of metres deeper along the light. Its depth also reaches 1.5 km toward the sun for the
+  ridges that shade a valley. The depth bias stays 0.45 m whatever the depth range.
+- The far plane is 3 km from the camera (2.5 km past the focus): from the Apuan summits the
+  deepest ground in view is ≈ 2.45 km from the camera, past the 1 km the plane used to stop at.
 
 ## HUD
 
@@ -200,16 +209,18 @@ the `PlayerView` inspector (`src/sim/views.ts`) and the map:
 - Location: the name of the nearest road within 15 m, if it has one (tracks and paths skipped,
   so an unnamed road never borrows a side street's name), and the district disc from `districtAt`. Looked up again only after moving 2 m.
 - The minimap is drawn once to an offscreen canvas and then blitted around the player, 300 m
-  across, turned with the view so that screen-up is up. At 0.5 px/m the whole map is 2600 × 2298 px (6 MP,
-  24 MB): under every browser's canvas limit (the strictest, Safari's, is 16.7 MP). Drawing it
-  takes ≈ 10 ms at load; the per-frame blit ≈ 1 ms.
+  across, turned with the view so that screen-up is up. At 0.3 px/m, the minimap's own scale (90
+  canvas px over 300 m, so the blit is 1:1), the whole map is 2340 × 3000 px (7 MP, 28 MB): under
+  every browser's canvas limit (the strictest, Safari's, is 16.7 MP). Drawing it takes ≈ 15 ms at
+  load; the per-frame blit ≈ 1 ms.
 - The full map (`src/hud/worldmap.ts`, `#hud-map` in `index.html`): the key labelled M toggles
   it (matched by the character it types, so AZERTY works; non-Latin layouts fall back to the key's
   position) and Esc closes it; repeats and Ctrl/Cmd/Alt chords are ignored. It paints the whole
   area north-up at screen resolution with the same layers as the minimap (`paintMap`), but roads
   light and at least 1.5–2 px wide so the network reads. It names the OSM villages (big, placed
-  first) and hamlets (`place=*` POIs, localities left out); a label that would overlap another or
-  the north arrow is dropped with its dot. The player is a red arrow in a red ring (no label is
+  first) and hamlets (`place=*` POIs, localities left out), then the peaks that are HUD landmark
+  districts (Monte Sagro, Pizzo d'Uccello...), once per name; a label that would overlap another
+  or the north arrow is dropped with its dot. The player is a red arrow in a red ring (no label is
   red), drawn on its own canvas over the map so CSS blinks it (steady under
   `prefers-reduced-motion`), with a 1 km bar and the player's district in the header. It is repainted on open, on
   resize, and when the pixel ratio changes. The dialog takes focus when it opens, so screen
