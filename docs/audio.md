@@ -210,7 +210,8 @@ Sounds of the player's own car are heard from inside it:
 - the engine has its own fixed level (68 dB(A), centred, no Doppler), and its voice switches to
   the cabin tone behind the firewall (a 2.5 kHz lowpass and +4 dB at 120 Hz);
 - the horn (in the grille) and the siren (on the roof) pass the whole cabin, like any outside sound;
-- its crashes, scrapes, doors, starter and the thud of a person it hits pass none;
+- its crashes, scrapes, doors, starter and the thud of a person it hits pass none, but their
+  street reverb and their echoes come back from outside and pass the whole cabin;
 - the tyres, the truck's beeper and the beds pass the whole cabin.
 
 ### Masking and proximity
@@ -283,11 +284,12 @@ Buildings are not echo faces: village streets get reverb, not echoes.
 
 ### Street reverb
 
-Reverb is sound scattered back by the surfaces around the listener, and outdoors only facades
-return enough of it to hear. Over open ground the energy that arrives after the direct sound stays
-15 dB and more under it (the ground's own reflection, under 2 ms late, is the ground effect), and
-in a forest the tail sits about 30 dB under the direct sound 10 m away. So the fields, the woods and
-the open valley play dry.
+Reverb is sound scattered back by the surfaces around the listener. Over open ground the energy
+that arrives after the direct sound stays 15 dB and more under it (the ground's own reflection,
+under 2 ms late, is the ground effect), so the fields and the open valley play dry. A forest's
+trunks scatter more: its tail sits about 30 dB under the direct sound 10 m away, but the direct
+sound falls faster than the diffuse tail, which is only 10–16 dB under it 100 m away. The woods
+play dry all the same (see Known limits): only streets send to the reverb.
 
 `streetAt` measures how enclosed the ears are: 8 directions out to 15 m, each counting the facade it
 meets by its height above the listener's ground (4 m and more count fully). The mean, 0 (open) to 1
@@ -305,7 +307,9 @@ wet = street² · 10^(8/20) · √(r / 10), with r clamped to 2.5–40 m
   both ends (0.75) is 5 dB drier, a lane with gaps (0.5) 12 dB, a single wall (0.3) 21 dB, which is
   as good as dry.
 - **Cabin and beds.** Inside a vehicle the send is a quarter (the cabin's own noise masks the
-  tail). The wind and cricket beds are diffuse already and send nothing.
+  tail). The tail comes back from outside, so a sound of the player's own car that skips the
+  cabin sends that much less again (15 dB in the closed cabins, 6 dB in the Ape). The wind and
+  cricket beds are diffuse already and send nothing.
 
 Held voices glide their send as the street eases, so walking into a village fades the reverb in.
 
@@ -473,9 +477,9 @@ functions (`synth/world.test.ts` imports them to check).
 | `src/render/index.test.ts` | every system of the render and audio schedules declares no writes |
 | `src/audio/acoustics.test.ts` | the laws: the line source against the exact table, the air cutoffs, Doppler, the pan, diffraction, ground, foliage, masking, the mix calibration |
 | `src/audio/occlusion.test.ts` | path differences on real map spots: a flat meadow, Monzone Alto's 30 m tower, a bell over its own walls, Monte San Giorgio between its flanks |
-| `src/audio/places.test.ts`, `src/audio/places/water.test.ts` | surfaces, ambience shares, streets, echoes at Equi Terme, bells, dogs and birds, the Torrente Lucido from Monzone station, the Fontana di Aiola |
-| `src/audio/director/index.test.ts` | the director on a recording speaker at real map spots: proximity (in the open and behind a ridge), a building's muffling, Doppler, step cadence, travel delay, crash merging and scrapes, echoes off a rock face and hidden in a street, the reverb dry in the open and wet in a walled street, nothing before the context, the cabin, getting in and out, horn and siren, the bells, water and its masking, the valley's never-silent bed and the river 15 m away against behind the houses, voice caps and their hysteresis, flee cues |
-| `src/audio/director/hearing.test.ts`, `occluder.test.ts` | the reverb send: none in the open, in a street by distance (capped), gaps and the cabin; the obstacle cache's refresh and forgetting |
+| `src/audio/places.test.ts`, `src/audio/places/water.test.ts` | surfaces, ambience shares, streets, echoes off the rock at Equi Terme and none off Monzone's gentler slopes, bells, dogs and birds, the Torrente Lucido from Monzone station, the Fontana di Aiola |
+| `src/audio/director/index.test.ts` | the director on a recording speaker at real map spots: proximity (in the open and behind a ridge), a building's muffling, Doppler, step cadence, travel delay, crash merging and scrapes, echoes off a rock face and hidden in a street, the reverb dry in the open and wet in a walled street, nothing before the context, the cabin (the own crash's tail and echoes through it), getting in and out, horn and siren, the bells, water and its masking, the valley's never-silent bed and the river 15 m away against behind the houses, voice caps and their hysteresis, flee cues |
+| `src/audio/director/hearing.test.ts`, `occluder.test.ts` | the reverb send: none in the open, in a street by distance (capped), gaps and the cabin, even for a sound of the own car that skips it; the obstacle cache's refresh and forgetting |
 | `src/audio/speaker.test.ts`, `mixer.test.ts`, `buffers.test.ts`, `measure.test.ts` | the one-shot cap, the speaker inert until a trusted gesture, the level meter, seamless noise loops, the render measurements |
 | `src/audio/gearbox.test.ts`, `src/audio/synth/*.test.ts` | gearbox shifts; the engine, tyre and crash laws; step and cricket rates; bubbles at their Minnaert frequency; synth params clamped, NaN to silence |
 
@@ -511,6 +515,9 @@ non-finite placement or param. On the audition page "Render all" gives 59 rows, 
 - **One edge.** Only the worst edge on the path counts, capped at 15 dB: two rows of houses are no
   quieter than one. Trees cost foliage loss but do not diffract.
 - **Echoes inherit the direct path's occlusion**, and only rock faces echo.
+- **The woods play dry.** A forest's tail reaches 10–16 dB under the direct sound 100 m away
+  (Huisman and Attenborough 1991), so a bark, a bell or a crash heard across the woods should
+  carry a faint tail, but only streets send to the reverb.
 - **The reverb is the listener's street.** A source in a street heard from outside it plays dry:
   its street's tail, escaping through the street's mouth, is left out. Every street shares one
   reverb time; only the send scales.

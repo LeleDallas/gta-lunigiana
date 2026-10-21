@@ -42,7 +42,7 @@ export const makeDirector = (
   const occluder = makeOccluder(), vehicles = makeVehicles(), people = makePeople(), world = makeWorld(options.clock ?? localTime)
   let last: number | undefined, ground: number | undefined
   let held: ReadonlySet<string> = new Set()
-  let slopes: { readonly x: number; readonly y: number; readonly at: number; readonly echoes: ReadonlyArray<Echo> } | undefined
+  let faces: { readonly x: number; readonly y: number; readonly at: number; readonly echoes: ReadonlyArray<Echo> } | undefined
 
   return {
     hear: (heard) => {
@@ -55,12 +55,12 @@ export const makeDirector = (
       const ears = { x: listener.x, y: listener.y, z: ground + EAR_HEIGHT, vx: listener.vx, vy: listener.vy }
       const inside = listener.car === undefined ? undefined : heard.vehicles.find((v) => v.id === listener.car)?.model
       const { ambient, street } = world.listen(ears, now, dt)
-      if (live && (slopes === undefined || now - slopes.at >= ECHOES_EVERY || Math.hypot(ears.x - slopes.x, ears.y - slopes.y) >= ECHOES_MOVED)) {
-        slopes = { x: ears.x, y: ears.y, at: now, echoes: echoesAt(ears.x, ears.y) }
+      if (live && (faces === undefined || now - faces.at >= ECHOES_EVERY || Math.hypot(ears.x - faces.x, ears.y - faces.y) >= ECHOES_MOVED)) {
+        faces = { x: ears.x, y: ears.y, at: now, echoes: echoesAt(ears.x, ears.y) }
       }
       const offers: Array<Offer> = []
       const frame = makeFrame({
-        heard, now, dt, live, ears, inside, ambient, street, random, occluder, echoes: slopes?.echoes ?? [], speaker, offers
+        heard, now, dt, live, ears, inside, ambient, street, random, occluder, echoes: faces?.echoes ?? [], speaker, offers
       })
       vehicles.hear(frame)
       people.hear(frame)

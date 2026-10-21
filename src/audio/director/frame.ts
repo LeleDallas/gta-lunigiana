@@ -82,15 +82,17 @@ export const makeFrame = (setup: Setup): Frame => {
     if (!echoes(sound)) return
     for (const echo of setup.echoes) {
       // The echo's extra way past the direct sound, never closer than `ECHO_MIN_DB` under it; in a street the facades
-      // hide all but the open share of the faces.
-      const extra = Math.max(ECHO_MIN_DB, echo.loss - spreading(at.r, LEVELS[sound.kind].rMin)) - gainToDb(1 - street)
+      // hide all but the open share of the faces. It comes back from outside, through the cabin a sound of the own car skipped.
+      const shell = at.shell?.loss ?? 0
+      const extra = Math.max(ECHO_MIN_DB, echo.loss - spreading(at.r, LEVELS[sound.kind].rMin)) - gainToDb(1 - street) + shell
       if (audibility(at.level - extra, ambient) === 0) continue
       const placement = {
         gain: at.placement.gain * dbToGain(-extra),
         pan: echo.pan,
-        cutoff: Math.min(at.placement.cutoff, airCutoff(echo.delay * SPEED_OF_SOUND)),
+        cutoff: Math.min(at.placement.cutoff, airCutoff(echo.delay * SPEED_OF_SOUND), at.shell?.cutoff ?? 20000),
         cents: 0,
-        wet: at.placement.wet
+        // The send is post-gain, and the cabin's loss is in the gain now.
+        wet: at.placement.wet * dbToGain(shell)
       }
       if (finite(placement)) speaker.play(sound, placement, delay + echo.delay)
     }
@@ -105,7 +107,7 @@ export const makeFrame = (setup: Setup): Frame => {
     random: setup.random,
     path: (key, source, level, way = {}) => {
       if (!setup.live) return SILENT
-      const through = way.cabin === false ? undefined : cabin
+      const bare = way.cabin === false, through = bare ? undefined : cabin
       // Obstacles only take away: a source masked even in the clear is not worth measuring.
       const r = Math.hypot(source.x - ears.x, source.y - ears.y, source.z - ears.z)
       if (audibility(level.db - (way.quiet ?? 0) - spreading(r, level.rMin) - (through?.loss ?? 0), ambient) === 0) return SILENT
@@ -114,7 +116,7 @@ export const makeFrame = (setup: Setup): Frame => {
       const height = Math.max(0, (ears.z - heightAt(ears.x, ears.y) + source.z - heightAt(source.x, source.y)) / 2)
       return hear({
         ears, source, db: level.db, rMin: level.rMin, height, quiet: way.quiet, delta: between.delta, forest: between.forest, ambient, street,
-        cabin: through, doppler: way.doppler
+        cabin, bare, doppler: way.doppler
       })
     },
     hold: (key, sound, at) => {

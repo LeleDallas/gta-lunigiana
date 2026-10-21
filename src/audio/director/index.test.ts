@@ -3,12 +3,12 @@ import { test } from "node:test"
 
 import type { VehicleModel } from "../../sim/vehicles.ts"
 import { screenAxes } from "../../sim/view.ts"
-import { AMBIENT_DB, CABIN, dbToGain, SPEED_OF_SOUND } from "../acoustics.ts"
+import { AMBIENT_DB, CABIN, dbToGain, gainToDb, SPEED_OF_SOUND } from "../acoustics.ts"
 import { bells, streetAt } from "../places.ts"
 import { stepRate } from "../synth/steps.ts"
 import type { Continuous, Happening, Heard, HeardPerson, HeardVehicle, OneShot, Placement, Speaker } from "../types.ts"
 import { makeDirector, type WallClock } from "./index.ts"
-import { ECHO_MIN_DB, TOWERS, windDb } from "./levels.ts"
+import { TOWERS, windDb } from "./levels.ts"
 
 /**
  * Real map spots (found by probing the map): a treeless meadow on Monte dei Bianchi clear for 300 m to the south and
@@ -177,7 +177,7 @@ test("a hard crash answers off a rock face, later, fainter and dry in the open; 
   const [direct, ...echoes] = crash(WEST_FLANK, 10)
   assert.ok(echoes.length > 0 && echoes.every((e) => e.delay > direct!.delay + 0.1 && e.at.gain < direct!.at.gain / 2 && e.at.wet === 0), `${echoes.length} echoes`)
   // From 100 m the direct sound has spread as far as the echo off the face 40 m away: that echo plays the face's own loss under it, times the open share.
-  const [walled, ...hidden] = crash(BELFRY, 10, 100), open = 1 - streetAt(BELFRY.x, BELFRY.y), most = dbToGain(-ECHO_MIN_DB) * open
+  const [walled, ...hidden] = crash(BELFRY, 10, 100), open = 1 - streetAt(BELFRY.x, BELFRY.y), most = dbToGain(-10) * open
   assert.ok(open < 0.5 && hidden.length > 0, `${hidden.length} echoes, ${open} open`)
   assert.ok(Math.abs(hidden[0]!.at.gain / walled!.at.gain - most) < 1e-9)
   assert.ok(hidden.every((e) => e.at.gain / walled!.at.gain < most + 1e-9 && e.at.wet === walled!.at.wet))
@@ -195,6 +195,26 @@ test("the reverb follows the surroundings: a honk in the open meadow plays dry, 
   const open = honk(MEADOW), walled = honk(GRAGNOLA)
   assert.ok(open.length === 1 && open[0]!.at.wet === 0, JSON.stringify(open))
   assert.ok(walled.length > 0 && walled[0]!.at.wet > 1, JSON.stringify(walled))
+})
+
+test("inside the Panda its own crash plays open, but its street tail and its echoes come back through the cabin like a crash 3 m away", () => {
+  const crash = (spot: { readonly x: number; readonly y: number }, own: boolean) => {
+    const director = rig(), other = away(spot, 3, SOUTH), at = own ? spot : other
+    const vehicles = [car(5, "panda", spot, { mine: true }), car(2, "panda", other)]
+    director.hear(world(spot, { vehicles, happenings: [{ kind: "impact", hit: "wall", x: at.x, y: at.y, speed: 10, mass: 1100, car: own ? 5 : 2 }] }, 5))
+    return director.take("crash")
+  }
+  const [own] = crash(GRAGNOLA, true), [outside] = crash(GRAGNOLA, false)
+  assert.ok(own!.at.gain > outside!.at.gain * dbToGain(10) && own!.at.wet < outside!.at.wet, `${own!.at.wet} < ${outside!.at.wet}`)
+  for (const spot of [WEST_FLANK, BELFRY]) {
+    const [direct, ...echoes] = crash(spot, true), [, ...outsides] = crash(spot, false)
+    assert.ok(echoes.length > 0 && echoes.length === outsides.length, `${echoes.length} echoes`)
+    echoes.forEach((echo, i) => {
+      const like = outsides[i]!.at
+      assert.ok(echo.at.gain <= direct!.at.gain * dbToGain(-10 - CABIN.panda.loss) && echo.at.cutoff <= CABIN.panda.cutoff, JSON.stringify(echo.at))
+      assert.ok(Math.abs(gainToDb(echo.at.gain / like.gain)) < 1 && Math.abs(echo.at.wet - like.wet) <= like.wet / 4, `${JSON.stringify(echo.at)} against ${JSON.stringify(like)}`)
+    })
+  }
 })
 
 test("before the audio context runs nothing is measured or played, but who sits where is still tracked", () => {

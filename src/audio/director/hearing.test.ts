@@ -20,3 +20,13 @@ test("no reverb in the open at any distance; in a street it rises 3 dB per doubl
   assert.ok(wet(20, 0.5) < wet(20, 1) / 3)
   assert.ok(wet(20, 1, CABIN.panda) < wet(20, 1))
 })
+
+test("a sound that skips the cabin (the own car's crash) plays open, but its tail comes back through the cabin like an outside sound's", () => {
+  const at = (bare?: boolean) =>
+    hear({ ears, source: { x: 0, y: -20, z: 0.8 }, db: 90, rMin: 2, height: 1.2, delta: 0, forest: 0, ambient: 35, street: 1, cabin: CABIN.panda, bare })
+  const through = at(), bare = at(true)
+  assert.ok(Math.abs(gainToDb(bare.placement.gain / through.placement.gain) - CABIN.panda.loss) < 1e-9 && bare.placement.cutoff > CABIN.panda.cutoff)
+  assert.ok(Math.abs(bare.placement.gain * bare.placement.wet - through.placement.gain * through.placement.wet) < 1e-12, "the same tail")
+  assert.equal(bare.shell, CABIN.panda)
+  assert.equal(through.shell, undefined)
+})

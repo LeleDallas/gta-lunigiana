@@ -80,11 +80,11 @@ export const DELAY_FROM = 40
 
 /**
  * The reverb send, on a mixer whose full send returns 12 dB under dry. None in the open, where nothing
- * scatters sound back (an open field's late energy is 15 dB and more under the direct sound). In a
- * street, street² of `db` dB at `ref` m (the tail leaks out of every gap in the facades), 3 dB wetter
- * per doubling of distance from `near` to `far` m: along a street the reverberant field falls like a
- * line source's, the direct sound like a point's (Thomas et al. 2013). `cabin`× inside a vehicle,
- * whose own noise masks the tail.
+ * scatters sound back (an open field's late energy is 15 dB and more under the direct sound), nor in
+ * the woods (a known limit: docs/audio.md). In a street, street² of `db` dB at `ref` m (the tail
+ * leaks out of every gap in the facades), 3 dB wetter per doubling of distance from `near` to `far` m:
+ * along a street the reverberant field falls like a line source's, the direct sound like a point's
+ * (Thomas et al. 2013). `cabin`× inside a vehicle, whose own noise masks the tail.
  */
 export const REVERB = { db: 8, ref: 10, near: 2.5, far: 40, cabin: 0.25 } as const
 
