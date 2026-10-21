@@ -1,7 +1,7 @@
 /**
  * Map vocabulary shared by the build (src/tools) and the runtime map module:
  * road classes, building styles, area kinds and the tree-trunk wall size. Imports no data,
- * so the build can use it before monzone.json exists. Game code imports these
+ * so the build can use it before monzone.bin exists. Game code imports these
  * through `./index.ts`.
  *
  * @module map/kinds

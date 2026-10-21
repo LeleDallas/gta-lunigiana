@@ -8,6 +8,7 @@
 import { districtAt, MAP } from "../sim/map/index.ts"
 import { css, PALETTE } from "../render/palette.ts"
 import { paintArrow, paintMap } from "./minimap.ts"
+import { element } from "./title.ts"
 
 /** Screen px kept clear around the map: the header above, the scale bar (and the two-line credits of narrow windows) below. */
 const MARGIN = { top: 64, right: 24, bottom: 56, left: 24 } as const
@@ -63,12 +64,6 @@ export const placeLabels = (labels: ReadonlyArray<Box & { readonly major: boolea
 const FONT = '"Courier New", ui-monospace, Menlo, Consolas, monospace'
 const LABEL = { major: { size: 16, dot: 6, hex: PALETTE.signYellow }, minor: { size: 11, dot: 4, hex: PALETTE.marbleWhite } } as const
 const PAD = 2 // px around a label's box
-
-const element = (document: Document, id: string): HTMLElement => {
-  const found = document.getElementById(id)
-  if (found === null) throw new Error(`index.html lacks #${id}`)
-  return found
-}
 
 /** Binds the full map to its markup (#hud-map). `show` paints it for the player at (x, y) heading `angle` (radians CCW from east). */
 export const makeWorldMap = (document: Document) => {

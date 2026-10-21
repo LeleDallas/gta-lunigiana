@@ -32,6 +32,11 @@ jobs:
       # Relative asset URLs, so the build works under the /<repo>/ project path.
       - run: pnpm build --base=./
 
+      # Pages derives each file's ETag from its mtime, which a fresh checkout resets on every deploy.
+      # Hashed asset names only repeat for identical content, so pin their mtime: returning players
+      # then revalidate the unchanged map (304) instead of downloading it again.
+      - run: find dist/assets -type f -exec touch -d '2000-01-01T00:00:00Z' {} +
+
       - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
           path: dist

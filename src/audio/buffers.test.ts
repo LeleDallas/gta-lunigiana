@@ -19,8 +19,18 @@ test("noise loops without a click: the seam step is no bigger than a typical ste
 
 test("grains and gusts stay in range", () => {
   assert.ok(crackleSamples(48000, 48000, 400, seeded(3)).some((v) => v !== 0))
-  const gust = gustSamples(8000, seeded(5))
-  assert.equal(Math.max(...gust.map(Math.abs)), 1)
+  // Regression: normalised by the unrounded peak, one seed in ten stored a peak an ulp off ±1.
+  for (let seed = 0; seed < 100; seed++) assert.equal(Math.max(...gustSamples(8000, seeded(seed)).map(Math.abs)), 1, `seed ${seed}`)
+})
+
+test("the gust signal is its sines' sum, normalised: the per-sample rotation does not drift", () => {
+  const n = 512000, random = seeded(5), g = gustSamples(n, seeded(5))
+  const parts = [2, 5, 9, 17, 31].map((k) => ({ a: 1 / Math.sqrt(k), w: (2 * Math.PI * k) / n, phase: random() * 2 * Math.PI }))
+  const exact = Array.from({ length: n }, (_, i) => parts.reduce((v, p) => v + p.a * Math.sin(p.w * i + p.phase), 0))
+  const peak = exact.reduce((m, v) => Math.max(m, Math.abs(v)), 0)
+  let worst = 0
+  for (let i = 0; i < n; i++) worst = Math.max(worst, Math.abs(g[i]! - exact[i]! / peak))
+  assert.ok(worst < 1e-6, `off by ${worst}`)
 })
 
 test("smoothstep clamps and eases", () => {

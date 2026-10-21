@@ -162,25 +162,35 @@ type Box = readonly [number, number, number, number]
  */
 export const staticGrid = (count: number, boxOf: (item: number) => Box, cellSize: number) => {
   if (!(cellSize > 0)) throw new Error(`cell size must be > 0, got ${cellSize}`)
+  // Each box asked for once, not again per cell pass: minX, minY, maxX, maxY at 4i (≈ 32 MB, freed once built, for the million trees).
+  const boxes = new Float64Array(count * 4)
   let x0 = 0, y0 = 0, x1 = 0, y1 = 0
   for (let i = 0; i < count; i++) {
-    const [ax, ay, bx, by] = boxOf(i)
-    if (i === 0) [x0, y0, x1, y1] = [ax, ay, bx, by]
-    else [x0, y0, x1, y1] = [Math.min(x0, ax), Math.min(y0, ay), Math.max(x1, bx), Math.max(y1, by)]
+    // Indexed, not destructured: destructuring measured twice as slow over the million trees.
+    const box = boxOf(i), ax = box[0], ay = box[1], bx = box[2], by = box[3]
+    boxes[4 * i] = ax
+    boxes[4 * i + 1] = ay
+    boxes[4 * i + 2] = bx
+    boxes[4 * i + 3] = by
+    x0 = i === 0 ? ax : Math.min(x0, ax)
+    y0 = i === 0 ? ay : Math.min(y0, ay)
+    x1 = i === 0 ? bx : Math.max(x1, bx)
+    y1 = i === 0 ? by : Math.max(y1, by)
   }
   const cols = Math.floor((x1 - x0) / cellSize) + 1, rows = Math.floor((y1 - y0) / cellSize) + 1
   const col = (x: number) => Math.floor((x - x0) / cellSize), row = (y: number) => Math.floor((y - y0) / cellSize)
-  const cells = (item: number, each: (cell: number) => void) => {
-    const [ax, ay, bx, by] = boxOf(item)
-    for (let r = row(ay); r <= row(by); r++) for (let c = col(ax); c <= col(bx); c++) each(r * cols + c)
+  // `boxes` is passed, not captured: the query below shares this scope, and would keep it alive.
+  const cells = (box: Float64Array, item: number, each: (cell: number) => void) => {
+    const k = 4 * item
+    for (let r = row(box[k + 1]!), r1 = row(box[k + 3]!); r <= r1; r++) for (let c = col(box[k]!), c1 = col(box[k + 2]!); c <= c1; c++) each(r * cols + c)
   }
   // Cell k's items are items[starts[k] .. starts[k + 1]): count them, sum, then fill.
   const starts = new Int32Array(cols * rows + 1)
-  for (let i = 0; i < count; i++) cells(i, (k) => starts[k + 1]!++)
+  for (let i = 0; i < count; i++) cells(boxes, i, (k) => starts[k + 1]!++)
   for (let k = 0; k < cols * rows; k++) starts[k + 1]! += starts[k]!
   const items = new Int32Array(starts[cols * rows]!)
   const next = starts.slice(0, -1)
-  for (let i = 0; i < count; i++) cells(i, (k) => (items[next[k]!++] = i))
+  for (let i = 0; i < count; i++) cells(boxes, i, (k) => (items[next[k]!++] = i))
   // seen[item] === query marks an item already visited by this query (items spanning several cells).
   const seen = new Int32Array(count)
   let query = 0

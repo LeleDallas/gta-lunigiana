@@ -1,16 +1,19 @@
-// Builds src/sim/map/monzone.json from data/raw: OSM (fetch-osm.ts) and the Regione
+// Builds src/sim/map/monzone.bin from data/raw: OSM (fetch-osm.ts) and the Regione
 // Toscana CTR 1:2000, LiDAR DTM and land cover (data/raw/rt, written by fetch-rt.ts).
-// Run: node src/tools/build-map.ts  (pnpm map), from any directory. Output is deterministic.
+// Run: node src/tools/build-map.ts  (pnpm map), from any directory. Output is deterministic:
+// gunzipped, the same bytes everywhere; gzipped, the same file with the same Node build (another
+// zlib or OS writes other compressed bytes).
 import { writeFileSync } from "node:fs"
 import { join } from "node:path"
+import { gzipSync } from "node:zlib"
 
-import type { MonzoneMapJson } from "../sim/map/index.ts"
+import type { MonzoneMap } from "../sim/map/index.ts"
 import { fitRoads, readCtr } from "./ctr.ts"
 import { fitDistricts } from "./districts.ts"
 import { extractAreas, extractBarriers, extractBuildings, extractPois, extractRail, extractRoads, extractWater, nameFromAddresses, type RoadF } from "./features.ts"
 import { along, arcLengths, BOUNDS, crossings, flatLine, M_PER_DEG, ORIGIN, r1, segIndex, type V } from "./geometry.ts"
 import { buildGraph } from "./graph.ts"
-import { packRows, packTrees, packWalls } from "./pack.ts"
+import { packMap } from "./pack.ts"
 import { readOsm } from "./osm.ts"
 import { chainsOf, lifted, makeProfiler, type Bound, type Linear } from "./profiles.ts"
 import { clearance, parkedSpots, playerSpawn, scatterTrees } from "./spawns.ts"
@@ -20,7 +23,7 @@ import { buildWalls, clipBuildings, openBarriers } from "./walls.ts"
 import { carveAll, fitUnderDecks, waterLine, waterProfiles, type Crossed } from "./water.ts"
 
 const ROOT = join(import.meta.dirname, "../..")
-const OUT = join(ROOT, "src/sim/map/monzone.json")
+const OUT = join(ROOT, "src/sim/map/monzone.bin")
 const t0 = performance.now()
 const lap = (label: string) => console.log(`${label.padEnd(10)} ${((performance.now() - t0) / 1000).toFixed(2)} s`)
 
@@ -159,12 +162,12 @@ const roadOut = (r: RoadF) => ({
   ...(r.oneway ? { oneway: true } : {}), ...(r.bridge ? { bridge: true } : {}), ...(r.tunnel ? { tunnel: true } : {}), ...(r.layer !== undefined ? { layer: r.layer } : {}),
   ...lineOut(r)
 })
-const map: MonzoneMapJson = {
+const map: MonzoneMap = {
   version: 1,
   origin: ORIGIN,
   mPerDeg: M_PER_DEG,
   bounds: BOUNDS,
-  heightmap: { cell: grid.cell, cols: grid.cols, rows: grid.rows, x0: grid.x0, y0: grid.y0, data: packRows(Array.from(grid.z, (z) => Math.round(z * 10)), grid.cols) },
+  heightmap: { cell: grid.cell, cols: grid.cols, rows: grid.rows, x0: grid.x0, y0: grid.y0, data: Array.from(grid.z, (z) => Math.round(z * 10)) },
   roads: roads.map(roadOut),
   buildings: buildings.map((b) => {
     let z0 = Number.MAX_VALUE
@@ -184,12 +187,13 @@ const map: MonzoneMapJson = {
   pois,
   districts,
   graph: { xy: graph.xy, edges: graph.edges, traffic: graph.traffic, walk: graph.walk },
-  walls: { walk: packWalls(walls.walk, BOUNDS, "walk walls"), drive: packWalls(walls.drive, BOUNDS, "drive walls") },
-  trees: packTrees(trees, BOUNDS),
+  walls: { walk: walls.walk, drive: walls.drive },
+  trees,
   spawns: { player, parked }
 }
-const json = JSON.stringify(map)
-writeFileSync(OUT, json)
+const { file, sizes } = packMap(map)
+const gz = gzipSync(file, { level: 9 })
+writeFileSync(OUT, gz)
 lap("write")
 
 /** Steepest vertex-to-vertex grade per road class (bridges included), over steps of >= 4 m. */
@@ -201,11 +205,12 @@ for (const r of map.roads) for (let i = 1, j = 0; i < r.z.length; i++) {
   if (g > parseFloat(grades[r.cls] ?? "0") / 100) grades[r.cls] = `${(g * 100).toFixed(1)}% (${r.id})`
   j = i
 }
-const kb = (v: unknown) => `${(JSON.stringify(v).length / 1024).toFixed(0)} KB`
+const kb = (bytes: number) => `${(bytes / 1024).toFixed(0)} KB`, jsonKb = (v: unknown) => kb(JSON.stringify(v).length)
 console.log({
-  bytes: json.length, roads: map.roads.length, buildings: map.buildings.length, water: map.water.length, rail: map.rail.length, areas: areas.length,
+  bytes: gz.length, roads: map.roads.length, buildings: map.buildings.length, water: map.water.length, rail: map.rail.length, areas: areas.length,
   wallsWalk: walls.walk.length / 4, wallsDrive: walls.drive.length / 4, blockedCells: { walk: walls.walkCells, drive: walls.driveCells },
   nodes: graph.xy.length / 2, edges: graph.edges.length / 3, traffic: graph.traffic.length, walk: graph.walk.length, trees: trees.length / 3, parked: parked.length, player,
   grades,
-  sizes: { heightmap: kb(map.heightmap), trees: kb(map.trees), walls: kb(map.walls), graph: kb(map.graph), roads: kb(map.roads), buildings: kb(map.buildings), areas: kb(areas) }
+  // the file's parts before gzip (the JSON line, then the packed sections), and the JSON line's biggest fields
+  sizes: { ...Object.fromEntries(Object.entries(sizes).map(([part, n]) => [part, kb(n)])), graph: jsonKb(map.graph), roads: jsonKb(map.roads), buildings: jsonKb(map.buildings), areas: jsonKb(areas) }
 })

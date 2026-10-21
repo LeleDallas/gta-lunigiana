@@ -624,11 +624,15 @@ On foot H does nothing. The title card lists it.
 ## Start, pause and hidden tabs
 
 - **Autoplay.** Browsers allow audio only after a user gesture, so the AudioContext is made on the
-  first trusted `keydown`, `pointerdown` or `touchend` with user activation: the same first key
-  that dismisses the title card (Esc does not count). Until then nothing plays and no sound time
-  passes. The gesture's own task builds only the context, the noise kit and the mixer; each
-  one-shot then pre-renders its buffers (the crash, its noise loops) in a task of its own, so the first key costs no long
-  freeze. A later gesture resumes a context the browser has left suspended or interrupted (Safari,
+  first trusted `keydown`, `pointerdown` or `touchend` with user activation once the speaker exists
+  (made during the last loading steps): normally the key that dismisses the title card (Esc does
+  not count). Until then nothing plays and no sound time passes. The gesture's own task builds
+  only the context, the noise kit and the mixer. The kit's samples take ≈ 17 ms in Node; ≈ 7 of
+  them are the gust signal, which turns each sine by a rotation per sample instead of calling
+  `Math.sin` (three times slower). Each one-shot then pre-renders its buffers in tasks of its own:
+  the crash its noise loops, the footsteps their 48 variants one bake at a time (a bake builds its
+  whole graph before it renders, so baking all at once built some 1,200 noise bursts in one task).
+  A later gesture resumes a context the browser has left suspended or interrupted (Safari,
   Firefox).
 - **Pause.** While the full map (M) is open, `main.ts` calls `speaker.pause(true)` every frame,
   which suspends the context, and skips the frame, so the audio schedule does not run either.
@@ -693,14 +697,14 @@ functions (`synth/world.test.ts` imports them to check).
 | `src/audio/places.test.ts`, `src/audio/places/water.test.ts` | surfaces, wall materials (a trunk, buildings by kind and style, the guard rail, the stone wall, a cliff, bare ground, a quarry's bank; the nearer of a trunk and a house wall 1.2–2.5 m apart wins; a bank with trees 1.5–3 m off it is earth), ambience shares, streets, echoes off the rock at Equi Terme and none off Monzone's gentler slopes, bells, dogs and birds, the Torrente Lucido from Monzone station, the Fontana di Aiola |
 | `src/audio/director/index.test.ts` | the director on a recording speaker at real map spots: proximity (in the open and behind a ridge), a building's muffling, Doppler, step cadence, travel delay, crash merging and scrapes, a house wall's material and cobbles in the crash and scrape params, the bodies swapped for a listener in the struck car, a zone's wear carried to the next crash, a wall crash's debris surface read under the car, a scrape's material held through a brief other contact, a wall crash on foot muffled by the house in the way, a bump culled nearer than a crash, echoes off a rock face and hidden in a street, the reverb dry in the open and wet in a walled street, nothing before the context, the cabin (the own crash's tail and echoes through it), getting in and out, horn and siren, the bells, water and its masking, the valley's never-silent bed and the river 15 m away against behind the houses, voice caps and their hysteresis, flee cues |
 | `src/audio/director/hearing.test.ts`, `occluder.test.ts` | the reverb send: none in the open, in a street by distance (capped), gaps and the cabin, even for a sound of the own car that skips it; the obstacle cache's refresh and forgetting |
-| `src/audio/speaker.test.ts`, `mixer.test.ts`, `buffers.test.ts`, `measure.test.ts` | the one-shot cap, the speaker inert until a trusted gesture, the level meter, seamless noise loops, the render measurements |
+| `src/audio/speaker.test.ts`, `mixer.test.ts`, `buffers.test.ts`, `measure.test.ts` | the one-shot cap, the speaker inert until a trusted gesture, the level meter, seamless noise loops, the gust signal against its closed-form sine sum, the render measurements |
 | `src/audio/gearbox.test.ts`, `src/audio/synth/*.test.ts` | gearbox shifts; the engine and tyre laws; the scrape's surface loops (seamless, at their RMS, a stone every 0.3 m and a rail post every 2 m) and its speed law; step and cricket rates; bubbles at their Minnaert frequency; synth params clamped, NaN to silence |
 | `src/audio/synth/crash/crash.test.ts` | the crash renderer over the design's matrix (a Panda into a house at 2, 5, 12, 14 and 20 m/s, Panda–Panda 10, Panda–truck 12, an Ape into stone 8, the Giulia into the guard rail 12, a sheet wall 12, a tree 10, earth 8, a side hit 12, the cabin at 14 front and with no airbag a side 12, a rear 8 and the Ape 14, a 40 m/s wreck), twenty seeds each (the bounds checked on seeds 1–80, twenty at a time), measured by `testing.ts` (the research's analysis tools, ported): finite, ≤ 1, ≤ 4 s, faded, finite from an 8 kHz device rate; noise that never repeats inside a render; deterministic per seed; the level law, its cap and the peaks following it within 2 dB (a bump, the rail, a sheet wall, Panda–Panda); growth past the cap (tail, block, at most 3 sub-hits, 42 m/s against 60 audibly different); the critique's targets on the exterior crashes (medians: −10 dB at 150–450 ms, rise 8–25 ms, crest 9–15 dB, band flatness 0.35–0.6, 1–8 kHz kurtosis 2.8–4.5, 8 kHz −12…−25 dB, 16 kHz −22…−36, centroid 1.5–3.5 kHz through 600 ms; 97 % of renders with 63 Hz ≤ −5 dB and the loudest octave in 125 Hz–2 kHz); the tail's −20 dB at 0.25–2.5 s, later the harder the hit; a flat median spectrum (the truck within 8 dB); the long partials layer (each model's count at 0.6–4.3 kHz, η 0.001–0.01) and 1–3 of them clear in the render; the bump's 40–100 ms; the rail's tonal ring; the sheet wall's ring against masonry; the truck's bumper clang; the tree's faint rustle past 2 s and its tail under 3.5 kHz; earth the slowest, dullest; the cabin's low share and muffled highs in every zone; a greenhouse nudge's dull crack; a worn side breaking nothing again; the glass shower's 6–10 kHz centroid and grass swallowing it |
 
 ### In a browser
 
-1. `pnpm dev`, open http://localhost:5173 and press a key: it dismisses the title card and starts
-   the sound.
+1. `pnpm dev`, open http://localhost:5173 and, once the title card says "Press any key", press a
+   key: it dismisses the card and starts the sound.
 2. In the console (dev builds only), `gta.audio.context()?.state` should read `"running"`, and
    `gta.audio.level()` returns the master's RMS in dBFS (−100 when silent). `gta.audio.speaker` is
    the speaker: wrap its `hold` and `play` to count requests or check placements.

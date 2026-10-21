@@ -69,8 +69,14 @@ const keyOf = (surface: Surface, run: boolean): string => `${surface} ${run ? "r
 
 const baked = perContext(async (ctx, kit) => {
   const sets = SURFACES.flatMap((surface) => [false, true].map((run) => ({ surface, run })))
-  const sounds = await Promise.all(sets.map(({ surface, run }) =>
-    Promise.all(Array.from({ length: VARIANTS }, () => bake(ctx.sampleRate, SLOT, (oc) => footfall(oc, kit, TREADS[surface], run)).then(trimmed)))))
+  // One bake at a time: a bake builds its whole graph before its first await, so starting all 48
+  // at once built every graph (some 1,200 bursts) in one long task, a stall on the first key press.
+  const sounds: Array<Array<Float32Array<ArrayBuffer>>> = []
+  for (const { surface, run } of sets) {
+    const variants: Array<Float32Array<ArrayBuffer>> = []
+    for (let v = 0; v < VARIANTS; v++) variants.push(trimmed(await bake(ctx.sampleRate, SLOT, (oc) => footfall(oc, kit, TREADS[surface], run))))
+    sounds.push(variants)
+  }
   // One factor for all, so the surfaces keep their relative levels: a running step on stone peaks at 0.5.
   normalise(sounds.flat(), 0.5, sounds[sets.findIndex((set) => set.surface === "stone" && set.run)])
   return new Map(sets.map(({ surface, run }, i) => [keyOf(surface, run), sounds[i]!.map((samples) => bufferOf(ctx, samples))]))

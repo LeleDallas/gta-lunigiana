@@ -7,7 +7,7 @@
  */
 import { Ops, type Random } from "@typeonce/ritmo-math"
 
-import { carCircles, carClear } from "./body.ts"
+import { carCircles, carRadius, clearOf } from "./body.ts"
 import { segmentDistance, staticGrid } from "./collide.ts"
 import { graph, MAP, roadClassOf, type Road, type Segment, wallsNear } from "./map/index.ts"
 import { VEHICLES, type VehicleModel } from "./vehicles.ts"
@@ -120,11 +120,25 @@ const SIDE_STEP = 0.25
 const PASS_MARGIN = 0.3
 const PASS_REACH = 3
 
-/** Free width across the drive walls at `along` metres down `lane` (up to 2 × PASS_REACH where a side is open). */
-const freeWidth = (lane: Lane, along: number): number => {
+/**
+ * Copies of the drive walls (`wallsNear` reuses its answer) around `edge` that reach within `pad` m
+ * of the line through `ab`, its lane a -> b: one query per edge. The lane tests take a min or a max
+ * over walls, so given every wall that can narrow or block a sample they answer as they would over
+ * a query per sample and side step, at a fraction of the cost.
+ */
+const wallsBeside = (edge: number, ab: Lane, pad: number): ReadonlyArray<Segment> => {
+  const { a, b } = graph.edges[edge]!, p = graph.nodes[a]!, q = graph.nodes[b]!
+  const across = (x: number, y: number) => (x - ab.x) * ab.rx + (y - ab.y) * ab.ry
+  return wallsNear("drive", Math.min(p.x, q.x) - pad, Math.min(p.y, q.y) - pad, Math.max(p.x, q.x) + pad, Math.max(p.y, q.y) + pad)
+    .filter((s) => Math.max(across(s.ax, s.ay), across(s.bx, s.by)) >= -pad && Math.min(across(s.ax, s.ay), across(s.bx, s.by)) <= pad)
+    .map(({ ax, ay, bx, by }) => ({ ax, ay, bx, by }))
+}
+
+/** Free width across `walls` at `along` metres down `lane` (up to 2 × PASS_REACH where a side is open). */
+const freeWidth = (walls: ReadonlyArray<Segment>, lane: Lane, along: number): number => {
   const p = lanePoint(lane, along, 0)
   let left = PASS_REACH, right = PASS_REACH
-  for (const s of wallsNear("drive", p.x - PASS_REACH, p.y - PASS_REACH, p.x + PASS_REACH, p.y + PASS_REACH)) {
+  for (const s of walls) {
     // Where the line across the lane, p + t·(rx, ry), meets the wall at a + u·(b − a).
     const ex = s.bx - s.ax, ey = s.by - s.ay, den = lane.rx * ey - lane.ry * ex
     if (den === 0) continue
@@ -182,25 +196,32 @@ const largestPart = (sides: Float64Array): Float64Array => {
  */
 const lanesFor = (model: VehicleModel): Float64Array => {
   const sides = new Float64Array(graph.edges.length * 2).fill(-1)
-  const passing = VEHICLES[model].width + VEHICLES.panda.width + PASS_MARGIN
+  const { width, length } = VEHICLES[model], r = carRadius(model)
+  const passing = width + VEHICLES.panda.width + PASS_MARGIN
   for (const edge of graph.trafficEdges) {
     if (!classAllows(edge, model)) continue
     // Samples every LANE_SAMPLE m over the middle 80%: the same points travelled either way.
     const samples = Math.max(2, Math.ceil((graph.edges[edge]!.length * 0.8) / LANE_SAMPLE))
     const at = (lane: Lane, i: number) => lane.length * (0.1 + (0.8 * i) / samples)
+    const nominal = trafficSide(roadOf(edge))
     const ab = laneOf(edge, true)
+    // Every wall `freeWidth` can meet within PASS_REACH, and every one a body circle can touch (half the body length out) at any side offset, with 1 m to spare.
+    const walls = wallsBeside(edge, ab, Math.max(PASS_REACH, nominal + length / 2) + 1)
     let singleFile = false
-    for (let i = 0; i <= samples && !singleFile; i++) singleFile = freeWidth(ab, at(ab, i)) < passing
+    for (let i = 0; i <= samples && !singleFile; i++) singleFile = freeWidth(walls, ab, at(ab, i)) < passing
     if (singleFile) continue
     for (const forward of [false, true]) {
       const lane = laneOf(edge, forward)
-      const angle = Ops.atan2(lane.dy, lane.dx)
-      const circles = carCircles(model, angle)
+      const circles = carCircles(model, Ops.atan2(lane.dy, lane.dx))
+      // `carClear` with no slack: every body circle at least r from every wall.
       const fits = (side: number) => {
-        for (let i = 0; i <= samples; i++) if (!carClear(model, { ...lanePoint(lane, at(lane, i), side), angle }, 0, circles)) return false
+        for (let i = 0; i <= samples; i++) {
+          const c = lanePoint(lane, at(lane, i), side)
+          if (!circles.every((o) => clearOf(walls, c.x + o.x, c.y + o.y, r))) return false
+        }
         return true
       }
-      let side = trafficSide(roadOf(edge))
+      let side = nominal
       while (side > 0 && !fits(side)) side = Math.max(0, side - SIDE_STEP)
       if (side > 0 || fits(0)) sides[key({ edge, forward })] = side
     }

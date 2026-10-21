@@ -55,13 +55,25 @@ export const crackleSamples = (n: number, sampleRate: number, grainsPerSecond = 
 /** `n` samples of a slow control signal in −1…1: a few sines with whole cycles over the loop (gusts, surges). */
 export const gustSamples = (n: number, random: () => number = Math.random): Float32Array<ArrayBuffer> => {
   const out = new Float32Array(n)
-  const parts = [2, 5, 9, 17, 31].map((k) => ({ w: (2 * Math.PI * k) / n, phase: random() * 2 * Math.PI, a: 1 / Math.sqrt(k) }))
+  // Each sine as a point (c, s) = (cos, sin)(w·i + phase) turned through w per sample: no Math.sin per
+  // sample (half a million samples, five sines, on the first key press). The rounding drift over a
+  // loop stays near 1e-10, far below the Float32 output, so it needs no renormalising.
+  const parts = [2, 5, 9, 17, 31].map((k) => {
+    const w = (2 * Math.PI * k) / n, phase = random() * 2 * Math.PI
+    return { a: 1 / Math.sqrt(k), cw: Math.cos(w), sw: Math.sin(w), c: Math.cos(phase), s: Math.sin(phase) }
+  })
   let max = 0
   for (let i = 0; i < n; i++) {
     let v = 0
-    for (const p of parts) v += p.a * Math.sin(p.w * i + p.phase)
+    for (const p of parts) {
+      v += p.a * p.s
+      const c = p.c
+      p.c = c * p.cw - p.s * p.sw
+      p.s = p.s * p.cw + c * p.sw
+    }
     out[i] = v
-    max = Math.max(max, Math.abs(v))
+    // Of the stored (Float32) values, so the peak divides to exactly ±1, never an ulp beyond.
+    max = Math.max(max, Math.abs(out[i]!))
   }
   for (let i = 0; i < n; i++) out[i]! /= max
   return out
