@@ -93,7 +93,7 @@ You need:
 
 ## Play in the browser
 
-Every push to `main` publishes the game to GitHub Pages at <https://lab.fedemas.dev/> (`.github/workflows/pages.yml`).
+Every push to `main` publishes the game to GitHub Pages at <https://gta-lunigiana.fedemas.dev/> (`.github/workflows/pages.yml`).
 
 ## Run the game locally
 
