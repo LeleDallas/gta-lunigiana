@@ -19,7 +19,7 @@ const AREA_KEYS = ["landuse", "natural", "building", "leisure", "amenity"]
 
 const get = async (url: string): Promise<string> => {
   for (let attempt = 0; ; attempt++) {
-    const res = await fetch(url, { headers: { "User-Agent": "grand-theft-auto-vdl map build" } })
+    const res = await fetch(url, { headers: { "User-Agent": "gta-lunigiana map build" } })
     if (res.ok) return res.text()
     if (attempt === 4) throw new Error(`${url}: HTTP ${res.status}`)
     await new Promise((r) => setTimeout(r, 2000 * 2 ** attempt))
@@ -50,6 +50,6 @@ for (const { id } of [...elements.relation.entries()].map(([id, xml]) => ({ id, 
   console.log(`relation ${id}: ${elements.node.size} nodes, ${elements.way.size} ways`)
 }
 const sorted = (m: Map<number, string>) => [...m].sort((a, b) => a[0] - b[0]).map(([, xml]) => `  ${xml.trim()}`)
-const xml = ['<?xml version="1.0" encoding="UTF-8"?>', '<osm version="0.6" generator="grand-theft-auto-vdl fetch-osm">', ...sorted(elements.node), ...sorted(elements.way), ...sorted(elements.relation), "</osm>", ""].join("\n")
+const xml = ['<?xml version="1.0" encoding="UTF-8"?>', '<osm version="0.6" generator="gta-lunigiana fetch-osm">', ...sorted(elements.node), ...sorted(elements.way), ...sorted(elements.relation), "</osm>", ""].join("\n")
 writeFileSync(OUT, gzipSync(xml, { level: 9 }))
 console.log({ nodes: elements.node.size, ways: elements.way.size, relations: elements.relation.size, bytes: xml.length })
