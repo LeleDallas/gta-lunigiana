@@ -29,8 +29,10 @@ components, Input (horn key) ──────┴─► audio schedule (Lunigia
      car's velocity into the wall at contact (a car wedged so that no move fits emits its whole
      speed). The speed lost in the step would be less by what the step travelled before contact,
      the rest lost the next step, so one hit would read as two softer ones: a 15 m/s hit as 7 and
-     4 m/s. The contact point is the car's centre plus the direction of the lost velocity (the
-     velocity, when wedged) times the body's reach that way, |u·f|·L/2 + |u·s|·W/2 for its L × W box.
+     4 m/s. The contact point is where the car's collision capsule (circles of radius W/2 along
+     ±(L/2 − W/2)) reaches furthest in the direction of the lost velocity u (the velocity, when
+     wedged): the end circle that leads, W/2 along u from its centre. So an oblique hit lands on the
+     front corner, on the wall itself, and a square-on side hit in the middle of the side.
      `Contacts` emits `car` when two vehicles close on each other: the closing speed, the reduced
      mass 1/(1/m₁ + 1/m₂), at the contact point (`car` and `other` follow query order, not who
      struck whom). It emits `person` for each knockdown: the car's speed before a pin stops it, the
@@ -50,8 +52,9 @@ components, Input (horn key) ──────┴─► audio schedule (Lunigia
      fleeing and knocked-down flags;
    - `happenings`: the `Impact` and `Honk` events since its last run, impacts first. Each impact
      carries the `body` of the vehicle `car` (and `otherBody` of `other`, for a `car` hit): its
-     model, and the zone the contact point lies in seen from its centre (within 45° of the
-     heading the front, within 45° of its reverse the rear, else the side). They come from every
+     model, and the zone of its L × W box the contact point lies on, by the face it is nearest in
+     proportion (front when along/L exceeds |across|/W, rear when −along/L does, else the side: a
+     Panda's wall hit is front to about 54° off square, a T-bone on its front door a side). They come from every
      vehicle, parked ones too (a struck parked car is not in `vehicles`); an impact whose vehicle
      has despawned since is dropped;
    - `horn`: whether the horn key is held.
@@ -99,8 +102,9 @@ components, Input (horn key) ──────┴─► audio schedule (Lunigia
   - vehicles: the listener's car and the running vehicles of the last frame (to hear getting in,
     getting out and the starter), the horn key's last state (the siren toggles on a press),
     engines still cranking, sirens on, each car's last crash (to merge one hit's steps) and the
-    cars scraping, with what they scrape along. Each entry ends when its time is over or its
-    vehicle stops running;
+    cars scraping, with what they scrape along (and a new wall met but not yet switched to). Each
+    entry ends when its time is over or its vehicle stops running. Each crashed vehicle's wear,
+    the hardest crush each of its zones took, is kept for the 256 most recently crashed;
   - people: per person on foot, the last position, the step phase, the mood and the last voice
     cue. A person not heard in a frame (despawned, or the player now in a car) is dropped;
   - the valley: the water and dogs near the ears (looked up again every 0.25 s or 2 m), the eased
@@ -342,8 +346,9 @@ Masonry, stone and rock add grit and chips only; masonry is finer and brighter, 
 adds a rare shard screech. The judder (the gust signal ×40) shakes the grind and opens the squeal
 and the screech. The level rises 4.5 dB per doubling of speed (roughness noise, v^0.75), up to
 full at 12 m/s, where every material peaks near 0.5. Doppler moves every band. A car sliding from
-one wall onto another crossfades to the new material in about 0.3 s, and the voice fades out over
-0.3 s once it is no longer held.
+one wall onto another switches to the new material once it has met it for 0.25 s (a trunk passed
+along a wooded bank, or contact jitter, keeps the old one) and crossfades in about 0.3 s; the voice
+fades out over 0.3 s once it is no longer held.
 
 Measured in Chrome at 12 m/s against the closest reference (a car's slide and grind after a BBC
 crash: centroid 1.5–1.8 kHz, band flatness 0.33–0.51, octaves within 5 dB from 125 Hz to 2 kHz):
@@ -357,7 +362,7 @@ One-shots:
 
 | Kind | Made of | Plays when | Level |
 |---|---|---|---|
-| `crash` | `synth/crash/`: rendered on demand from its exact params (pure TypeScript, a few ms; an echo replays the same render): each body's crunch, the parts that break and fall, what it hit, from inside the cabin's balance ([Crashes](#crashes)) | a `wall` or `car` Impact of 1.5 m/s or more. One hit spans a few steps: within 0.1 s of a car's crash only a 1.5× harder hit plays again. Its params (below): the closing speed, the reduced mass, both bodies, the wall's material, the surface under the contact point, whether the listener sits in `body` | 115 (2 m) for the reference crash; the render plays its own level under or over that |
+| `crash` | `synth/crash/`: rendered on demand from its exact params (pure TypeScript, a few ms; an echo replays the same render): each body's crunch, the parts that break and fall, what it hit, from inside the cabin's balance ([Crashes](#crashes)) | a `wall` or `car` Impact of 1.5 m/s or more. One hit spans a few steps: within 0.1 s of a car's crash only a 1.5× harder hit plays again. Its params (below): the closing speed, the reduced mass, both bodies and their wear, the wall's material, the surface debris lands on, whether the listener sits in `body` | 115 (2 m) for the reference crash; the render plays its own level under or over that |
 | `thud` | a low thump and a cloth swish, full level from 12 m/s | a `person` Impact (a knockdown) | 85 (1 m) |
 | `groan` | `synth/voices.ts`, a formant voice | 0.25 s after a thud, from the person hit | 72 (1 m) |
 | `door` | per model: opening (latch clicks, the seal), closing (thump, latch, panel ring) | the player gets in (open, then close 0.7 s later) or out (at their new spot) | 82 (1 m) |
@@ -369,16 +374,24 @@ One-shots:
 | `bird` | `synth/nature.ts`: autumn calls of the robin, great tit, blackbird ("chink" or "seee") and chaffinch ("pink"), 35/30/20/15 % | from a tree 15–70 m away: 0.3 calls a second in full forest, plus 0.05 near houses | 85 (1 m) |
 | `bark` | `synth/nature.ts`: two to five barks of a big or a small dog through a formant tract | 183 farm dogs (about one in eight barns, sheds, houses and farm buildings with open ground and no paving 5 m out): those within 200 m bark every 45 s on average, four times as often while the player runs or drives within 30 m | 96 (1 m) |
 
-A crash's params say what met: `body` is the vehicle that hit (model and zone), `against` either
-the wall's `material` or the other vehicle's body. When the listener sits in the other car of a
-car–car crash the two swap, so `body` is always theirs (the contact sounds the same from either
-car) and `inside` says they hear it from that cabin. `surface` is what debris lands on, read at
-the contact point like a tyre's. The material of a drive wall (`wallAt` in `places.ts`) is that
-of the nearest wall source within 3 m of the contact point: a tree trunk (`tree`); a building's
-walls by kind and style (a greenhouse `glass`, the industrial style, which takes in substations
-and silos, `sheet`, the stone, church, tower and ruin styles `stone`, the rest `masonry`); a
-barrier (a guard rail `rail`, a wall `stone`, a cliff `rock`); anything else, a steep bank, a
-stream's edge or the end of the map, is `earth`.
+A crash's params say what met: `body` is the listener's car if they sit in one of the two, else
+the Impact's `car` (query order, not necessarily the one that struck; model and zone), `against`
+either the wall's `material` or the other vehicle's body. When the listener sits in the other car
+of a car–car crash the two swap, so `body` is always theirs (the contact sounds the same from
+either car) and `inside` says they hear it from that cabin. Each body carries its `worn`: the
+director's record of the hardest crush (the barrier-equivalent speed, `crushSpeeds` in
+`synth/crash/hit.ts`) that zone of that vehicle took before, so a mirror, a window, a lamp, a
+windscreen or an airbag that went then does not go again. `surface` is what debris lands on: read
+like a tyre's under the car for a wall hit (its contact point lies on the house front, often on a
+verge or a paved strip off the street), at the contact point between two cars. The material of a
+drive wall (`wallAt` in `places.ts`) is that of the nearest wall source within 3 m of the contact
+point, if it is the wall the car met (within 0.6 m of the nearest drive wall of any kind): a tree
+trunk (`tree`); a building's walls by kind and style (a greenhouse `glass`, the industrial style,
+which takes in substations and silos, `sheet`, the stone, church, tower and ruin styles `stone`,
+the rest `masonry`); a barrier (a guard rail `rail`, a wall `stone`, a cliff `rock`); anything
+else, a steep bank, a stream's edge or the end of the map, is `earth`, though trees stand a metre
+or two off it (35 % of the probes 0.15 m off the map's banks read `tree` before that rule, 3.6 %
+after).
 
 ### Crashes
 
@@ -398,17 +411,22 @@ What a crash is made of, in time:
 - **The crunch** of each body (`render.ts`): dense Gaussian band noise, overlapping buckle grains
   (1500–3000 a second, 2–5 ms each), whose power follows the crush rate cos(πt/T) inside the crush
   pulse T = 0.1 s·√(μ/k) (±10 %; k the two stiffnesses in series), is held by the rebound and the
-  continued deformation for the **main block** (60–90 ms for a bump, 150–400 ms for a crash, longer
-  with speed and on a side hit), then falls into the tail. Its spectrum is flat within ~5 dB over
-  125 Hz–2 kHz with a random tilt per render (±1.3 dB per octave) and falls away above and below
-  it (measured at 30–150 ms, re the loudest octave: 63 Hz −9…−17 dB, 4 kHz −8…−12, 8 kHz
-  −14…−21, 16 kHz −21…−34): no boom outside. It rings on in the body's dense modal field,
+  continued deformation for the **main block** (60–75 ms for a bump, 150–400 ms for a crash, longer
+  with speed and on a side hit), then falls into the tail; its drive tops out the same whether it
+  crumples or only rubs, so the level law alone sets how loud it is. Its spectrum is flat within
+  ~5 dB over 125 Hz–2 kHz with a random tilt per render (±1.3 dB per octave) and falls away above
+  and below it (the medians over the exterior matrix at 30–150 ms, re the loudest octave: 63 Hz
+  −9…−17 dB, 4 kHz −6.5…−13, 8 kHz −15…−22, 16 kHz −25…−35, the brightest a side hit and a wreck,
+  the dullest earth and the truck): no boom outside. It rings on in the body's dense modal field,
   each octave decaying with T60 = 2.2 / (f·η), η 0.015–0.045 (at most 0.8 s). A bump (no crumple
   under ~3 m/s) is the cover rubbing instead: darker, peaking near 250 Hz.
-- **1–3 sub-hits** at +80…600 ms (more on a side hit and with speed; a wreck to 1 s): a second
-  contact, rising in 4–10 ms, 40–120 ms long.
+- **1–3 sub-hits** at +80…600 ms (more on a side hit and with speed): a second contact, rising in
+  4–10 ms, 40–120 ms long. Past the level cap (a barrier-equivalent of about 30 m/s) a wreck goes on
+  growing in time: from 25 to 60 m/s equivalent the block lengthens by up to 80 ms, the third
+  sub-hit grows likelier, the sub-hits spread to 1.2 s and the tail by up to a second.
 - **3–30 major buckles** (power-law energies, α 1.3–1.6, over 20 dB), mostly inside the pulse, the
-  rest through the block and the sub-hits: each a bright burst and 4–8 freshly drawn panel modes.
+  rest through the block and the sub-hits: each a bright burst and 4–8 freshly drawn panel modes
+  (fewer each past a dozen buckles, where they merge into the dense field anyway).
 - **1–3 long partials**, stiff parts ringing through the crunch: 0.6–4.3 kHz, T60 0.3–0.9 s
   (η 0.001–0.01), about 9–18 dB clear of it in a narrow band.
 - **What breaks** (`parts.ts`), by threshold, read at each body's barrier-equivalent speed (the
@@ -419,12 +437,16 @@ What a crash is made of, in time:
   door skin (a brighter crunch), the mirror snapping, the tempered side glass from 5–10 m/s; front
   and rear take it from 15–20 m/s. **Tempered glass**: a pop, a near-silent gap, then cubes landing
   in 10–60 clumps over a granular bed from 150–250 ms to ~1.4 s, centred on the 8 kHz octave, a
-  second cascade 1.5–2 s later in 40 % of panes.
-- **The aftermath**: the car settling (a low-mid bed, the recordings' tails are loudest at
-  125–500 Hz), debris landing from 0.25 s (none at 2 m/s, dozens at 10–15, up to ~220 in a wreck;
-  a third of it metal clinks ringing 20–100 ms), loose parts rattling, creaks at an Omori rate
-  (t + 0.2 s)^−0.9, coolant hiss after a hard frontal hit. The tail lasts 0.5–2.5 s, growing with
-  speed; a render is at most 4 s, trimmed 60 dB under its peak and faded.
+  second cascade 1.5–2 s later in 40 % of panes; about 9 dB under the crunch it rides on (the
+  pop 5 dB), so a hard frontal or a side hit stays under 3.5 kHz of centroid through 600 ms like
+  the recordings. A part breaks once: the mirror, the side glass, a lamp, the windscreen and the
+  airbag go only if no earlier hit on that zone of the vehicle (its `worn`) passed their threshold.
+- **The aftermath**: the car settling (a low-mid bed 8–13 dB under the block, the recordings'
+  tails are loudest at 125–500 Hz), debris landing from 0.25 s (none at 2 m/s, dozens at 10–15,
+  ~220 in a wreck, up to ~440 at 60 m/s; a third of it metal clinks ringing 20–100 ms), loose
+  parts rattling, creaks at an Omori rate (t + 0.2 s)^−0.9 (more past the cap), coolant hiss after
+  a hard frontal hit. The tail lasts 0.5–2.5 s, growing with speed, to 3.5 s past the cap; a
+  render is at most 4 s (a 35 m/s Giulia wreck reaches it), trimmed 60 dB under its peak and faded.
 
 Each vehicle (`bodies.ts`; masses are the sim's, the rest the research's estimates):
 
@@ -432,7 +454,7 @@ Each vehicle (`bodies.ts`; masses are the sim's, the rest the research's estimat
 |---|---|---|---|---|---|---|
 | Panda | 1 | the reference | 0.025–0.045 | 1–2, 0.7–3.5 kHz | PP cover | a hubcap wobbling down after 9 m/s (40 %) |
 | Ape | 0.5 | thin and tinny, little boom | 0.015–0.03 | 2–3, longer | bare steel, no airbag | big rattles (2.5× a car's) |
-| Truck | 3 | deeper (the frame sweetener from 10 m/s) | 0.02–0.04 | 1–2, 0.6–2.5 kHz | a steel bumper's clang | the marble shifting by its velocity change, a chain on hard hits |
+| Truck | 3 | deeper (the frame sweetener from 10 m/s) | 0.02–0.04 | 1–2, 0.6–2.5 kHz | a heavy steel bumper's clang (4 modes at 150–900 Hz, η 0.004, driven by the closing speed; 12 dB clear of the crunch in about half of Panda–truck hits at 12 m/s, its 250–500 Hz lifting the spectrum to within 8 dB) | the marble shifting by its velocity change (2–6 thunks from 0.5–3 m/s: the truck hit by a Panda at 12 m/s loses 2.6), a chain rattling from 2.5 m/s |
 | Giulia | 1.3 | aluminium skins: brighter | 0.025–0.045 | 1–2, 0.9–4.3 kHz | PP cover | the light bar cracking, its electronics rattling |
 
 Car into car: both bodies crunch from one pulse, sharing it by compliance (each takes
@@ -447,17 +469,19 @@ its own sound:
 | `masonry` | rigid | plaster grit, chips landing above ~8 m/s, the building's dull mass (40–80 Hz, η 0.1); no ring |
 | `stone` | 6 | more grit; above ~8 m/s stones knocked out, thudding and clacking as they land; a short rumble |
 | `rock` | rigid, the hardest contact | harsh grit, pebbles trickling down for seconds |
-| `sheet` | 3 | a big, wobbly thin-sheet ring (dense low modes beating against near-twins), the sheet clattering |
-| `glass` | 1 | annealed greenhouse panes: ringing shards falling over 0.1–2 s, a granular bed |
+| `sheet` | 3 | a big, wobbly thin-sheet ring (14 modes at 100–2500 Hz, η 0.002–0.004, each beating against a near-twin, driven up while the sheet deflects: band flatness 0.38 through 150–600 ms against masonry's 0.55), the sheet clattering |
+| `glass` | 1 | annealed greenhouse panes: a crack as the pane breaks (fading in from 1.5 to 4 m/s), ringing shards falling over 0.1–2 s from about 2 m/s, a granular bed |
 | `rail` | 2 | the only long tonal ring: W-beam modes near 180, 430, 770 Hz and 2–2.7 kHz with split partners, T60 1.4–2.4 s, driven while it deflects; a post's thud, bolts rattling |
 | `earth` | 0.43 (the car crushes 30 %) | the softest, slowest contact, a dull crunch, a 60–110 Hz thud, dirt sprayed up, clods |
-| `tree` | 1.5 (the car crushes 60 %) | a wood knock (Farnell's wood bank), a creak above ~8 m/s, leaves and twigs rustling for 2–4 s |
+| `tree` | 1.5 (the car crushes 60 %) | a wood knock (Farnell's wood bank), a creak above ~8 m/s, leaves rustling faintly for 2–4 s (at 2–2.5 s about 23 dB under the crash's first 300 ms in 2.5–8 kHz, 9–13 dB over a house wall's tail there), twigs and burrs ticking dully on the bonnet (300–2000 Hz, η 0.01) |
 
-Pieces land on the `surface` under the contact point: asphalt as is, stone setts brighter and
-bouncier, gravel, dirt, leaves and grass muffled and quieter (grass about 16 dB under asphalt).
-From the listener's own cabin (`inside`) the whole crash is heard through the cabin's balance
-(70–85 % of the energy under 200 Hz, the highs muffled), with its first air mode
-(1.2–1.5 × c/2L) booming at the hit and each sub-hit, and the airbag loud.
+Pieces land on the `surface` under the car: asphalt as is, stone setts brighter and bouncier,
+gravel, dirt, leaves and grass muffled and quieter (grass about 16 dB under asphalt). From the
+listener's own cabin (`inside`) the whole crash, its crunch too, is heard through the cabin's
+balance (medians of 71–84 % of the energy under 200 Hz across zones and models, single renders
+58–86 %; 2–16 kHz 18–20 dB under the same crash outside), peaking within about 3 dB of the level
+law, with its first air mode (1.2–1.5 × c/2L) booming at the hit and each sub-hit, and the airbag
+the loudest moment of a frontal hit.
 
 **One level law, applied once.** The render's gain is the dissipated energy ½·μ·v²·(1 − e²)
 (e from Cipriani's fit, 0.46 at 1 m/s to 0.1 from 7 m/s), times the car's share against a wall,
@@ -466,20 +490,26 @@ nominal 0.5. That is −18 dB at 2 m/s, −10 at 5, −3.5 at 10, +2.5 at 20; +6
 speed; a Panda–Panda 3 dB under a Panda into a wall at the same closing speed (μ = 0.5); an earth
 bank 5.2 dB and a tree 2.2 dB under masonry. Above +6 dB (a Panda at ~30 m/s) the level stops:
 the front is used up, and the main block's length, the sub-hits, the debris and the tail carry
-the severity. `crashQuiet` is that level, negated, for masking. Event counts, durations and
-thresholds never touch the level. A render never peaks over 0.95.
+the severity. `crashQuiet` is that level, negated, for masking, less what a ringing wall adds to
+it (`adds`, measured: the guard rail and a sheet wall play 2 dB over the law once their ring is
+driven fully, from 8 m/s). Event counts, durations and thresholds never touch the level. The
+peaks follow it within about 1 dB from a 2 m/s bump to a 20 m/s hit on every material (a
+Panda–truck hit, its bumper clang, 1.8 dB over). A render never peaks over 0.95.
 
 **Cost.** A render is mostly multiply-adds: every noise layer only adds power to ten octave
 bands' envelopes (at 6 kHz control rate), played at the end over ten precomputed loops of band
-noise (1.4 s each, made once per sample rate in `prepare`: 11–28 ms, 2.6 MB); each mode is one
-recurrence step a sample until it falls 60 dB (or to −80 dBFS). In Node on this machine, over 20
-seeds: a Panda into a house at 14 m/s renders in 3.8 ms (median; 4.2 worst), the heaviest (the
-guard rail, a tree, the wreck) in 7–9 ms (12 worst); in headless Chrome 3.6 ms and 6–7 ms (8
-worst), a play with its buffer 7–8 ms, an echo of it nothing, and no long task. In the game
-(headless Chrome, `?seed=3`, about 350 crashes of traffic and of the player's car into houses,
-stone, trees, banks and parked cars) a play took 2.4 ms (median; 4.8 for nine in ten, 8.1 at most)
-and no frame had a long task. ponytail: the render runs on the main thread; move it to a Worker if
-the browser shows long tasks.
+noise (2.7 s each, read forth and back so they repeat only after 5.5 s, longer than any render;
+made once per sample rate in `prepare`: 24–33 ms in Node, 5.2 MB); each mode is one recurrence
+step a sample until it falls 60 dB (or to −80 dBFS). A crash renders at the device's rate up to
+48 kHz (above it Web Audio resamples: at 96 kHz every mode would cost twice as much). In Node on
+this machine (busy, a load of 6), over 20 seeds: a Panda into a house at 14 m/s renders in 4.7 ms
+(median; 6.7 worst), the heaviest reachable crashes (the Giulia into a rail or a house at 40 m/s,
+a Panda into a tree at 40, a Giulia–truck head-on at 62, two trucks at 40) in 8–15 ms (18 worst);
+in headless Chrome 3.5 ms and 7–13.5 ms (14.5 worst). In the game (headless Chrome, `?seed=3`,
+90 s at Monzone station and the player's Panda driven into houses, a stone wall and a tree, 115
+crash plays) a play took 2 ms (median; 4.6 for nine in ten, 8.8 at most) and no long task fell
+within a second of one. ponytail: the render runs on the main thread; move it to a Worker if the
+browser shows long tasks.
 
 The bells are the tallest church or tower of each district, 22 in all. A tower of 10 m or less
 rings an 800 Hz prime; taller towers ring lower, down to 400 Hz at 30 m.
@@ -495,7 +525,7 @@ rings an 800 Hz prime; taller towers ring lower, down to 400 Hz at 30 m.
 - `BEDS`: the wind and cricket beds at the ears at full strength and density. `windDb` (here),
   `cricketsQuiet` (`synth/nature.ts`), `WALK_DB` (`synth/steps.ts`) and `crashQuiet`
   (`synth/crash/index.ts`, the crash's level law: 18 dB under at a 2 m/s bump, none at the 15 m/s
-  reference, 6 dB over from about 30 m/s): how far the wind, crickets, walking-step and crash synths
+  reference, 6 dB over from about 30 m/s, 2 dB more for a ringing guard rail or sheet wall): how far the wind, crickets, walking-step and crash synths
   play under (or over) that, so masking counts the sound actually played. The last three live beside the synths they describe, derived from
   the same numbers.
 - `HEIGHT`, `WATER_R_MIN`: source heights and the water's 1 m clamp.
@@ -545,7 +575,8 @@ before the pan, and a panned one lower):
   a tree, a bank, the guard rail and a stone wall at 10 m/s −2.1 to −3.7 at 5 m and −12 to −20 at
   30 m. The player's own crash plays 21–26 dB over gain 1 (no cabin, 2–3 m from the contact point)
   and peaks −0.3 to −2 dBFS from 10 m/s (a hard-panned one at 15 m/s once in six at +0.6), −7 at a
-  2 m/s bump. The limiter's 1 ms attack holds them there: with 3 ms their transients got through
+  2 m/s bump; re-measured in the game since its crunch passes the cabin's balance too, −1.3 to
+  −2.2 dBFS at 10–15 m/s into a house, a stone wall and a tree, −3.1 at 4.5 m/s. The limiter's 1 ms attack holds them there: with 3 ms their transients got through
   to +0.1…+2.4 dBFS and clipped, while 6 dB less `LEVELS.crash` moved the near peaks by only
   0.3–1.5 dB (it is the limiter's overshoot, not the level), so the level stays at 115 dB(A).
 
@@ -597,8 +628,11 @@ own emitter and mixer:
   The crashes cover a matrix: a Panda into a house wall at 2 (a bump), 5, 14 and 20 m/s, a
   Panda–Panda at 10, a Panda–truck at 12, an Ape into stone at 8, the Giulia into the guard rail
   at 12, a Panda into a tree at 10 and into earth at 8, a side hit at 12, the cabin at 14 and the
-  Giulia wrecked at 40; the scrape plays along every material at 12 m/s, along masonry at 4 and
-  along the guard rail at 2.5, where it squeals.
+  Giulia wrecked at 40, each drawn anew on every run (a fresh params object, so the crash's
+  per-object memo never replays an earlier run); the scrape plays along every material at 12 m/s,
+  along masonry at 4 and along the guard rail at 2.5, where it squeals. A crash or an engine with
+  `inside` ticked plays through no cabin, as the game plays the listener's own (the synth makes
+  its cabin).
   Adding a kind fails to compile until the page has a panel and render rows for it. Two low peaks
   are by design: the wind swells with gusts over seconds, so at strength 1 a 2 s render peaks near
   0.2–0.3 while its 64 s gust loop reaches 0.45–0.65; and the blackbird's thin "seee" (30 % of its
@@ -618,17 +652,17 @@ functions (`synth/world.test.ts` imports them to check).
 
 | File | Checks |
 |---|---|
-| `src/sim/index.test.ts`, `src/sim/walls.test.ts` | the events: a car driven into a building is a `wall` Impact as fast as the car was, where its nose meets the wall; a car rolling into a parked one a `car` Impact at the closing speed, the reduced mass and where the bumpers meet; a knockdown one `person` Impact faster than `KNOCK_SPEED`; a car pinning the player a `person` Impact as fast as the car was; a car blocked by a parked one honks once per stuck episode, `HONK_STEPS` before each time it backs up |
-| `src/audio/index.test.ts` | `Hear`: the listener on foot and at the wheel with the horn held, AI traffic running while standing, an untouched car heard only while it moves, impacts (with the struck vehicle's model and zone; none for a vehicle gone since) then honks each heard once, an Ape rolling into a parked Panda front on rear |
+| `src/sim/index.test.ts`, `src/sim/walls.test.ts` | the events: a car driven into a building is a `wall` Impact as fast as the car was, where its nose meets the wall; rolled into it 45° and 60° off square, on the wall itself (within 5 cm) at its front end; a car rolling into a parked one a `car` Impact at the closing speed, the reduced mass and where the bumpers meet; a knockdown one `person` Impact faster than `KNOCK_SPEED`; a car pinning the player a `person` Impact as fast as the car was; a car blocked by a parked one honks once per stuck episode, `HONK_STEPS` before each time it backs up |
+| `src/audio/index.test.ts` | `Hear`: the listener on foot and at the wheel with the horn held, AI traffic running while standing, an untouched car heard only while it moves, impacts (with the struck vehicle's model and zone; none for a vehicle gone since) then honks each heard once, an Ape rolling into a parked Panda front on rear, an Ape T-boning a parked Panda's front door on its side, a Panda rolling 50° off square into a house wall on its front |
 | `src/render/index.test.ts` | every system of the render and audio schedules declares no writes |
 | `src/audio/acoustics.test.ts` | the laws: the line source against the exact table, the air cutoffs, Doppler, the pan, diffraction, ground, foliage, masking, the mix calibration |
 | `src/audio/occlusion.test.ts` | path differences on real map spots: a flat meadow, Monzone Alto's 30 m tower, a bell over its own walls, Monte San Giorgio between its flanks |
-| `src/audio/places.test.ts`, `src/audio/places/water.test.ts` | surfaces, wall materials (a trunk, buildings by kind and style, the guard rail, the stone wall, a cliff, bare ground), ambience shares, streets, echoes at Equi Terme, bells, dogs and birds, the Torrente Lucido from Monzone station, the Fontana di Aiola |
-| `src/audio/director/index.test.ts` | the director on a recording speaker at real map spots: proximity (in the open and behind a ridge), a building's muffling, Doppler, step cadence, travel delay, crash merging and scrapes, a house wall's material and cobbles in the crash and scrape params, the bodies swapped for a listener in the struck car, a wall crash on foot muffled by the house in the way, a bump culled nearer than a crash, echoes, nothing before the context, the cabin, getting in and out, horn and siren, the bells, water and its masking, the valley's never-silent bed and the river 15 m away against behind the houses, voice caps and their hysteresis, flee cues |
+| `src/audio/places.test.ts`, `src/audio/places/water.test.ts` | surfaces, wall materials (a trunk, buildings by kind and style, the guard rail, the stone wall, a cliff, bare ground; the nearer of a trunk and a house wall 1.2–2.5 m apart wins; a bank with trees 1.5–3 m off it is earth), ambience shares, streets, echoes at Equi Terme, bells, dogs and birds, the Torrente Lucido from Monzone station, the Fontana di Aiola |
+| `src/audio/director/index.test.ts` | the director on a recording speaker at real map spots: proximity (in the open and behind a ridge), a building's muffling, Doppler, step cadence, travel delay, crash merging and scrapes, a house wall's material and cobbles in the crash and scrape params, the bodies swapped for a listener in the struck car, a zone's wear carried to the next crash, a wall crash's debris surface read under the car, a scrape's material held through a brief other contact, a wall crash on foot muffled by the house in the way, a bump culled nearer than a crash, echoes, nothing before the context, the cabin, getting in and out, horn and siren, the bells, water and its masking, the valley's never-silent bed and the river 15 m away against behind the houses, voice caps and their hysteresis, flee cues |
 | `src/audio/director/hearing.test.ts`, `occluder.test.ts` | the reverb send; the obstacle cache's refresh and forgetting |
 | `src/audio/speaker.test.ts`, `mixer.test.ts`, `buffers.test.ts`, `measure.test.ts` | the one-shot cap, the speaker inert until a trusted gesture, the reverb crossfade, the level meter, seamless noise loops, the render measurements |
 | `src/audio/gearbox.test.ts`, `src/audio/synth/*.test.ts` | gearbox shifts; the engine and tyre laws; the scrape's surface loops (seamless, at their RMS, a stone every 0.3 m and a rail post every 2 m) and its speed law; step and cricket rates; bubbles at their Minnaert frequency; synth params clamped, NaN to silence |
-| `src/audio/synth/crash/crash.test.ts` | the crash renderer over the design's matrix (a Panda into a house at 2, 5, 14 and 20 m/s, Panda–Panda 10, Panda–truck 12, an Ape into stone 8, the Giulia into the guard rail 12, a tree 10, earth 8, a side hit 12, the cabin 14, a 40 m/s wreck), five seeds each, measured by `testing.ts` (the research's analysis tools, ported): finite, ≤ 1, ≤ 4 s, faded; deterministic per seed; the level law and its cap; the critique's targets on the exterior crashes (medians: −10 dB at 150–450 ms, rise 8–25 ms, crest 9–15 dB, band flatness 0.35–0.6, 1–8 kHz kurtosis 2.8–4.5; every render: 63 Hz ≤ −5 dB and the loudest octave in 125 Hz–2 kHz; 8 kHz −12…−25 dB, centroid 1.5–3.5 kHz, a flat median spectrum, 1–3 long partials); the tail's −20 dB at 0.25–2.5 s, later the harder the hit; the bump's 40–100 ms; the rail's tonal ring; the tree's rustle past 2 s; earth the slowest, dullest; the cabin's low share; the glass shower's 6–10 kHz centroid and grass swallowing it |
+| `src/audio/synth/crash/crash.test.ts` | the crash renderer over the design's matrix (a Panda into a house at 2, 5, 12, 14 and 20 m/s, Panda–Panda 10, Panda–truck 12, an Ape into stone 8, the Giulia into the guard rail 12, a sheet wall 12, a tree 10, earth 8, a side hit 12, the cabin at 14 front and with no airbag a side 12, a rear 8 and the Ape 14, a 40 m/s wreck), twenty seeds each (the bounds checked on seeds 1–80, twenty at a time), measured by `testing.ts` (the research's analysis tools, ported): finite, ≤ 1, ≤ 4 s, faded, finite from an 8 kHz device rate; noise that never repeats inside a render; deterministic per seed; the level law, its cap and the peaks following it within 2 dB (a bump, the rail, a sheet wall, Panda–Panda); growth past the cap (tail, block, at most 3 sub-hits, 42 m/s against 60 audibly different); the critique's targets on the exterior crashes (medians: −10 dB at 150–450 ms, rise 8–25 ms, crest 9–15 dB, band flatness 0.35–0.6, 1–8 kHz kurtosis 2.8–4.5, 8 kHz −12…−25 dB, 16 kHz −22…−36, centroid 1.5–3.5 kHz through 600 ms; 97 % of renders with 63 Hz ≤ −5 dB and the loudest octave in 125 Hz–2 kHz); the tail's −20 dB at 0.25–2.5 s, later the harder the hit; a flat median spectrum (the truck within 8 dB); the long partials layer (each model's count at 0.6–4.3 kHz, η 0.001–0.01) and 1–3 of them clear in the render; the bump's 40–100 ms; the rail's tonal ring; the sheet wall's ring against masonry; the truck's bumper clang; the tree's faint rustle past 2 s and its tail under 3.5 kHz; earth the slowest, dullest; the cabin's low share and muffled highs in every zone; a greenhouse nudge's dull crack; a worn side breaking nothing again; the glass shower's 6–10 kHz centroid and grass swallowing it |
 
 ### In a browser
 
@@ -648,7 +682,8 @@ Crashes (a Panda driven by CDP keys into a house, a stone wall, a tree and a ban
 into parked cars at 9–15 m/s, `gta.audio.level()` and each channel's sample peak every 20 ms): the
 played speed is the car's at contact (wall hits within 0.3 m/s of it, an oblique tree hit 0.5 under;
 before the sim reported it, a 15 m/s hit played as 2.9 then 9.9 m/s); from the seat each peaks −0.3 to
-−1.9 dBFS (the meter −12 to −14 over a cabin at −15 to −20 under throttle); on foot 6.6 m from an
+−1.9 dBFS (the meter −12 to −14 over a cabin at −15 to −20 under throttle; −1.3 to −2.2 and the
+meter −12.2 to −13.2 with the cabin balance on the crunch); on foot 6.6 m from an
 11.4 m/s hit −2.8 (the meter −10), 10.5 m from a 5.1 m/s one −9.8; a play's render 1–8 ms, no long
 task, no console error, no non-finite placement.
 
@@ -679,16 +714,25 @@ task, no console error, no non-finite placement.
 - **A car rubbing along a wall** keeps a faint scrape held while the sim reports the small hits.
 - **Crashes are tuned by measurement, not by ear.** Their features match the research's real
   recordings (onset, block length, crest, noisiness, kurtosis, octave balance, centroid,
-  partials), the medians over seeds within the critique's ranges; single renders still miss one
-  now and then (a rise over 25 ms or a crest over 15 dB in about one render in five, as the
-  recordings themselves vary). A parking bump's crest is about 15 dB, a bumper tap's (13.7–15.2),
-  not under 15. Nobody has listened to them blind against the recordings yet.
-- **Crashes render on the main thread** when they play: 2–9 ms each (up to ~12 ms at worst).
-- **Traffic brushes houses.** Near Monzone station (`?seed=3`) AI cars hit house walls about ten
-  times a minute (mostly a side at 1.5–8 m/s where a lane passes close to a facade), and each hit
-  is a crash: distant bumps, now and then a loud one in a nearby street.
+  partials), the medians over twenty seeds within the critique's ranges on any twenty; single
+  renders still miss one now and then (a rise over 25 ms or a crest over 15 dB in about one
+  render in five, 63 Hz over −5 dB in about one in eighty, as the recordings themselves vary). A
+  parking bump's crest is about 15.3 dB (a bumper tap's 13.7–15.2) and its −10 dB about 90 ms,
+  both near the edge of their targets. A tree's tail is still brighter than the one recorded tree
+  crash's (3.3 kHz of centroid after 0.6 s against 1.4). Nobody has listened to them blind
+  against the recordings yet.
+- **Crashes render on the main thread** when they play: 2–9 ms each, the heaviest reachable
+  (two trucks head-on at 40 m/s) about 15 ms in Node and 13.5 in Chrome.
+- **Traffic brushes houses.** Near Monzone station (`?seed=3`) AI cars hit house walls 10–17
+  times a minute (front corners and sides at 1.5–9 m/s where a lane passes close to a facade, the
+  same cars again and again: in one 90 s run 16 of 26 crashes landed on a zone already worn), and
+  each hit is a crash: distant bumps, now and then a loud one in a nearby street, its mirror and
+  glass gone after the first.
 - **What a crash leaves out:** a parked car's alarm, a stuck horn, the engine stalling, tyre
-  scrub after the hit, a hanging part swinging; the zone is front, side or rear (no corners).
+  scrub after the hit, a hanging part swinging; the zone is front, side or rear (no corners: an
+  oblique hit on a front corner is the front). A part's threshold is drawn per render, so a harder
+  later hit can break a part again when its draw lands between the two speeds; the Giulia's light
+  bar and the Panda's hubcap are not remembered at all.
 - **A scrape's level follows speed only.** The sim reports no contact force, so a car pressed hard
   along a wall grinds as loud as one brushing it.
 

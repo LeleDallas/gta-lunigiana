@@ -11,7 +11,7 @@
  */
 import { coverName, mapCover, type Cover } from "../render/landcover.ts"
 import { staticGrid } from "../sim/collide.ts"
-import { type Building, buildingBoxes, buildingsIn, buildingStyleOf, districtAt, heightAt, MAP, type Road, treesIn, TRUNK } from "../sim/map/index.ts"
+import { type Building, buildingBoxes, buildingsIn, buildingStyleOf, districtAt, heightAt, MAP, type Road, treesIn, TRUNK, wallsNear } from "../sim/map/index.ts"
 import { hash01, segDist2 } from "../tools/geometry.ts"
 import { delayOf, EAR_HEIGHT, panOf } from "./acoustics.ts"
 import type { Material, Surface } from "./types.ts"
@@ -96,13 +96,18 @@ const distanceTo = (pts: ReadonlyArray<number>, closed: boolean, x: number, y: n
   return Math.sqrt(d2)
 }
 
+/** A trunk, building or barrier this much farther than the nearest drive wall is not the wall that was hit, m (a trunk's square wall against its circle, a contact a few cm off). */
+const SAME_WALL = 0.6
+
 /**
  * What a vehicle hitting a drive wall at the contact point (x, y) hit, by how it sounds: the
- * nearest tree trunk, building wall or barrier within `reach` m, else earth (a steep bank, a
- * stream's edge, the end of the map).
+ * nearest tree trunk, building wall or barrier within `reach` m, if it is the nearest drive wall;
+ * else earth (a steep bank, a stream's edge, the end of the map).
  */
 export const wallAt = (x: number, y: number, reach = 3): Material => {
-  let nearest = reach, material: Material = "earth"
+  let wall = Infinity
+  for (const s of wallsNear("drive", x - reach, y - reach, x + reach, y + reach)) wall = Math.min(wall, segDist2(x, y, s.ax, s.ay, s.bx, s.by).d2)
+  let nearest = Math.min(reach, Math.sqrt(wall) + SAME_WALL), material: Material = "earth"
   const offer = (d: number, what: Material) => {
     if (d < nearest) [nearest, material] = [d, what]
   }

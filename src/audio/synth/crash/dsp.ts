@@ -15,8 +15,8 @@ export type Spectrum = ReadonlyArray<number>
 
 /** Control step of the band envelopes, samples (0.17 ms at 48 kHz). */
 const STEP = 8
-/** Length of each band's noise loop, samples (1.4 s at 48 kHz). */
-const SIZE = 1 << 16
+/** Length of each band's noise loop, samples (2.7 s at 48 kHz); played forth and back, it repeats only after 5.5 s, longer than any render. */
+const SIZE = 1 << 17
 
 /** `lo` … `hi`, uniformly. */
 export const between = (random: () => number, lo: number, hi: number): number => lo + (hi - lo) * random()
@@ -90,7 +90,8 @@ const loops = new Map<number, ReadonlyArray<Float32Array>>()
  * One seamless loop of unit-RMS noise per band at `sampleRate`, made once (a fixed seed, so renders
  * stay deterministic). Built in the frequency domain: every bin at its band's weight with a random
  * quadrant phase (Gaussian in time by the central limit), two bands per FFT (one in the real part,
- * one in the imaginary), so the loops wrap without a seam and sum to white noise.
+ * one in the imaginary), so the loops wrap without a seam. Each band has unit power, so a Spectrum is
+ * power per octave band and all ones is pink noise. A band at or above Nyquist is silent.
  */
 export const bandLoops = (sampleRate: number): ReadonlyArray<Float32Array> => {
   const known = loops.get(sampleRate)
@@ -113,7 +114,8 @@ export const bandLoops = (sampleRate: number): ReadonlyArray<Float32Array> => {
     for (const part of [re, im]) {
       let energy = 0
       for (let i = 0; i < SIZE; i++) energy += part[i]! * part[i]!
-      const scale = 1 / Math.sqrt(energy / SIZE), loop = new Float32Array(SIZE)
+      // A band with no bins under Nyquist holds only rounding residue: silence, not noise scaled up to unit power (or NaN).
+      const scale = energy > 1e-12 * SIZE ? 1 / Math.sqrt(energy / SIZE) : 0, loop = new Float32Array(SIZE)
       for (let i = 0; i < SIZE; i++) loop[i] = part[i]! * scale
       made.push(loop)
     }
@@ -166,11 +168,11 @@ export const excite = (noise: Noise, drive: Float32Array, spectrum: Spectrum, t6
   }
 }
 
-/** Adds the noise into `out`: each band's loop, from a random offset, times the square root of its power envelope (skipped under amplitude `floor`). */
+/** Adds the noise into `out`: each band's loop, from a random offset, forth and back, times the square root of its power envelope (skipped under amplitude `floor`). */
 export const playNoise = (out: Float32Array, noise: Noise, random: () => number, floor: number): void => {
-  const bands = bandLoops(noise.rate * STEP), mask = SIZE - 1
+  const bands = bandLoops(noise.rate * STEP), mask = 2 * SIZE - 1
   noise.power.forEach((env, b) => {
-    const loop = bands[b]!, offset = Math.floor(random() * SIZE)
+    const loop = bands[b]!, offset = Math.floor(random() * 2 * SIZE)
     let from = Math.sqrt(env[0]!)
     for (let c = 0; c + 1 < env.length; c++) {
       const to = Math.sqrt(env[c + 1]!), i0 = c * STEP, i1 = Math.min(out.length, i0 + STEP)
@@ -178,7 +180,9 @@ export const playNoise = (out: Float32Array, noise: Noise, random: () => number,
         const slope = (to - from) / STEP
         let a = from
         for (let i = i0; i < i1; i++) {
-          out[i]! += a * loop[(offset + i) & mask]!
+          // Reversed, the loop is other noise of the same spectrum; the turn is seamless (the same sample twice).
+          const k = (offset + i) & mask
+          out[i]! += a * loop[k < SIZE ? k : mask - k]!
           a += slope
         }
       }

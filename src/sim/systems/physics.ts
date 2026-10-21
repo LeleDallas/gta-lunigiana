@@ -38,12 +38,13 @@ const yawRate = (spec: VehicleSpec, v: number, steer: number, handbrake: boolean
 
 /**
  * Where a body of `spec` centred on (x, y) at heading `angle` meets what it moves `into` (a unit
- * vector): the centre plus `into` times the body's support distance along it, as a box L×W.
+ * vector): the point of its collision capsule (circles of radius W/2 along ±(L/2 − W/2)) furthest
+ * along `into`, on the end circle that leads (the front corner of an oblique hit, the side's middle
+ * of a square-on side hit).
  */
 const contact = (spec: VehicleSpec, x: number, y: number, angle: number, into: Vec2.Vec2): Vec2.Vec2 => {
-  const fx = Ops.cos(angle), fy = Ops.sin(angle)
-  const reach = Math.abs(into.x * fx + into.y * fy) * spec.length / 2 + Math.abs(into.y * fx - into.x * fy) * spec.width / 2
-  return { x: x + into.x * reach, y: y + into.y * reach }
+  const fx = Ops.cos(angle), fy = Ops.sin(angle), r = spec.width / 2, end = Math.sign(into.x * fx + into.y * fy) * (spec.length / 2 - r)
+  return { x: x + fx * end + into.x * r, y: y + fy * end + into.y * r }
 }
 
 /**

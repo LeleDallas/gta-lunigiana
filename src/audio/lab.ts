@@ -64,7 +64,8 @@ const EARS = { x: 0, y: 0, z: EAR_HEIGHT, vx: 0, vy: 0 } as const
 const heard = (sound: Sound, where: Where): { readonly hearing: Hearing; readonly source: Calibration } => {
   const source = sourceOf(sound), r = source.wet === undefined ? where.r : 0, ahead = Math.sqrt(1 - where.side * where.side)
   const at = { x: r * (where.side * SCREEN_RIGHT.x + ahead * SCREEN_UP.x), y: r * (where.side * SCREEN_RIGHT.y + ahead * SCREEN_UP.y), z: EAR_HEIGHT }
-  const own = sound.kind === "engine" && sound.inside
+  // The game plays the listener's own engine and crash through no cabin (the synths make theirs).
+  const own = (sound.kind === "engine" || sound.kind === "crash") && sound.inside
   const hearing = hear({
     ears: EARS, source: at, db: source.db, rMin: source.rMin, height: EAR_HEIGHT, quiet: source.quiet, delta: 0, forest: 0, ambient: AMBIENT_DB,
     street: where.street, cabin: own ? undefined : where.cabin
@@ -268,7 +269,8 @@ const renderShot = async (kit: Kit, sound: OneShot): Promise<Row> => {
   const ctx = new OfflineAudioContext({ numberOfChannels: 2, length: SHOT_SECONDS * RATE, sampleRate: RATE })
   const shot = SHOTS[sound.kind] as Shot<OneShot>
   await shot.prepare?.(ctx, kit)
-  const end = Math.min(SHOT_SECONDS, shot.play({ ctx, out: ctx.destination, kit }, sound, 0))
+  // A fresh params object: the crash keeps one render per object, and every run should draw anew.
+  const end = Math.min(SHOT_SECONDS, shot.play({ ctx, out: ctx.destination, kit }, { ...sound }, 0))
   // The speaker frees a shot's emitter 0.1 s after its end.
   return rowOf(sound, await ctx.startRendering(), 0, end, Math.min(SHOT_SECONDS, end + 0.1))
 }

@@ -1,9 +1,10 @@
 /**
  * What a car hits, by material (synthesis.md §6.4; physics.md §4; critique §5.3, §7): how it takes the
  * crush and what it adds to the car's own sound. Masonry, stone and rock barely radiate (grit, chips,
- * a dull mass); the W-beam guard rail is the only long tonal ring; a sheet-metal wall wobbles; a
- * greenhouse's annealed panes break into ringing shards; an earth bank is a soft, longer, dull pulse;
- * a tree knocks like wood and rustles for seconds. Levels are power re the crunch's main block.
+ * a dull mass); the W-beam guard rail rings on longest, at its beam bands; a sheet-metal wall rings
+ * and wobbles; a greenhouse's annealed panes break into ringing shards; an earth bank is a soft,
+ * longer, dull pulse; a tree knocks like wood and rustles faintly for seconds. Levels are power re
+ * the crunch's main block.
  *
  * @module audio/synth/crash/targets
  */
@@ -17,7 +18,7 @@ import { grains, land, train } from "./textures.ts"
 export interface TargetSpec {
   /** Stiffness re a Panda's front: the car takes k / (k + k_car) of the crush (Infinity: rigid, all of it); a softer contact lasts longer. */
   readonly stiffness: number
-  /** How long the car's side of the first contact lasts against it, s (Hertz: steel on steel shortest, wood and soil longest). */
+  /** How long the struck thing's side of the first contact lasts, s (Hertz: steel shortest, wood and soil longest); in series with the car's own (hit.ts). */
   readonly contact: readonly [number, number]
   /** How much slower the contact builds than against a wall. */
   readonly soft: number
@@ -25,6 +26,8 @@ export interface TargetSpec {
   readonly tint: Spectrum
   /** How much longer than the car's aftermath it sounds, s (a rail's ring, a tree's rustle, a greenhouse falling). */
   readonly ringing: number
+  /** TUNED: how much louder its ring (driven fully from 8 m/s) makes the crash than the level law's crunch, dB (measured peaks), so masking counts it. */
+  readonly adds: number
   /** Adds what the struck thing sounds like. */
   readonly add: (mix: Mix, hit: Hit) => void
 }
@@ -44,6 +47,8 @@ const DIRT = power([-99, -99, -30, -16, -6, 0, -1, -8, -18, -30])
 const LEAVES = power([-99, -99, -99, -40, -26, -12, -3, 0, -2, -14])
 /** A small hard click (a bolt, a clip, a pebble). */
 const CLICK = power([-99, -99, -99, -30, -18, -8, -2, 0, -6, -16])
+/** A twig or a burr dropping on the bonnet: a dull 0.5–3 kHz tick. */
+const TWIG = power([-99, -99, -24, -12, -4, 0, -3, -10, -22, -36])
 /** A glass shard's tinkle. */
 const SHARD = power([-99, -99, -99, -99, -30, -18, -8, -2, 0, -4])
 
@@ -107,11 +112,11 @@ const tree = (mix: Mix, hit: Hit): void => {
     train(mix, from, Math.round(between(random, 30, 90) * smoothstep(8, 16, v)), 1 / between(random, 60, 150), 0.4, 0.03, power([-99, -99, -20, -6, 0, -4, -12, -20, -99, -99]), [[bank[3]!, 0.05]], 0.2)
   }
   // The crown shaking: leaves swell in 50–150 ms and rustle 2–4 s, twigs and burrs ticking on the bonnet.
-  const from = between(random, 0.05, 0.15), last = between(random, 2, 4)
-  puff(mix, from, 0.15, last / 2.5, 0.002 * smoothstep(2, 10, v), LEAVES)
-  grains(mix, from, from + last, 1500, last / 2, 0.002, 0.004 * smoothstep(2, 10, v), LEAVES)
+  const from = between(random, 0.05, 0.15), last = between(random, 2, 4), shaken = smoothstep(2, 10, v)
+  puff(mix, from, 0.15, last, 0.0000125 * shaken, LEAVES)
+  grains(mix, from, from + last, 1500, last / 0.8, 0.002, 0.000025 * shaken, LEAVES)
   for (let i = Math.round(between(random, 3, 30) * smoothstep(4, 14, v)); i > 0; i--) {
-    land(mix, from + between(random, 0.2, last * 0.8), "asphalt", 0.004 * random(), SHARD, [[between(random, 2000, 6000), 0.005]], 0.3)
+    land(mix, from + between(random, 0.2, last * 0.8), "asphalt", 0.002 * random(), TWIG, [[between(random, 300, 2000), 0.01]], 0.3)
   }
 }
 
@@ -132,13 +137,13 @@ const rail = (mix: Mix, hit: Hit): void => {
   train(mix, between(random, 0.05, 0.15), Math.round(between(random, 6, 16)), 1 / between(random, 20, 40), 0.15, 0.01 * drive, CLICK, [[between(random, 2500, 5000), 0.005]], 0.4)
 }
 
-/** A metal-clad industrial wall: a big, wobbly thin-sheet ring (dense low modes beating against near-twins), the sheet clattering on its fixings. */
+/** A metal-clad industrial wall: a big, wobbly thin-sheet ring (modes at 100–2500 Hz, η 0.002–0.004, beating against near-twins, driven up while the sheet deflects), as loud as the rail's, the sheet clattering on its fixings. */
 const sheet = (mix: Mix, hit: Hit): void => {
   const { random } = mix, drive = Math.min(1, hit.speed / 8)
   for (let i = 0; i < 14; i++) {
-    const hz = 70 * (1200 / 70) ** random(), eta = between(random, 0.004, 0.01), amp = 0.1 * drive * rayleigh(random) * Math.min(1, Math.sqrt(hz / 300))
-    strike(mix, 0, hz, eta, amp, hit.rise)
-    strike(mix, 0, hz * between(random, 1.005, 1.02), eta, amp * 0.7, hit.rise)
+    const hz = 100 * (2500 / 100) ** random(), eta = between(random, 0.002, 0.004), amp = 0.4 * drive * rayleigh(random) * Math.min(1, Math.sqrt(hz / 300))
+    strike(mix, 0, hz, eta, amp, hit.pulse / 2)
+    strike(mix, 0, hz * between(random, 1.005, 1.02), eta, amp * 0.7, hit.pulse / 2)
   }
   train(mix, between(random, 0.04, 0.1), Math.round(between(random, 8, 20)), 1 / between(random, 20, 40), 0.25, 0.02 * drive, CLICK, [[between(random, 900, 2500), 0.01]], 0.5)
 }
@@ -146,7 +151,8 @@ const sheet = (mix: Mix, hit: Hit): void => {
 /** A greenhouse: annealed panes crack and fall as big ringing shards (2–3 modes at 1.6–6 kHz, η 0.002–0.003, ratios {1, 1.5–1.8, 2.2–2.7}) over a longer fall. */
 const glass = (mix: Mix, hit: Hit): void => {
   const { random } = mix, v = hit.speed
-  puff(mix, 0.002, 0.0004, 0.004, 0.4, SHARD)
+  // The pane cracks only once it is pushed hard enough to break, and falls from about 2 m/s.
+  puff(mix, 0.002, 0.0004, 0.004, 0.4 * smoothstep(1.5, 4, v), SHARD)
   for (let i = Math.round(between(random, 20, 50) * smoothstep(2, 8, v)); i > 0; i--) {
     const t = between(random, 0.1, 0.4) + 1.8 * random() ** 2, hz = between(random, 1600, 6000)
     land(mix, t, hit.surface, 0.02 * Math.exp(-t / 1.5) * random(), SHARD, [[hz, between(random, 0.002, 0.003)], [hz * between(random, 1.5, 1.8), 0.003], [hz * between(random, 2.2, 2.7), 0.003]], 0.5)
@@ -157,15 +163,15 @@ const glass = (mix: Mix, hit: Hit): void => {
 const HARD = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
 
 export const TARGETS = {
-  masonry: { stiffness: Infinity, contact: [0.0004, 0.0007], soft: 1, tint: HARD, ringing: 0, add: masonry },
+  masonry: { stiffness: Infinity, contact: [0.0004, 0.0007], soft: 1, tint: HARD, ringing: 0, adds: 0, add: masonry },
   // A dry-stone wall gives a little.
-  stone: { stiffness: 6, contact: [0.0004, 0.0006], soft: 1, tint: HARD, ringing: 0, add: stone },
-  sheet: { stiffness: 3, contact: [0.0003, 0.0005], soft: 1, tint: HARD, ringing: 0.5, add: sheet },
-  glass: { stiffness: 1, contact: [0.0003, 0.0006], soft: 1.1, tint: HARD, ringing: 1, add: glass },
+  stone: { stiffness: 6, contact: [0.0004, 0.0006], soft: 1, tint: HARD, ringing: 0, adds: 0, add: stone },
+  sheet: { stiffness: 3, contact: [0.0003, 0.0005], soft: 1, tint: HARD, ringing: 0.5, adds: 2, add: sheet },
+  glass: { stiffness: 1, contact: [0.0003, 0.0006], soft: 1.1, tint: HARD, ringing: 1, adds: 0, add: glass },
   // The rail deflects and slides: a longer pulse than a wall's.
-  rail: { stiffness: 2, contact: [0.00025, 0.0004], soft: 1.1, tint: HARD, ringing: 1.5, add: rail },
-  rock: { stiffness: Infinity, contact: [0.00035, 0.0005], soft: 0.9, tint: HARD, ringing: 1.5, add: rock },
+  rail: { stiffness: 2, contact: [0.00025, 0.0004], soft: 1.1, tint: HARD, ringing: 1.5, adds: 2, add: rail },
+  rock: { stiffness: Infinity, contact: [0.00035, 0.0005], soft: 0.9, tint: HARD, ringing: 1.5, adds: 0, add: rock },
   // The bank gives: the softest, slowest contact, and the dullest crunch (dirt and grass damp the panels too).
-  earth: { stiffness: 0.43, contact: [0.005, 0.008], soft: 2.8, tint: [0, 0, 0, 0, -1, -2, -4, -6, -8, -10], ringing: 0, add: earth },
-  tree: { stiffness: 1.5, contact: [0.0015, 0.0024], soft: 1.2, tint: [0, 0, 0, 0, 0, -1, -1, -2, -3, -4], ringing: 3, add: tree }
+  earth: { stiffness: 0.43, contact: [0.005, 0.008], soft: 2.8, tint: [0, 0, 0, 0, -1, -2, -4, -6, -8, -10], ringing: 0, adds: 0, add: earth },
+  tree: { stiffness: 1.5, contact: [0.0015, 0.0024], soft: 1.2, tint: [0, 0, 0, 0, 0, -1, -1, -2, -3, -4], ringing: 3, adds: 0, add: tree }
 } as const satisfies Record<Material, TargetSpec>

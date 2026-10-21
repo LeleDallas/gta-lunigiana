@@ -6,9 +6,9 @@ import { Keyboard } from "@typeonce/ritmo-browser"
 import { Determinism } from "@typeonce/ritmo-devtools"
 import { Ops, Vec2 } from "@typeonce/ritmo-math"
 
-import { ringBox } from "../tools/geometry.ts"
+import { ringBox, segDist2 } from "../tools/geometry.ts"
 import { carClear } from "./body.ts"
-import { graph, MAP } from "./map/index.ts"
+import { graph, MAP, wallsNear } from "./map/index.ts"
 import { pointInRing } from "./collide.ts"
 import { distanceToEdge, laneOf, lanePoint, laneSide, roadOf, walkIndex } from "./route.ts"
 import { bindings, Game, KeyboardInput, makeRuntime, type PoseValue, setup, update } from "./index.ts"
@@ -96,6 +96,24 @@ test("driving into a building: the car stops at the wall without tunnelling, los
   const across = (p: { readonly x: number; readonly y: number }) => (p.y - pose.y) * Ops.cos(pose.angle) - (p.x - pose.x) * Ops.sin(pose.angle)
   assert.ok(Math.abs(progress(hardest) - 18.15 - VEHICLES.panda.length / 2) < 0.1, `at the wall: ${progress(hardest)}`)
   assert.ok(Math.abs(across(hardest)) < 0.1, `on the car's axis: ${across(hardest)}`)
+})
+
+// Regression: the contact point took a box's reach along the wall normal, so an oblique hit reported a point up to 0.34 m (a Panda) inside the house.
+test("an oblique wall hit is a wall Impact on the wall itself, at the car's leading front corner", () => {
+  // The Via Cesare Battisti house wall again, a Panda rolling into it 45° and 60° off square.
+  const wall = { x: -433.525, y: 433.24, angle: 1.386 }, { length, width } = VEHICLES.panda
+  for (const degrees of [45, 60]) {
+    const turn = (degrees * Math.PI) / 180, back = 18 - Ops.cos(turn) * (length / 2 - width / 2) - width / 2
+    const car = { x: wall.x + back * Ops.cos(wall.angle), y: wall.y + back * Ops.sin(wall.angle), angle: wall.angle + turn }
+    const { run, heard } = start([], [door({ x: car.x - 30, y: car.y, angle: 0 }), { cars: [rolling("panda", car, 12, 0)] }])
+    run(40)
+    const hit = heard.impacts.find((i) => i.hit === "wall")!
+    let gap = Infinity
+    for (const s of wallsNear("drive", hit.x - 3, hit.y - 3, hit.x + 3, hit.y + 3)) gap = Math.min(gap, Math.sqrt(segDist2(hit.x, hit.y, s.ax, s.ay, s.bx, s.by).d2))
+    assert.ok(gap < 0.05, `${degrees}°: ${gap} m from the wall`)
+    const along = (hit.x - car.x) * Ops.cos(car.angle) + (hit.y - car.y) * Ops.sin(car.angle)
+    assert.ok(along > length / 2 - width / 2, `${degrees}°: ${along} m ahead of the centre, on the front end`)
+  }
 })
 
 test("contacts: a car rolling into a parked one is a car Impact at the closing speed, where the bumpers meet", () => {

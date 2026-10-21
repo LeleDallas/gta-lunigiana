@@ -25,8 +25,8 @@ const RUB = [-30, -16, -4, 0, -2, -6, -8, -13, -24, -38]
 const SNAP = [-10, -8, -5, -3, -1, 0, 0, -1, -3, -6]
 /** A side hit: the door skin, no crash box, crunches brighter. */
 const SIDE = [0, 0, -1, -1, 0, 1, 2, 2, 1, 0]
-/** Heard from the cabin (critique §4.3: 82–83 % of the energy under 200 Hz, the highs muffled), about as loud overall. */
-const CABIN = [-4, 2, 4, -4, -11, -16, -21, -27, -35, -43]
+/** Heard from the cabin (critique §4.3: 82–83 % of the energy under 200 Hz, the highs muffled), about as loud overall: every layer passes it, the crunch too. */
+const CABIN = [0, 6, 6, 0, -6, -12, -18, -24, -32, -40]
 
 /** TUNED: the output scale at which the reference crash (a Panda into masonry at 15 m/s) peaks near the nominal 0.5. */
 const SCALE = 0.112
@@ -56,8 +56,8 @@ const crunch = (mix: Mix, hit: Hit, body: Crushed): Spectrum => {
     const t = c / rate, r = t < rise ? 0.5 - 0.5 * Math.cos((Math.PI * t) / rise) : 1
     const crush = t < pulse / 2 ? Math.cos((Math.PI * t) / pulse) : 0
     const hold = t < 0.7 * block ? 1 : 0.5 + 0.5 * Math.cos(Math.PI * Math.min(1, (t - 0.7 * block) / (0.6 * block)))
-    // A bump (no crumple) is the cover rubbing, a little quieter for its energy than a crunch.
-    drive[c] = r * r * (0.55 * crush * crumples + 0.7 * hold) * (0.75 + 0.25 * crumples)
+    // Normalised to the same top whether it crumples or only rubs, so the level law alone sets how loud it is.
+    drive[c] = (r * r * (0.55 * crush * crumples + 0.7 * hold) * 1.25) / (0.7 + 0.55 * crumples)
   }
   for (const sub of hit.subHits) {
     const up = between(random, 0.004, 0.01)
@@ -73,17 +73,18 @@ const crunch = (mix: Mix, hit: Hit, body: Crushed): Spectrum => {
     level = level * fall + (random() < per ? -Math.log(1 - random()) : 0)
     drive[c]! *= 0.6 + (0.4 * level) / mean
   }
-  excite(noise, drive, shape.map((p) => p * body.part), t60)
+  excite(noise, drive, shape.map((p, b) => p * body.part * mix.view[b]!), t60)
 
   // The major buckles: 3–30, energies p(E) ∝ E^−α (α 1.3–1.6) over 20 dB, mostly inside the pulse (rate ∝ cos(πt/T)), the rest through the block and the sub-hits.
-  const snap = tint(shape, SNAP), alpha = between(random, 1.3, 1.6), top = 10 ** between(random, 0.3, 0.8)
-  for (let i = Math.round(crumples * Math.min(30, 3 + 1.1 * body.speed)); i > 0; i--) {
+  // Past a dozen their panel modes merge into the dense field the crunch already is: fewer each (and a wreck renders sooner).
+  const snap = tint(shape, SNAP), alpha = between(random, 1.3, 1.6), top = 10 ** between(random, 0.3, 0.8), buckles = Math.round(crumples * Math.min(30, 3 + 1.1 * body.speed))
+  for (let i = buckles; i > 0; i--) {
     const u = random(), sub = hit.subHits[Math.floor(random() * hit.subHits.length)]
     const t = u < 0.6 ? rise + 0.005 + (pulse / Math.PI) * Math.asin(random()) : u < 0.85 || sub === undefined ? between(random, pulse / 2, 0.9 * block) : sub.at + 0.3 * sub.length * random()
     // The contact stays the loudest moment of its first 50 ms.
     const peak = top * (t < 0.05 ? 0.08 : 0.9) * body.part * powerLaw(random(), alpha, 0.01, 1), tau = between(random, 0.0002, 0.0008)
     puff(mix, t, 0.0003, between(random, 0.001, 0.004), peak, snap)
-    for (let m = Math.round(between(random, 4, 8)); m > 0; m--) {
+    for (let m = Math.round(between(random, 4, 8) * Math.min(1, 12 / buckles)); m > 0; m--) {
       const hz = between(random, spec.panels[0], spec.panels[1])
       strike(mix, t, hz, spec.panelEta * between(random, 0.6, 1.4), 0.08 * Math.sqrt(peak) * rayleigh(random) * halfSine(hz, tau))
     }
@@ -91,13 +92,14 @@ const crunch = (mix: Mix, hit: Hit, body: Crushed): Spectrum => {
   return shape
 }
 
-/** 1–3 stiff parts ringing through the crunch (critique §4.4): 0.6–4.3 kHz, T60 0.2–0.9 s (η 0.001–0.01), 9–18 dB clear of it in a narrow band. */
-const partials = (mix: Mix, hit: Hit, body: Crushed, shape: Spectrum, count: number): void => {
-  const { random } = mix, { hz: [lo, hi], t60 } = body.spec.partials
+/** Stiff parts ringing through `body`'s crunch of `shape` (critique §4.4): its model's 1–3 (0–1 on the other body of two), 0.6–4.3 kHz, T60 0.2–0.9 s (η 0.001–0.01), 9–18 dB clear of it in a narrow band. */
+export const partials = (mix: Mix, hit: Hit, body: Crushed, shape: Spectrum): void => {
+  const { random } = mix, { count: [few, many], hz: [lo, hi], t60 } = body.spec.partials
+  const count = body === hit.bodies[0] ? Math.floor(between(random, few, many + 0.999)) : Math.floor(between(random, 0, 1.999))
   for (let i = 0; i < count; i++) {
     const hz = lo * (hi / lo) ** random(), b = Math.round(Math.log2(hz / BANDS[0]!)), prominence = between(random, 20, 26)
     // A sine's power against the main block's in one 85 ms bin (≈ 25 Hz / f of its octave's); driven up with the contact.
-    const bed = 0.7 * (0.75 + 0.25 * smoothstep(2.5, 6, body.speed)) * body.part * shape[b]!
+    const bed = (0.875 / (0.7 + 0.55 * smoothstep(2.5, 6, body.speed))) * body.part * shape[b]!
     const amp = Math.sqrt(2 * 10 ** (prominence / 10) * bed * (25 / hz)), t = between(random, 0, 0.02)
     const loss = Math.min(0.01, Math.max(0.0008, 2.2 / (hz * between(random, t60[0], t60[1]))))
     strike(mix, t, hz, loss, amp, hit.rise)
@@ -142,8 +144,7 @@ export const renderCrash = (sound: Crash, sampleRate: number, random: () => numb
   hit.bodies.forEach((body, i) => {
     const shape = crunch(mix, hit, body)
     if (i === 0) contact(mix, hit, shape)
-    const [lo, hi] = body.spec.partials.count
-    partials(mix, hit, body, shape, i === 0 ? Math.floor(between(random, lo, hi + 0.999)) : Math.floor(between(random, 0, 1.999)))
+    partials(mix, hit, body, shape)
   })
   for (const body of hit.bodies) {
     breakage(mix, hit, body)

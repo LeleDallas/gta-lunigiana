@@ -26,8 +26,8 @@ export type Surface = "asphalt" | "stone" | "gravel" | "dirt" | "grass" | "leave
 export type Material = "masonry" | "stone" | "sheet" | "glass" | "rail" | "rock" | "earth" | "tree"
 /** Where a hit lands on a vehicle's body. */
 export type Zone = "front" | "side" | "rear"
-/** One vehicle in a crash. */
-export interface Body { readonly model: VehicleModel; readonly zone: Zone }
+/** One vehicle in a crash; `worn`: the barrier-equivalent speed (m/s) of the hardest earlier hit on this zone, so what broke then stays broken (none: intact). */
+export interface Body { readonly model: VehicleModel; readonly zone: Zone; readonly worn?: number }
 
 /** A vehicle someone could hear: running (someone at the wheel) or moving. Parked, still cars are left out. */
 export interface HeardVehicle {
@@ -150,8 +150,9 @@ export type Continuous =
 
 /** One-shot sounds: played once, at a placement, possibly delayed (sound travelling, echoes). */
 export type OneShot =
-  /** A vehicle hitting something: closing `speed` m/s, reduced `mass` (Panda = 1), the `body` that hit,
-   *  what it hit, the `surface` debris lands on; `inside`: the listener sits in `body` (heard from its cabin). */
+  /** A vehicle hitting something: closing `speed` m/s, reduced `mass` (Panda = 1), the `body` (the listener's car, else the
+   *  Impact's `car`: query order, not necessarily the striker), what it met, the `surface` debris lands on; `inside`: the
+   *  listener sits in `body` (heard from its cabin). */
   | { readonly kind: "crash"; readonly speed: number; readonly mass: number; readonly body: Body;
       readonly against: { readonly kind: "wall"; readonly material: Material } | { readonly kind: "car"; readonly body: Body };
       readonly surface: Surface; readonly inside: boolean }

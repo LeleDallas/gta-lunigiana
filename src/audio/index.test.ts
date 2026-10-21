@@ -94,3 +94,24 @@ test("hear: an Ape rolling into a parked Panda hits it with its front on the Pan
   assert.ok(hits.length >= 1)
   for (const hit of hits) assert.deepEqual(new Map([hit.body, hit.otherBody!].map((b) => [b.model, b.zone])), new Map([["ape", "front"], ["panda", "rear"]]))
 })
+
+// Regression: zones split at 45° from the centre, so a hit on a long body's front door (0.9 m ahead of a Panda's centre) was its front.
+test("hear: an Ape T-boning a parked Panda on its front door hits the Panda's side", () => {
+  const fx = Math.cos(ON_BATTISTI.angle), fy = Math.sin(ON_BATTISTI.angle), gap = 0.825 + 1.45 + 0.6
+  const ape = { x: ON_BATTISTI.x + 0.9 * fx - gap * fy, y: ON_BATTISTI.y + 0.9 * fy + gap * fx, angle: ON_BATTISTI.angle - Math.PI / 2 }
+  const { run, frames } = listen([], door({ x: ON_BATTISTI.x - 40 * fx, y: ON_BATTISTI.y - 40 * fy, angle: 0 }), { cars: [parkedCar("panda", 0x3d6155, ON_BATTISTI), rolling("ape", ape, 8, 0)] })
+  run(30)
+  const hits = frames.flatMap((f) => f.happenings).flatMap((h) => (h.kind === "impact" && h.hit === "car" ? [h] : []))
+  assert.ok(hits.length > 0)
+  for (const hit of hits) assert.deepEqual(new Map([hit.body, hit.otherBody!].map((b) => [b.model, b.zone])), new Map([["ape", "front"], ["panda", "side"]]))
+})
+
+// Regression: an oblique wall hit's point lay on the wall normal through the centre, so anything 45° off square was a side.
+test("hear: a Panda rolling 50° off square into a house wall hits it with its front", () => {
+  const wall = { x: -433.525, y: 433.24, angle: 1.386 }, turn = (50 * Math.PI) / 180, back = 18 - Math.cos(turn) * 1.025 - 0.825
+  const car = { x: wall.x + back * Math.cos(wall.angle), y: wall.y + back * Math.sin(wall.angle), angle: wall.angle + turn }
+  const { run, frames } = listen([], door({ x: car.x - 30, y: car.y, angle: 0 }), { cars: [rolling("panda", car, 12, 0)] })
+  run(40)
+  const hits = frames.flatMap((f) => f.happenings).flatMap((h) => (h.kind === "impact" && h.hit === "wall" ? [h] : []))
+  assert.ok(hits.length > 0 && hits.every((h) => h.body.zone === "front"), hits.map((h) => h.body.zone).join())
+})

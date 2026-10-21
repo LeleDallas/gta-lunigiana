@@ -13,7 +13,7 @@ import { Descriptor } from "@typeonce/ritmo"
 import {
   CarInput, Down, Driving, Game, Honk, Impact, Input, Motion, Pedestrian, Person, Player, Pose, Traffic, Vehicle
 } from "../sim/index.ts"
-import type { VehicleModel } from "../sim/vehicles.ts"
+import { VEHICLES, type VehicleModel } from "../sim/vehicles.ts"
 import type { Body, Happening, Heard, HeardPerson, HeardVehicle, Zone } from "./types.ts"
 
 /** The host's ears: gets one `Heard` per frame while there is a player. */
@@ -22,10 +22,10 @@ export const Audio = Descriptor.Service<{ readonly hear: (heard: Heard) => void 
 /** Below this speed (m/s), with no spin, a vehicle nobody drives is silent. */
 const STILL = 0.01
 
-/** Where (x, y) lies on a vehicle at `pose`: by its direction from the centre, within 45° of the heading the front, of its reverse the rear. */
-const zoneOf = (pose: { readonly x: number; readonly y: number; readonly angle: number }, x: number, y: number): Zone => {
-  const dx = x - pose.x, dy = y - pose.y, fx = Math.cos(pose.angle), fy = Math.sin(pose.angle)
-  const along = dx * fx + dy * fy, across = Math.abs(dy * fx - dx * fy)
+/** Where (x, y) lies on a vehicle of `model` at `pose`: by the face of its L × W box it is nearest in proportion, the front, the rear or a side. */
+const zoneOf = (model: VehicleModel, pose: { readonly x: number; readonly y: number; readonly angle: number }, x: number, y: number): Zone => {
+  const { length, width } = VEHICLES[model], dx = x - pose.x, dy = y - pose.y, fx = Math.cos(pose.angle), fy = Math.sin(pose.angle)
+  const along = (dx * fx + dy * fy) / length, across = Math.abs(dy * fx - dx * fy) / width
   return along > across ? "front" : -along > across ? "rear" : "side"
 }
 
@@ -76,7 +76,7 @@ const Hear = Game.System("Lunigiana/Hear", {
   /** Vehicle `id`'s model and the zone of it a hit at (x, y) landed on; undefined once it is gone. */
   const bodyAt = (id: number, x: number, y: number): Body | undefined => {
     const found = bodies.get(id)
-    return found === undefined ? undefined : { model: found.model, zone: zoneOf(found, x, y) }
+    return found === undefined ? undefined : { model: found.model, zone: zoneOf(found.model, found, x, y) }
   }
   const people = queries.people.each().map(({ entity, data }): HeardPerson => {
     const at = data.pose.get(), v = data.motion.get()

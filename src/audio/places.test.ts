@@ -1,7 +1,8 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
 
-import { MAP } from "../sim/map/index.ts"
+import { pointInRing } from "../sim/collide.ts"
+import { buildingsIn, MAP, treesIn } from "../sim/map/index.ts"
 import { SPEED_OF_SOUND } from "./acoustics.ts"
 import { ambienceAt, bells, birdSpot, dogsNear, echoesAt, forestAlong, streetAt, surfaceAt, wallAt } from "./places.ts"
 
@@ -48,6 +49,49 @@ test("walls: a tree trunk, buildings by kind and style, the guard rail, the ston
   const { trees } = MAP
   assert.equal(wallAt(trees[0]! + 0.55, trees[1]!), "tree")
   assert.equal(wallAt(MEADOW.x, MEADOW.y), "earth")
+})
+
+test("walls: the nearest source wins, a trunk by a house wall is the trunk; a bank is earth though trees stand 1.5–3 m off it", () => {
+  const { trees } = MAP, outside = (x: number, y: number) => {
+    let free = true
+    buildingsIn(x, y, x, y, (i) => void (free &&= !pointInRing(x, y, MAP.buildings[i]!.outer)))
+    return free
+  }
+  // A trunk 1–2.5 m from a rendered house's wall: 0.3 m off the trunk on its far side is the tree, 0.3 m off the wall the house.
+  let pair: { readonly tree: number; readonly wall: { readonly x: number; readonly y: number; readonly nx: number; readonly ny: number } } | undefined
+  for (const b of MAP.buildings) {
+    if (pair !== undefined || b.kind !== "house" || b.style !== "plaster") continue
+    const pts = b.outer
+    for (let i = 0, j = pts.length - 2; i < pts.length && pair === undefined; j = i, i += 2) {
+      const ex = pts[i]! - pts[j]!, ey = pts[i + 1]! - pts[j + 1]!, length = Math.hypot(ex, ey)
+      if (length < 4) continue
+      const x = (pts[i]! + pts[j]!) / 2, y = (pts[i + 1]! + pts[j + 1]!) / 2, nx = ey / length, ny = -ex / length
+      treesIn(x - 3, y - 3, x + 3, y + 3, (t) => {
+        const d = (trees[3 * t]! - x) * nx + (trees[3 * t + 1]! - y) * ny, off = Math.abs((trees[3 * t]! - x) * ny - (trees[3 * t + 1]! - y) * nx)
+        if (pair === undefined && d > 1.2 && d < 2.5 && off < 0.5 && outside(trees[3 * t]! + 0.6 * nx, trees[3 * t + 1]! + 0.6 * ny)) pair = { tree: t, wall: { x, y, nx, ny } }
+      })
+    }
+  }
+  assert.ok(pair !== undefined, "a trunk by a house wall")
+  const { tree, wall } = pair
+  assert.equal(wallAt(wall.x + 0.3 * wall.nx, wall.y + 0.3 * wall.ny), "masonry")
+  assert.equal(wallAt(trees[3 * tree]! + 0.55 * wall.nx, trees[3 * tree + 1]! + 0.55 * wall.ny), "tree")
+  // A steep bank (a drive wall that is no building and no barrier) with a trunk 1.5–3 m from the contact point and nothing else within 3 m.
+  const walls = MAP.walls.drive
+  let bank: { readonly x: number; readonly y: number } | undefined
+  for (let s = 0; s + 3 < walls.length && bank === undefined; s += 4) {
+    const ax = walls[s]!, ay = walls[s + 1]!, bx = walls[s + 2]!, by = walls[s + 3]!, length = Math.hypot(bx - ax, by - ay)
+    if (length < 2) continue
+    for (const side of [1, -1]) {
+      const x = (ax + bx) / 2 + (side * 0.15 * (by - ay)) / length, y = (ay + by) / 2 - (side * 0.15 * (bx - ax)) / length
+      let nearest = Infinity, built = false
+      treesIn(x - 3, y - 3, x + 3, y + 3, (t) => void (nearest = Math.min(nearest, Math.hypot(trees[3 * t]! - x, trees[3 * t + 1]! - y))))
+      buildingsIn(x - 3, y - 3, x + 3, y + 3, () => void (built = true))
+      if (nearest > 1.5 && nearest < 3 && !built && MAP.barriers.every((b) => b.pts.every((_, k) => k % 2 === 1 || Math.hypot(b.pts[k]! - x, b.pts[k + 1]! - y) > 20))) bank ??= { x, y }
+    }
+  }
+  assert.ok(bank !== undefined, "a wooded bank")
+  assert.equal(wallAt(bank.x, bank.y), "earth")
 })
 
 test("ambience shares stay within 1 and tell the forest, the meadow and the village apart", () => {

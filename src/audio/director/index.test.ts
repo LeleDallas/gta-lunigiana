@@ -6,7 +6,7 @@ import { screenAxes } from "../../sim/view.ts"
 import { AMBIENT_DB, CABIN, dbToGain, SPEED_OF_SOUND } from "../acoustics.ts"
 import { bells } from "../places.ts"
 import { stepRate } from "../synth/steps.ts"
-import type { Continuous, Happening, Heard, HeardPerson, HeardVehicle, OneShot, Placement, Speaker } from "../types.ts"
+import type { Continuous, Happening, Heard, HeardPerson, HeardVehicle, OneShot, Placement, Speaker, Zone } from "../types.ts"
 import { makeDirector, type WallClock } from "./index.ts"
 import { TOWERS, windDb } from "./levels.ts"
 
@@ -79,9 +79,9 @@ const world = (at: { readonly x: number; readonly y: number }, more: Partial<Hea
 const away = (from: { readonly x: number; readonly y: number }, metres: number, dir: { readonly x: number; readonly y: number } = SCREEN_RIGHT) =>
   ({ x: from.x + metres * dir.x, y: from.y + metres * dir.y })
 const SOUTH = { x: 0, y: -1 }
-/** Car `car`, a Panda, hitting a wall at `at` nose first. */
-const wallHit = (at: { readonly x: number; readonly y: number }, speed: number, car = 1): Happening => ({
-  kind: "impact", hit: "wall", x: at.x, y: at.y, speed, mass: 1, car, body: { model: "panda", zone: "front" }
+/** Car `car`, a Panda, hitting a wall at `at` on its `zone` (nose first). */
+const wallHit = (at: { readonly x: number; readonly y: number }, speed: number, car = 1, zone: Zone = "front"): Happening => ({
+  kind: "impact", hit: "wall", x: at.x, y: at.y, speed, mass: 1, car, body: { model: "panda", zone }
 })
 
 test("a running car 30 m away on screen-right is heard there; 2 km away it is not (proximity)", () => {
@@ -191,8 +191,45 @@ test("a car crash heard from inside the struck car is that car's: its body first
     const [played] = director.take("crash")
     return played?.sound.kind === "crash" ? [played.sound.body, played.sound.against, played.sound.inside] : undefined
   }
-  assert.deepEqual(crash(undefined), [{ model: "truck", zone: "front" }, { kind: "car", body: { model: "panda", zone: "rear" } }, false])
-  assert.deepEqual(crash(2), [{ model: "panda", zone: "rear" }, { kind: "car", body: { model: "truck", zone: "front" } }, true])
+  assert.deepEqual(crash(undefined), [{ model: "truck", zone: "front", worn: 0 }, { kind: "car", body: { model: "panda", zone: "rear", worn: 0 } }, false])
+  assert.deepEqual(crash(2), [{ model: "panda", zone: "rear", worn: 0 }, { kind: "car", body: { model: "truck", zone: "front", worn: 0 } }, true])
+})
+
+test("what broke stays broken: a car's second crash on the same zone carries how hard the first one crushed it, another zone none", () => {
+  const director = rig()
+  const at = away(MEADOW, 10, SOUTH)
+  const hit = (speed: number, zone: Zone) => {
+    director.hear(world(MEADOW, { vehicles: [car(1, "panda", at, { vx: 8 })], happenings: [wallHit(at, speed, 1, zone)] }), 10)
+    const [played] = director.take("crash")
+    return played?.sound.kind === "crash" ? played.sound.body.worn : undefined
+  }
+  assert.equal(hit(8, "side"), 0)
+  const first = hit(6, "side")
+  // An earth bank takes 70 % of the crush: the car's barrier-equivalent speed is 8·√0.3.
+  assert.ok(first !== undefined && Math.abs(first - 8 * Math.sqrt(0.43 / 1.43)) < 0.01, `${first}`)
+  assert.equal(hit(12, "side"), first, "the hardest so far")
+  assert.equal(hit(6, "front"), 0)
+})
+
+// Regression: a wall crash read its debris surface at the contact point, on the house front (here its grass verge), not on the street the car stands on.
+test("a wall crash's debris lands on the ground under the car, not on the house front it hit", () => {
+  const director = rig(), car0 = { x: -399.7, y: 435.5 }, front = { x: -399.7, y: 433.3 }
+  director.hear(world(car0, { vehicles: [car(1, "panda", car0, { vx: 8 })], happenings: [wallHit(front, 10)] }))
+  const [played] = director.take("crash")
+  assert.ok(played?.sound.kind === "crash" && played.sound.surface === "asphalt" && played.sound.against.kind === "wall" && played.sound.against.material === "masonry")
+})
+
+test("a scrape keeps its wall's material through a brief other contact (a tree along a bank), and switches once the new one has lasted 0.25 s", () => {
+  const director = rig(), at = away(MEADOW, 10, SOUTH)
+  const rub = (wall: { readonly x: number; readonly y: number }, frames: number) => {
+    director.hear(world(MEADOW, { vehicles: [car(1, "panda", at, { vx: 8 })], happenings: [wallHit(wall, 0.5)] }), frames)
+    const held = director.held().get("scrape:1")?.sound
+    return held?.kind === "scrape" ? held.material : undefined
+  }
+  assert.equal(rub(HOUSE_WALL, 3), "masonry")
+  assert.equal(rub(at, 5), "masonry", "earth for 5 frames")
+  assert.equal(rub(HOUSE_WALL, 3), "masonry")
+  assert.equal(rub(at, 20), "earth", "earth for a third of a second")
 })
 
 // Regression: on foot, a wall hit's missing `other` matched the missing car the listener sits in, so every wall crash was "their own".
