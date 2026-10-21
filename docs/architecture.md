@@ -158,7 +158,7 @@ wall and a road's edge (house fronts, sidewalks, alleys), and pebble beds along 
 Streaming:
 
 - `new World(scene)` prepares, once (≈ 190 ms in Node for the whole valley): the land-cover raster
-  for the whole map (`mapCover()` in `src/render/landcover.ts`, ≈ 80 ms and 4.9 MB, cheaper than
+  for the whole map (`mapCover()` in `src/render/landcover.ts`, ≈ 105 ms and 4.9 MB, cheaper than
   clipping areas per chunk; built on first use and shared read-only with the audio host), every
   static item as a `Piece` (an anchor polyline plus a `draw` function), the pieces bucketed per
   chunk with the range of segments that reach it, and the trees bucketed per chunk and kind. A chunk

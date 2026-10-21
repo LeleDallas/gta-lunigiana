@@ -626,10 +626,13 @@ On foot H does nothing. The title card lists it.
 - **Autoplay.** Browsers allow audio only after a user gesture, so the AudioContext is made on the
   first trusted `keydown`, `pointerdown` or `touchend` with user activation: the same first key
   that dismisses the title card (Esc does not count). Until then nothing plays and no sound time
-  passes. The gesture's own task builds only the context, the noise kit and the mixer; each
-  one-shot then pre-renders its buffers (the crash, its noise loops) in a task of its own, so the first key costs no long
-  freeze. A later gesture resumes a context the browser has left suspended or interrupted (Safari,
-  Firefox).
+  passes. The gesture's own task builds only the context, the noise kit and the mixer. The kit's
+  samples take ≈ 17 ms in Node; ≈ 7 of them are the gust signal, which turns each sine by a
+  rotation per sample instead of calling `Math.sin` (three times slower). Each one-shot then
+  pre-renders its buffers in tasks of its own: the crash its noise loops, the footsteps their 48
+  variants one bake at a time (a bake builds its whole graph before it renders, so baking all at
+  once built some 1,200 noise bursts in one task). A later gesture resumes a context the browser
+  has left suspended or interrupted (Safari, Firefox).
 - **Pause.** While the full map (M) is open, `main.ts` calls `speaker.pause(true)` every frame,
   which suspends the context, and skips the frame, so the audio schedule does not run either.
   Closing the map resumes both.

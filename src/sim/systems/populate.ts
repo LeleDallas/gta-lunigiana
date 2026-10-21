@@ -43,9 +43,10 @@ const peopled = edgeIndex(graph.walkEdges.filter((e) => {
   const lane = laneOf(e, true), m = lanePoint(lane, lane.length / 2, 0)
   let near = false
   buildingsIn(m.x - PEOPLED, m.y - PEOPLED, m.x + PEOPLED, m.y + PEOPLED, (i) => {
+    if (near) return // the query cannot stop early: skip the rest once one is found
     const [x0, y0, x1, y1] = buildingBoxes[i]!
     const dx = Math.max(x0 - m.x, 0, m.x - x1), dy = Math.max(y0 - m.y, 0, m.y - y1)
-    near ||= dx * dx + dy * dy <= PEOPLED * PEOPLED
+    near = dx * dx + dy * dy <= PEOPLED * PEOPLED
   })
   return near
 }))

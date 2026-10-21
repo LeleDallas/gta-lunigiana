@@ -45,6 +45,8 @@ const eachTree = (visit: (x: number, y: number, scale: number, seed: number) => 
   for (let i = 0; i + 2 < MAP.trees.length; i += 3) {
     const x = MAP.trees[i]!, y = MAP.trees[i + 1]!, scale = MAP.trees[i + 2]!
     visit(x, y, scale, i)
+    // Most trees are far from every edge: no mirrors, so skip building the lists below.
+    if (x - minX >= reach && maxX - x >= reach && y - minY >= reach && maxY - y >= reach) continue
     const xs = [x, ...(x - minX < reach ? [2 * minX - x] : []), ...(maxX - x < reach ? [2 * maxX - x] : [])]
     const ys = [y, ...(y - minY < reach ? [2 * minY - y] : []), ...(maxY - y < reach ? [2 * maxY - y] : [])]
     for (const mx of xs) for (const my of ys) if (mx !== x || my !== y) visit(mx, my, scale, i + 1)
