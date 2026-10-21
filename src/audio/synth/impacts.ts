@@ -11,17 +11,15 @@
  * - `door`: per model open (two latch clicks, the seal) and close (thump, latch, panel ring).
  * - `ignition`: the starter whirring with a dip at every compression, then the engine catching:
  *   the real engine synth flaring and settling, fading as the running engine voice takes over.
- * - `scrape` (a voice): metal grinding along a wall, ringing panels and grit, louder with speed;
- *   the same along every material.
  *
  * @module audio/synth/impacts
  */
 import { VEHICLE_MODELS, type VehicleModel } from "../../sim/vehicles.ts"
 import { bufferOf, loop } from "../buffers.ts"
 import { gainToDb } from "../acoustics.ts"
-import type { Continuous, Kit, OneShot, Shot, VoiceFactory } from "../types.ts"
+import type { Kit, OneShot, Shot } from "../types.ts"
 import { engine, ENGINES } from "./engine.ts"
-import { bake, fadeOut, glide, jitter, normalise, perContext, pick, playBuffer, strike } from "./graph.ts"
+import { bake, jitter, normalise, perContext, pick, playBuffer, strike } from "./graph.ts"
 
 /** Free-free bar mode ratios: the panels' inharmonic ring. */
 const BAR = [1, 2.756, 5.404, 8.933] as const
@@ -227,44 +225,5 @@ export const ignition: Shot<Extract<OneShot, { readonly kind: "ignition" }>> = {
   play: (io, sound, when) => {
     const buffer = ignitions.get(io.ctx)?.get(sound.model)
     return buffer ? playBuffer(io, buffer, when) : when
-  }
-}
-
-/** Grinding gain at full speed (12 m/s and up): peaks near 0.5 (offline renders). */
-const SCRAPE = 0.7
-/** Top of the grinding, Hz: the noise bands' 6 dB/oct skirts and the grit reach Nyquist, a hiss over the metal's 2–4 kHz. */
-const SCRAPE_TOP = 4000
-
-/** Metal grinding along a wall at `speed` m/s. */
-export const scrape: VoiceFactory<Extract<Continuous, { readonly kind: "scrape" }>> = (io) => {
-  const { ctx, kit } = io, output = new GainNode(ctx, { gain: 0 }), grind = new GainNode(ctx, { gain: 1 })
-  const top = new BiquadFilterNode(ctx, { type: "lowpass", frequency: SCRAPE_TOP })
-  grind.connect(top).connect(output).connect(io.out)
-  const white = loop(ctx, kit.white), band = new BiquadFilterNode(ctx, { type: "bandpass", frequency: 1500, Q: 1.2 })
-  white.connect(band).connect(grind)
-  // The panels ring: noise exciting a steel sheet's bar modes.
-  const modes = BAR.map((ratio, i) => {
-    const mode = new BiquadFilterNode(ctx, { type: "bandpass", frequency: 420 * ratio, Q: 30 })
-    white.connect(mode).connect(new GainNode(ctx, { gain: [1.5, 1, 0.75, 0.45][i]! })).connect(grind)
-    return mode
-  })
-  const grit = loop(ctx, kit.crackle)
-  grit.connect(new BiquadFilterNode(ctx, { type: "highpass", frequency: 2000 })).connect(new GainNode(ctx, { gain: 0.5 })).connect(grind)
-  // Stick-slip: the gust signal, sped up 40×, shakes the grinding level at 1–20 Hz.
-  const judder = loop(ctx, kit.gust, 40)
-  judder.connect(new GainNode(ctx, { gain: 0.5 })).connect(grind.gain)
-  // White noise has no pitch to shift: Doppler moves the bands it rings through.
-  for (const filter of [band, ...modes, top]) io.cents.connect(filter.detune)
-  io.cents.connect(grit.detune)
-  let first = true
-  return {
-    update: (sound, now) => {
-      const speed = Math.min(20, Math.max(0, sound.speed))
-      glide(output.gain, SCRAPE * Math.min(1, speed / 12), now, false)
-      glide(band.frequency, 1200 + 120 * speed, now, first)
-      glide(grit.playbackRate, 0.6 + speed / 8, now, first)
-      first = false
-    },
-    stop: (now) => fadeOut(output, [white, grit, judder], now)
   }
 }
