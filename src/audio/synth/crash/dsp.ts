@@ -27,11 +27,6 @@ export const powerLaw = (u: number, alpha: number, lo: number, hi: number): numb
   const a = lo ** (1 - alpha), b = hi ** (1 - alpha)
   return (a + u * (b - a)) ** (1 / (1 - alpha))
 }
-/** 0 below `a`, 1 above `b`, a smooth S between. */
-export const ramp = (a: number, b: number, x: number): number => {
-  const t = Math.min(1, Math.max(0, (x - a) / (b - a)))
-  return t * t * (3 - 2 * t)
-}
 /** Power gains from levels in dB; −60 dB or less is none (the band is skipped). */
 export const power = (db: Spectrum): Spectrum => db.map((level) => (level <= -60 ? 0 : 10 ** (level / 10)))
 /** The spectrum of a half-sine contact force `tau` s long at `hz`, 1 at DC: −6 dB at 0.83/τ, falling as f^−2 past 1.5/τ. */

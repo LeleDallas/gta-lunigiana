@@ -312,13 +312,43 @@ Continuous voices (held every frame they play):
 |---|---|---|---|
 | `engine` | `synth/engine.ts`: an oscillator at the firing frequency (a sawtooth, or a band-limited pulse for the Ape's two-stroke and the truck's diesel), a half-order sub, a waveshaper driven by the load, two exhaust formants, noise gated at the firing rate, and a turbo whine on the truck and the Giulia. Revs come from a virtual gearbox per model (`gearbox.ts`) | a vehicle runs (AI traffic, or the player at the wheel), once its starter, if any, has caught | at full load: Panda 90 (2 m), Ape 92 (2 m), truck 98 (4 m), Giulia 93 (2.5 m); the player's own 68 from the seat |
 | `tyres` | `synth/tyres.ts`: rolling noise rising as (v / 70 km/h)^1.5, a sett rumble at v / 0.14 m on stone, a two-tone squeal (980 and 1460 Hz) on asphalt and stone when sliding, a gravel crunch on loose ground; the truck's 6 dB louder and darker | a vehicle moves faster than 1 m/s. The surface is the road's OSM surface on a carriageway (or within 0.5 m of its edge), else the land cover's | 98 (2 m) |
-| `scrape` | `synth/impacts.ts`: band-passed noise, ringing panel modes, grit and a stick-slip judder, the same along every `material` | a car hits a wall at under 1.5 m/s while still moving faster than 2 m/s; held 0.2 s past the last such hit, along the material of the wall at that hit | 105 (2 m) |
+| `scrape` | `synth/scrape.ts`: the wall's surface played at the car's speed, ringing the car's panels and the wall's own modes, by `material` (below) | a car hits a wall at under 1.5 m/s while still moving faster than 2 m/s; held 0.2 s past the last such hit, along the material of the wall at that hit | 105 (2 m) |
 | `horn` | `synth/horns.ts`: Panda 420 Hz, Ape 610 Hz, truck air horn 150 + 185 Hz, Giulia 410 + 500 Hz | the player holds H at the wheel of anything but the Giulia | 116 (2 m) |
 | `siren` | `synth/horns.ts`: the Italian *bitonale*, 466 and 622 Hz for 0.75 s each (D.M. 20/03/1979) | toggled by H in the Giulia the player drives; it stops when they get out | 117 (2.5 m) |
 | `beeper` | `synth/horns.ts`: a 1 kHz tone, 0.5 s on and 0.5 s off | a running truck reverses (faster than 0.3 m/s backwards) | 100 (2 m) |
 | `water` | `synth/water.ts`: bubbles ringing at their Minnaert frequency (van den Doel's model, `synth/bubbles.ts`), a pink-noise bed, and in rivers a boulder rumble and a slow surge. `body` is `river` (OSM rivers, and water 8 m wide or more), `stream` or `fountain`; `flow` comes from width and grade | the 4 loudest bodies within 400 m | from the water's level at the ears (above) |
 | `wind` | `synth/nature.ts`: a brown-noise band breathing with gusts, a whistle on strong gusts, leaves in proportion to the forest around | always, one bed | 60 at the ears at strength 1, never under 35 |
 | `crickets` | `synth/nature.ts`: six Italian tree crickets (*Oecanthus pellucens*) on a 2.6 kHz carrier, 0.59 echemes (chirps) a second (Dolbear's law at the game's fixed 15 °C October afternoon) | open ground outweighs buildings around the ears (`open − built` > 0) | 42 at the ears at density 1 |
+
+The scrape is built from what the wall is made of. Each material has a surface: 32 m of wall
+ridden at 10 m/s (3.2 s), rendered in plain TypeScript the first time that material is scraped
+(4–10 ms in Chrome, once per material). It holds a pink bed (equal energy per octave, as in the reference recordings), grit (micro-impacts
+with power-law heights), level dips at the joints between stones or sheet ribs, and damped knocks:
+a guard rail's posts every 2 m and splices every 4 m, glazing bars, chips. The voice loops it at
+v / 10 m/s like a record, so stones pass at v / 0.3 m and rail posts thump at v / 2 m. The loop
+rings 8–12 of the car's panel resonances, drawn fresh for every scrape (Q 60–120, 150–3000 Hz),
+and the wall's own modes:
+
+- the guard rail: 12 bands at Q 300–500, half of them near its 176, 428 and 771 Hz bands, and a
+  stick-slip squeal below about 3 m/s;
+- sheet cladding: a wobbling ring;
+- a tree: a short wood bank.
+
+Masonry, stone and rock add grit and chips only; masonry is finer and brighter, stone swings
+10 dB at every stone, rock is the harshest. Earth rings nothing: a dirt hiss at 0.8–3 kHz. Glass
+adds a rare shard screech. The judder (the gust signal ×40) shakes the grind and opens the squeal
+and the screech. The level rises 4.5 dB per doubling of speed (roughness noise, v^0.75), up to
+full at 12 m/s, where every material peaks near 0.5. Doppler moves every band. A car sliding from
+one wall onto another crossfades to the new material in about 0.3 s, and the voice fades out over
+0.3 s once it is no longer held.
+
+Measured in Chrome at 12 m/s against the closest reference (a car's slide and grind after a BBC
+crash: centroid 1.5–1.8 kHz, band flatness 0.33–0.51, octaves within 5 dB from 125 Hz to 2 kHz):
+
+- the walls: centroid 1.8 kHz on stone and 2.0–2.1 on masonry, rock and sheet, band flatness
+  0.36–0.45, octaves within 6 dB from 125 Hz to 2 kHz;
+- the rail is the tonal one (band flatness 0.18–0.31);
+- a tree is the darkest (1.5 kHz), earth sits at 2.4 kHz and glass at 3.8 kHz.
 
 One-shots:
 
@@ -545,13 +575,14 @@ own emitter and mixer:
   listener (a crash `crashQuiet` under it), the gain, pan, lowpass, reverb send and delay. The
   first press starts the audio.
 - **Render all** (also `window.lab.renderAll()`, which returns the rows) renders every voice and
-  shot offline at 48 kHz at a few representative params (75 renders, about 3 s) and tabulates peak,
+  shot offline at 48 kHz at a few representative params (76 renders, about 3 s) and tabulates peak,
   RMS (dBFS), spectral centroid (`measure.ts`), NaNs and length. It flags silence (peak under
   1e-4), clipping (over 0.95), NaNs, and any sound left after a voice's stop or a shot's end.
   The crashes cover a matrix: a Panda into a house wall at 2 (a bump), 5, 14 and 20 m/s, a
   Panda–Panda at 10, a Panda–truck at 12, an Ape into stone at 8, the Giulia into the guard rail
   at 12, a Panda into a tree at 10 and into earth at 8, a side hit at 12, the cabin at 14 and the
-  Giulia wrecked at 40; the scrape plays along every material at 12 m/s and along masonry at 4.
+  Giulia wrecked at 40; the scrape plays along every material at 12 m/s, along masonry at 4 and
+  along the guard rail at 2.5, where it squeals.
   Adding a kind fails to compile until the page has a panel and render rows for it. Two low peaks
   are by design: the wind swells with gusts over seconds, so at strength 1 a 2 s render peaks near
   0.2–0.3 while its 64 s gust loop reaches 0.45–0.65; and the blackbird's thin "seee" (30 % of its
@@ -580,7 +611,7 @@ functions (`synth/world.test.ts` imports them to check).
 | `src/audio/director/index.test.ts` | the director on a recording speaker at real map spots: proximity (in the open and behind a ridge), a building's muffling, Doppler, step cadence, travel delay, crash merging and scrapes, a house wall's material and cobbles in the crash and scrape params, the bodies swapped for a listener in the struck car, a wall crash on foot muffled by the house in the way, a bump culled nearer than a crash, echoes, nothing before the context, the cabin, getting in and out, horn and siren, the bells, water and its masking, the valley's never-silent bed and the river 15 m away against behind the houses, voice caps and their hysteresis, flee cues |
 | `src/audio/director/hearing.test.ts`, `occluder.test.ts` | the reverb send; the obstacle cache's refresh and forgetting |
 | `src/audio/speaker.test.ts`, `mixer.test.ts`, `buffers.test.ts`, `measure.test.ts` | the one-shot cap, the speaker inert until a trusted gesture, the reverb crossfade, the level meter, seamless noise loops, the render measurements |
-| `src/audio/gearbox.test.ts`, `src/audio/synth/*.test.ts` | gearbox shifts; the engine and tyre laws; step and cricket rates; bubbles at their Minnaert frequency; synth params clamped, NaN to silence |
+| `src/audio/gearbox.test.ts`, `src/audio/synth/*.test.ts` | gearbox shifts; the engine and tyre laws; the scrape's surface loops (seamless, at their RMS, a stone every 0.3 m and a rail post every 2 m) and its speed law; step and cricket rates; bubbles at their Minnaert frequency; synth params clamped, NaN to silence |
 | `src/audio/synth/crash/crash.test.ts` | the crash renderer over the design's matrix (a Panda into a house at 2, 5, 14 and 20 m/s, Panda–Panda 10, Panda–truck 12, an Ape into stone 8, the Giulia into the guard rail 12, a tree 10, earth 8, a side hit 12, the cabin 14, a 40 m/s wreck), five seeds each, measured by `testing.ts` (the research's analysis tools, ported): finite, ≤ 1, ≤ 4 s, faded; deterministic per seed; the level law and its cap; the critique's targets on the exterior crashes (medians: −10 dB at 150–450 ms, rise 8–25 ms, crest 9–15 dB, band flatness 0.35–0.6, 1–8 kHz kurtosis 2.8–4.5; every render: 63 Hz ≤ −5 dB and the loudest octave in 125 Hz–2 kHz; 8 kHz −12…−25 dB, centroid 1.5–3.5 kHz, a flat median spectrum, 1–3 long partials); the tail's −20 dB at 0.25–2.5 s, later the harder the hit; the bump's 40–100 ms; the rail's tonal ring; the tree's rustle past 2 s; earth the slowest, dullest; the cabin's low share; the glass shower's 6–10 kHz centroid and grass swallowing it |
 
 ### In a browser
@@ -596,7 +627,7 @@ Measured in headless Chrome (`?seed=3`, keys sent over CDP, `gta.audio.level()` 
 standing at the spawn −40 to −42 dBFS, walking there with step peaks up to −20, 15 m from the
 Lucido in the clear −25, in the Carabinieri Giulia idling −30 and driving with the siren on −10.5
 (peaks −3.5), in a stolen Panda idling −29, at 18–22 m/s −14 and honking −13 (peaks −3.5); no console errors and no
-non-finite placement or param. On the audition page "Render all" gives 75 rows, none flagged.
+non-finite placement or param. On the audition page "Render all" gives 76 rows, none flagged.
 
 ## Known limits and tuning
 
@@ -632,6 +663,8 @@ non-finite placement or param. On the audition page "Render all" gives 75 rows, 
 - **Crashes render on the main thread** when they play: 2–9 ms each (up to ~12 ms at worst).
 - **What a crash leaves out:** a parked car's alarm, a stuck horn, the engine stalling, tyre
   scrub after the hit, a hanging part swinging; the zone is front, side or rear (no corners).
+- **A scrape's level follows speed only.** The sim reports no contact force, so a car pressed hard
+  along a wall grinds as loud as one brushing it.
 
 Where to tune:
 
@@ -646,7 +679,7 @@ Where to tune:
 | `src/audio/places.ts`, `src/audio/places/water.ts` | surfaces, wall materials and their reach, ambience, street probes, the echo search, bells, dogs, bird trees; water power, fountains and the Cascata |
 | `src/audio/synth/crash/` | the crash: its level law and timing (`hit.ts`), the crunch, partials, contact and cabin (`render.ts`, with `SCALE`, the reference crash's output scale), each model (`bodies.ts`), each material (`targets.ts`), what breaks and falls (`parts.ts`), grit, trains and landings by surface (`textures.ts`) |
 | `src/audio/mixer.ts`, `src/audio/speaker.ts` | master gain, limiter, the two reverbs and their return; the one-shot cap |
-| `src/audio/gearbox.ts`, `src/audio/synth/*.ts` | each synth's own table: gear ratios, engines, horns, tyre grounds, treads, voices, calls, bubbles |
+| `src/audio/gearbox.ts`, `src/audio/synth/*.ts` | each synth's own table: gear ratios, engines, horns, tyre grounds, the scrape's materials, treads, voices, calls, bubbles |
 
 Sources for the numbers: ISO 9613-1 (air absorption) and ISO 9613-2 (ground effect, foliage),
 Maekawa's barrier chart (diffraction), ITU-R BT.1359 (audio lag), D.M. 20/03/1979 (the siren),

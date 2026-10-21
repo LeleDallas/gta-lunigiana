@@ -8,7 +8,8 @@ import type { Shots, Voices } from "../types.ts"
 import { engine } from "./engine.ts"
 import { beeper, honk, horn, siren } from "./horns.ts"
 import { crash } from "./crash/index.ts"
-import { door, ignition, scrape, thud } from "./impacts.ts"
+import { door, ignition, thud } from "./impacts.ts"
+import { scrape } from "./scrape.ts"
 import { tyres } from "./tyres.ts"
 
 /** Continuous vehicle sounds. */

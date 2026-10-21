@@ -7,9 +7,10 @@
  * @module audio/synth/crash/hit
  */
 import { VEHICLES, type VehicleModel } from "../../../sim/vehicles.ts"
+import { smoothstep } from "../../buffers.ts"
 import type { Material, OneShot, Surface, Zone } from "../../types.ts"
 import { BODIES, type BodySpec } from "./bodies.ts"
-import { between, ramp } from "./dsp.ts"
+import { between } from "./dsp.ts"
 import { TARGETS } from "./targets.ts"
 
 /** A crash's params. */
@@ -102,18 +103,18 @@ export const hitOf = (sound: Crash, random: () => number): Hit => {
   // Springs in series: T = π·√(μ/k) scaled so a Panda into a wall lasts ~0.1 s (barrier pulses 91–106 ms); ±15 % across the pairs.
   const k = kOther === Infinity ? a.stiffness : (a.stiffness * kOther) / (a.stiffness + kOther)
   const pulse = Math.min(0.25, 0.1 * Math.sqrt(mu / k)) * between(random, 0.9, 1.1)
-  const crumples = ramp(2.5, 6, equivalent)
+  const crumples = smoothstep(2.5, 6, equivalent)
   // The main block: a bump is over in 40–100 ms, a crash holds 150–400 ms (rebound, yaw into a second contact, stiff parts ringing).
-  const block = Math.max((0.075 + 0.105 * crumples + 0.12 * ramp(6, 30, equivalent)) * (side ? 1.2 : 1) * between(random, 0.85, 1.2), 0.06 + 1.2 * pulse * crumples)
+  const block = Math.max((0.075 + 0.105 * crumples + 0.12 * smoothstep(6, 30, equivalent)) * (side ? 1.2 : 1) * between(random, 0.85, 1.2), 0.06 + 1.2 * pulse * crumples)
   // 1–3 sub-hits at +50…600 ms, more for side hits and higher speeds; a wreck tumbles on to a second.
   const subHits: Array<SubHit> = []
   if (equivalent >= 4) {
-    const count = 1 + Number(random() < 0.3 + 0.3 * Number(side) + 0.3 * ramp(10, 25, equivalent)) + Number(random() < 0.1 + 0.3 * Number(side) + 0.4 * ramp(15, 35, equivalent)) + Number(equivalent > 25)
+    const count = 1 + Number(random() < 0.3 + 0.3 * Number(side) + 0.3 * smoothstep(10, 25, equivalent)) + Number(random() < 0.1 + 0.3 * Number(side) + 0.4 * smoothstep(15, 35, equivalent)) + Number(equivalent > 25)
     for (let i = 0, at = between(random, 0.08, 0.3); i < count && at < (equivalent > 25 ? 1 : 0.6); i++, at += between(random, 0.1, 0.3)) {
       subHits.push({ at, level: between(random, 0.3, 0.8), length: between(random, 0.04, 0.12) })
     }
   }
-  const tail = 0.5 + 2 * ramp(3, 30, equivalent)
+  const tail = 0.5 + 2 * smoothstep(3, 30, equivalent)
   const theirs = b === undefined ? between(random, target!.contact[0], target!.contact[1]) : bodies[1]!.contact
   return {
     speed: v, equivalent, bodies, material: sound.against.kind === "wall" ? sound.against.material : undefined, pulse,

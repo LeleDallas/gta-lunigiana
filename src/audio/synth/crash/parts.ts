@@ -9,7 +9,8 @@
  *
  * @module audio/synth/crash/parts
  */
-import { between, halfSine, type Mix, power, puff, ramp, rayleigh, strike, tint } from "./dsp.ts"
+import { smoothstep } from "../../buffers.ts"
+import { between, halfSine, type Mix, power, puff, rayleigh, strike, tint } from "./dsp.ts"
 import type { Crushed, Hit } from "./hit.ts"
 import { grains, groundOf, land, train } from "./textures.ts"
 
@@ -71,7 +72,7 @@ export const breakage = (mix: Mix, hit: Hit, body: Crushed): void => {
   } else {
     if (spec.bumper === "plastic") {
       // The cover over its foam: a dull thock, its modes struck through the soft contact's spectrum; cracks and clip pops from 3 m/s.
-      const thock = 1 - 0.7 * ramp(3, 10, v)
+      const thock = 1 - 0.7 * smoothstep(3, 10, v)
       puff(mix, 0, hit.rise * 0.6, between(random, 0.02, 0.04), 0.2 * thock, THOCK)
       for (let i = 0; i < 6; i++) {
         // A thock rings 20–100 ms (η ≈ 0.07 at 300 Hz).
@@ -96,8 +97,8 @@ export const breakage = (mix: Mix, hit: Hit, body: Crushed): void => {
 
 /** The aftermath of `body`: debris landing from 0.25 s (to 2.5 s in a wreck), loose parts rattling, creaks decaying as t^−0.9, coolant hiss after a hard frontal hit. */
 export const aftermath = (mix: Mix, hit: Hit, body: Crushed): void => {
-  const { random } = mix, v = body.speed, spread = 0.5 + 1.5 * ramp(8, 35, v)
-  puff(mix, hit.block * 0.8, 0.05, hit.tail * between(random, 0.25, 0.4), 10 ** -(between(random, 0.8, 1.3) + 0.4 * (1 - ramp(3, 8, v))) * body.part, SETTLE)
+  const { random } = mix, v = body.speed, spread = 0.5 + 1.5 * smoothstep(8, 35, v)
+  puff(mix, hit.block * 0.8, 0.05, hit.tail * between(random, 0.25, 0.4), 10 ** -(between(random, 0.8, 1.3) + 0.4 * (1 - smoothstep(3, 8, v))) * body.part, SETTLE)
   // Pieces: none at 2 m/s, a handful at 5, dozens at 10–15, hundreds in a wreck; a third of them metal.
   for (let i = Math.round(between(random, 0.6, 1.2) * Math.min(220, 0.7 * Math.max(0, v - 3) ** 2)); i > 0; i--) {
     const t = Math.sqrt((2 * between(random, 0.3, 1.3)) / 9.81) + spread * random() ** 2, level = 10 ** -between(random, 2.2, 3.6)
@@ -116,13 +117,13 @@ export const aftermath = (mix: Mix, hit: Hit, body: Crushed): void => {
   }
   if (v > 5) {
     // Crumpled sheet relaxing: creaks at an Omori rate ∝ (t + 0.2)^−0.9 (physics.md §2.8), each a little stick-slip burst.
-    const count = Math.round(5 + 25 * ramp(5, 30, v)), a = 0.35 ** 0.1, b = (0.35 + hit.tail) ** 0.1
+    const count = Math.round(5 + 25 * smoothstep(5, 30, v)), a = 0.35 ** 0.1, b = (0.35 + hit.tail) ** 0.1
     for (let i = 0; i < count; i++) {
       const t = (a + random() * (b - a)) ** 10 - 0.2, hz = between(random, 400, 2500)
       train(mix, t, Math.round(between(random, 3, 10)), 1 / between(random, 100, 300), 0.03, 10 ** -between(random, 2.5, 4), CLINK, [[hz, between(random, 0.01, 0.03)]], 0.5, 2)
     }
   }
-  if (body.zone === "front" && random() < ramp(10, 18, v)) puff(mix, between(random, 0.1, 0.4), between(random, 0.1, 0.3), 1, 10 ** -between(random, 3.3, 4.3), HISS)
+  if (body.zone === "front" && random() < smoothstep(10, 18, v)) puff(mix, between(random, 0.1, 0.4), between(random, 0.1, 0.3), 1, 10 ** -between(random, 3.3, 4.3), HISS)
   QUIRKS[body.model](mix, hit, body)
 }
 
@@ -141,7 +142,7 @@ const QUIRKS: Record<Crushed["model"], (mix: Mix, hit: Hit, body: Crushed) => vo
   truck: (mix, hit, body) => {
     const { random } = mix
     // The marble in the bed shifts by the truck's own velocity change: stone thunks at 80–300 Hz, a chain rattling on hard hits.
-    for (let i = Math.round(ramp(2, 6, body.dv) * between(random, 2, 6)); i > 0; i--) {
+    for (let i = Math.round(smoothstep(2, 6, body.dv) * between(random, 2, 6)); i > 0; i--) {
       const hz = between(random, 80, 300)
       land(mix, between(random, 0.05, 0.6), "asphalt", 0.03 * random(), THOCK, [[hz, 0.02], [hz * between(random, 1.5, 2.2), 0.02]], 0.8)
     }

@@ -10,7 +10,8 @@
  *
  * @module audio/synth/crash/render
  */
-import { BANDS, between, excite, halfSine, type Mix, noiseFor, playNoise, power, powerLaw, puff, ramp, rayleigh, type Spectrum, strike, tint } from "./dsp.ts"
+import { smoothstep } from "../../buffers.ts"
+import { BANDS, between, excite, halfSine, type Mix, noiseFor, playNoise, power, powerLaw, puff, rayleigh, type Spectrum, strike, tint } from "./dsp.ts"
 import { type Crash, type Crushed, type Hit, hitOf, levelOf } from "./hit.ts"
 import { aftermath, breakage } from "./parts.ts"
 import { TARGETS } from "./targets.ts"
@@ -34,7 +35,7 @@ const LIMIT = 0.95
 
 /** One body's crunch: its spectrum, its drive through the crush pulse, the main block and the sub-hits, its major buckles. Returns the spectrum (power, summing to 1). */
 const crunch = (mix: Mix, hit: Hit, body: Crushed): Spectrum => {
-  const { random, noise } = mix, { rate } = noise, spec = body.spec, crumples = ramp(2.5, 6, body.speed), target = hit.material === undefined ? undefined : TARGETS[hit.material]
+  const { random, noise } = mix, { rate } = noise, spec = body.spec, crumples = smoothstep(2.5, 6, body.speed), target = hit.material === undefined ? undefined : TARGETS[hit.material]
   // A random tilt per render (the recordings spread 3–19 dB over 125 Hz–2 kHz; their median is flat).
   const tilt = between(random, -1.3, 1.3), db = CRUNCH.map((level, b) => {
     const rub = RUB[b]!, slope = b >= 2 && b <= 7 ? tilt * Math.log2(BANDS[b]! / 500) : 0
@@ -44,7 +45,7 @@ const crunch = (mix: Mix, hit: Hit, body: Crushed): Spectrum => {
   db[8]! += between(random, -3, 3)
   db[9]! += between(random, -4, 4)
   // The frame sweetener: from 12 m/s (the truck from 10) the lowest bands swell 2–5 dB, never the loudest.
-  const sweet = between(random, 2, 5) * ramp(body.model === "truck" ? 10 : 12, body.model === "truck" ? 12 : 14, hit.equivalent)
+  const sweet = between(random, 2, 5) * smoothstep(body.model === "truck" ? 10 : 12, body.model === "truck" ? 12 : 14, hit.equivalent)
   db[0]! += sweet
   db[1]! += sweet
   const raw = power(db), sum = raw.reduce((p, q) => p + q, 0), shape = raw.map((p) => p / sum)
@@ -96,7 +97,7 @@ const partials = (mix: Mix, hit: Hit, body: Crushed, shape: Spectrum, count: num
   for (let i = 0; i < count; i++) {
     const hz = lo * (hi / lo) ** random(), b = Math.round(Math.log2(hz / BANDS[0]!)), prominence = between(random, 20, 26)
     // A sine's power against the main block's in one 85 ms bin (≈ 25 Hz / f of its octave's); driven up with the contact.
-    const bed = 0.7 * (0.75 + 0.25 * ramp(2.5, 6, body.speed)) * body.part * shape[b]!
+    const bed = 0.7 * (0.75 + 0.25 * smoothstep(2.5, 6, body.speed)) * body.part * shape[b]!
     const amp = Math.sqrt(2 * 10 ** (prominence / 10) * bed * (25 / hz)), t = between(random, 0, 0.02)
     const loss = Math.min(0.01, Math.max(0.0008, 2.2 / (hz * between(random, t60[0], t60[1]))))
     strike(mix, t, hz, loss, amp, hit.rise)

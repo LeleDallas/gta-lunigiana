@@ -168,8 +168,12 @@ const VOICE_RENDERS = {
     { kind: "tyres", speed: 10, slip: 0, surface: "stone", heavy: false },
     { kind: "tyres", speed: 15, slip: 3, surface: "gravel", heavy: true }
   ],
-  // Full grinding from 12 m/s: peaks near 0.5.
-  scrape: [{ kind: "scrape", speed: 4, material: "masonry" }, ...MATERIALS.map((material) => ({ kind: "scrape", speed: 12, material }) as const)],
+  // Full grinding from 12 m/s, where every material peaks near 0.5; masonry slower, and the guard rail's squeal at 2.5 m/s.
+  scrape: [
+    ...MATERIALS.map((material) => ({ kind: "scrape", speed: 12, material }) as const),
+    { kind: "scrape", speed: 4, material: "masonry" },
+    { kind: "scrape", speed: 2.5, material: "rail" }
+  ],
   horn: VEHICLE_MODELS.map((model) => ({ kind: "horn", model }) as const),
   siren: [{ kind: "siren" }],
   beeper: [{ kind: "beeper" }],

@@ -7,8 +7,9 @@
  *
  * @module audio/synth/crash/targets
  */
+import { smoothstep } from "../../buffers.ts"
 import type { Material } from "../../types.ts"
-import { between, type Mix, power, puff, ramp, rayleigh, type Spectrum, strike } from "./dsp.ts"
+import { between, type Mix, power, puff, rayleigh, type Spectrum, strike } from "./dsp.ts"
 import type { Hit } from "./hit.ts"
 import { grains, land, train } from "./textures.ts"
 
@@ -48,13 +49,13 @@ const SHARD = power([-99, -99, -99, -99, -30, -18, -8, -2, 0, -4])
 
 /** Rigid and massive: no ring, only grit, a few chips and the building's dull mass. */
 const masonry = (mix: Mix, hit: Hit): void => {
-  const { random } = mix, v = hit.speed, crush = ramp(2, 10, v)
+  const { random } = mix, v = hit.speed, crush = smoothstep(2, 10, v)
   grains(mix, 0.004, 0.7, 2000, 0.12, 0.0008, 0.008 * crush, GRIT)
   grains(mix, 0.1, 1.5, 40, 0.5, 0.001, 0.003 * crush, GRIT)
   // One low, heavily damped mode (40–80 Hz, η 0.1), kept under the crunch: outdoors the boom is weak.
   strike(mix, hit.rise / 2, between(random, 40, 80), 0.1, 0.05)
   // Above ~8 m/s chips fly and land at 0.25–0.75 s: three-mode knocks at 500–2500 Hz (η 0.03).
-  for (let i = Math.round(ramp(7, 14, v) * between(random, 3, 10)); i > 0; i--) {
+  for (let i = Math.round(smoothstep(7, 14, v) * between(random, 3, 10)); i > 0; i--) {
     const hz = between(random, 500, 2500)
     land(mix, between(random, 0.25, 0.75), hit.surface, 0.01 * random(), CLICK, [[hz, 0.03], [hz * between(random, 1.5, 2), 0.03], [hz * between(random, 2.4, 3.2), 0.03]], 0.4)
   }
@@ -62,11 +63,11 @@ const masonry = (mix: Mix, hit: Hit): void => {
 
 /** Rubble stone, dry-stone walls, churches: as masonry with more grit, and above ~8 m/s stones knocked out, thudding and clacking as they land, with a short rumble. */
 const stone = (mix: Mix, hit: Hit): void => {
-  const { random } = mix, v = hit.speed, crush = ramp(2, 10, v)
+  const { random } = mix, v = hit.speed, crush = smoothstep(2, 10, v)
   grains(mix, 0.004, 0.8, 2500, 0.15, 0.001, 0.01 * crush, STONE_GRIT)
   grains(mix, 0.1, 1.5, 50, 0.5, 0.001, 0.004 * crush, STONE_GRIT)
   strike(mix, hit.rise / 2, between(random, 40, 70), 0.1, 0.05)
-  const stones = Math.round(ramp(7, 14, v) * between(random, 1, 6))
+  const stones = Math.round(smoothstep(7, 14, v) * between(random, 1, 6))
   for (let i = 0; i < stones; i++) {
     const t = between(random, 0.2, 0.6), hz = between(random, 150, 400)
     land(mix, t, hit.surface, 0.03 * between(random, 0.3, 1), GRAVEL, [[hz, 0.03], [hz * between(random, 1.4, 1.9), 0.03], [between(random, 1000, 3000), 0.02]], 0.6)
@@ -77,7 +78,7 @@ const stone = (mix: Mix, hit: Hit): void => {
 /** A cliff: the hardest contact, harsh grit, pebbles trickling down for seconds, almost no ring. */
 const rock = (mix: Mix, hit: Hit): void => {
   const { random } = mix
-  grains(mix, 0.003, 0.6, 2500, 0.1, 0.0007, 0.01 * ramp(2, 10, hit.speed), STONE_GRIT)
+  grains(mix, 0.003, 0.6, 2500, 0.1, 0.0007, 0.01 * smoothstep(2, 10, hit.speed), STONE_GRIT)
   for (let t = between(random, 0.25, 0.5); t < 3; t += -Math.log(1 - random()) / (25 * Math.exp(-t / 0.8) + 0.5)) {
     const hz = between(random, 1200, 4000)
     land(mix, t, hit.surface, 0.004 * Math.exp(-t / 1.2) * random(), CLICK, [[hz, 0.02]], 0.5)
@@ -103,13 +104,13 @@ const tree = (mix: Mix, hit: Hit): void => {
   if (v > 8) {
     // Stick-slip of the bending trunk through the bank: a burst of creaking 0.1–0.3 s in, for up to a second.
     const from = between(random, 0.1, 0.3)
-    train(mix, from, Math.round(between(random, 30, 90) * ramp(8, 16, v)), 1 / between(random, 60, 150), 0.4, 0.03, power([-99, -99, -20, -6, 0, -4, -12, -20, -99, -99]), [[bank[3]!, 0.05]], 0.2)
+    train(mix, from, Math.round(between(random, 30, 90) * smoothstep(8, 16, v)), 1 / between(random, 60, 150), 0.4, 0.03, power([-99, -99, -20, -6, 0, -4, -12, -20, -99, -99]), [[bank[3]!, 0.05]], 0.2)
   }
   // The crown shaking: leaves swell in 50–150 ms and rustle 2–4 s, twigs and burrs ticking on the bonnet.
   const from = between(random, 0.05, 0.15), last = between(random, 2, 4)
-  puff(mix, from, 0.15, last / 2.5, 0.002 * ramp(2, 10, v), LEAVES)
-  grains(mix, from, from + last, 1500, last / 2, 0.002, 0.004 * ramp(2, 10, v), LEAVES)
-  for (let i = Math.round(between(random, 3, 30) * ramp(4, 14, v)); i > 0; i--) {
+  puff(mix, from, 0.15, last / 2.5, 0.002 * smoothstep(2, 10, v), LEAVES)
+  grains(mix, from, from + last, 1500, last / 2, 0.002, 0.004 * smoothstep(2, 10, v), LEAVES)
+  for (let i = Math.round(between(random, 3, 30) * smoothstep(4, 14, v)); i > 0; i--) {
     land(mix, from + between(random, 0.2, last * 0.8), "asphalt", 0.004 * random(), SHARD, [[between(random, 2000, 6000), 0.005]], 0.3)
   }
 }
@@ -146,11 +147,11 @@ const sheet = (mix: Mix, hit: Hit): void => {
 const glass = (mix: Mix, hit: Hit): void => {
   const { random } = mix, v = hit.speed
   puff(mix, 0.002, 0.0004, 0.004, 0.4, SHARD)
-  for (let i = Math.round(between(random, 20, 50) * ramp(2, 8, v)); i > 0; i--) {
+  for (let i = Math.round(between(random, 20, 50) * smoothstep(2, 8, v)); i > 0; i--) {
     const t = between(random, 0.1, 0.4) + 1.8 * random() ** 2, hz = between(random, 1600, 6000)
     land(mix, t, hit.surface, 0.02 * Math.exp(-t / 1.5) * random(), SHARD, [[hz, between(random, 0.002, 0.003)], [hz * between(random, 1.5, 1.8), 0.003], [hz * between(random, 2.2, 2.7), 0.003]], 0.5)
   }
-  grains(mix, 0.12, 2.2, 400, 0.6, 0.0005, 0.01 * ramp(2, 8, v), SHARD)
+  grains(mix, 0.12, 2.2, 400, 0.6, 0.0005, 0.01 * smoothstep(2, 8, v), SHARD)
 }
 
 const HARD = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
