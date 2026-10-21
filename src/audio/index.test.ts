@@ -67,15 +67,30 @@ test("hear: AI traffic runs even standing; a car nobody drives is heard only whi
   assert.deepEqual(near(parked), [])
 })
 
-test("hear: impacts then honks since the last frame, as happenings, each heard once", () => {
-  const { runtime, run, frames } = listen([], door(ON_BATTISTI))
+test("hear: impacts then honks since the last frame, as happenings with the struck vehicle's model and zone, each heard once", () => {
+  const lane = laneOf(BATTISTI.edge, BATTISTI.forward)
+  const coasting = { ...lanePoint(lane, 30, laneSide(BATTISTI, "truck")), angle: ON_BATTISTI.angle }
+  const { runtime, run, frames } = listen([], door(ON_BATTISTI), { cars: [rolling("truck", coasting, 5, 0)] })
   run(1)
+  const truck = frames[0]!.vehicles.find((v) => v.model === "truck")!
+  // 3 m behind the truck's centre, and an impact of a vehicle gone since.
+  const behind = { x: truck.x - 3 * Math.cos(truck.angle), y: truck.y - 3 * Math.sin(truck.angle) }
   runtime.send(Honk, { car: 7, model: "ape", x: 1, y: 2 })
-  runtime.send(Impact, { hit: "car", x: 3, y: 4, speed: 5, mass: 0.5, car: 7, other: 8 })
+  runtime.send(Impact, { hit: "wall", ...behind, speed: 5, mass: 4, car: truck.id })
+  runtime.send(Impact, { hit: "wall", x: 3, y: 4, speed: 5, mass: 1, car: 9999 })
   run(2)
-  assert.deepEqual(frames.map((f) => f.happenings), [
-    [],
-    [{ kind: "impact", hit: "car", x: 3, y: 4, speed: 5, mass: 0.5, car: 7, other: 8 }, { kind: "honk", car: 7, model: "ape", x: 1, y: 2 }],
+  assert.deepEqual(frames.slice(1).map((f) => f.happenings), [
+    [{ kind: "impact", hit: "wall", ...behind, speed: 5, mass: 4, car: truck.id, body: { model: "truck", zone: "rear" } }, { kind: "honk", car: 7, model: "ape", x: 1, y: 2 }],
     []
   ])
+})
+
+test("hear: an Ape rolling into a parked Panda hits it with its front on the Panda's rear", () => {
+  const lane = laneOf(BATTISTI.edge, BATTISTI.forward), side = laneSide(BATTISTI, "panda")
+  const ahead = { ...lanePoint(lane, 15, side), angle: ON_BATTISTI.angle }
+  const { run, frames } = listen([], door(ON_BATTISTI), { cars: [parkedCar("panda", 0x3d6155, ahead), rolling("ape", { ...lanePoint(lane, 5, side), angle: ON_BATTISTI.angle }, 8, 0)] })
+  run(120)
+  const hits = frames.flatMap((f) => f.happenings).flatMap((h) => (h.kind === "impact" && h.hit === "car" ? [h] : []))
+  assert.ok(hits.length >= 1)
+  for (const hit of hits) assert.deepEqual(new Map([hit.body, hit.otherBody!].map((b) => [b.model, b.zone])), new Map([["ape", "front"], ["panda", "rear"]]))
 })

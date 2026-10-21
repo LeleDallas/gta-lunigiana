@@ -20,6 +20,15 @@ import type { VehicleModel } from "../sim/vehicles.ts"
 /** What a foot or a tyre is on: road surfaces, stone paving, and the land cover off the road. */
 export type Surface = "asphalt" | "stone" | "gravel" | "dirt" | "grass" | "leaves"
 
+/** What a vehicle hit, by how it sounds: masonry (rendered houses), stone (rubble stone, dry-stone walls,
+ *  churches, ruins), sheet (metal-clad industrial walls), glass (greenhouses), rail (steel W-beam guard rail),
+ *  rock (cliffs), earth (steep banks and every other drive wall), tree (a trunk). */
+export type Material = "masonry" | "stone" | "sheet" | "glass" | "rail" | "rock" | "earth" | "tree"
+/** Where a hit lands on a vehicle's body. */
+export type Zone = "front" | "side" | "rear"
+/** One vehicle in a crash. */
+export interface Body { readonly model: VehicleModel; readonly zone: Zone }
+
 /** A vehicle someone could hear: running (someone at the wheel) or moving. Parked, still cars are left out. */
 export interface HeardVehicle {
   /** Entity id: stable while the vehicle exists, the key of its voices. */
@@ -59,6 +68,7 @@ export type Happening =
     readonly kind: "impact"
     /** What the vehicle `car` hit: a wall, another vehicle (`other`), or a person (`other`). */
     readonly hit: "wall" | "car" | "person"
+    /** Where: the contact point (a wall or a vehicle), or the person. */
     readonly x: number
     readonly y: number
     /** Impact speed, m/s: speed lost into the wall, closing speed, or the car's speed. */
@@ -67,6 +77,9 @@ export type Happening =
     readonly mass: number
     readonly car: number
     readonly other?: number
+    /** The vehicle `car`'s model and the zone of it the hit landed on; `otherBody`, the vehicle `other`'s (hit "car"). */
+    readonly body: Body
+    readonly otherBody?: Body
   }
   | {
     /** An AI driver held up for a while sounds the horn. */
@@ -120,8 +133,8 @@ export type Continuous =
   | { readonly kind: "engine"; readonly model: VehicleModel; readonly speed: number; readonly throttle: number; readonly inside: boolean }
   /** Rolling noise, squeal or gravel crunch: `speed` m/s over the ground, `slip` sideways m/s. */
   | { readonly kind: "tyres"; readonly speed: number; readonly slip: number; readonly surface: Surface; readonly heavy: boolean }
-  /** Metal grinding along a wall at `speed` m/s. */
-  | { readonly kind: "scrape"; readonly speed: number }
+  /** Grinding along a wall at `speed` m/s, on `material`. */
+  | { readonly kind: "scrape"; readonly speed: number; readonly material: Material }
   /** A held horn. */
   | { readonly kind: "horn"; readonly model: VehicleModel }
   /** The Carabinieri two-tone siren. */
@@ -137,8 +150,11 @@ export type Continuous =
 
 /** One-shot sounds: played once, at a placement, possibly delayed (sound travelling, echoes). */
 export type OneShot =
-  /** A vehicle hitting something: impact `speed` m/s, relative `mass`. */
-  | { readonly kind: "crash"; readonly speed: number; readonly mass: number }
+  /** A vehicle hitting something: closing `speed` m/s, reduced `mass` (Panda = 1), the `body` that hit,
+   *  what it hit, the `surface` debris lands on; `inside`: the listener sits in `body` (heard from its cabin). */
+  | { readonly kind: "crash"; readonly speed: number; readonly mass: number; readonly body: Body;
+      readonly against: { readonly kind: "wall"; readonly material: Material } | { readonly kind: "car"; readonly body: Body };
+      readonly surface: Surface; readonly inside: boolean }
   /** A body hit by a vehicle. */
   | { readonly kind: "thud"; readonly speed: number }
   | { readonly kind: "door"; readonly model: VehicleModel; readonly open: boolean }

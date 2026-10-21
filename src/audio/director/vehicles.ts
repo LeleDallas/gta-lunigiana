@@ -1,9 +1,10 @@
 /**
  * Every vehicle sound: engines (the listener's own from the driver's seat), tyres, horns and the
  * Carabinieri siren, the truck's reversing beeper, crashes, scrapes along walls and people hit,
- * AI honks, and the doors and starter of the listener getting in and out. Sounds of the listener's
- * own car are heard from inside it: its crash, scrape and doors through no cabin, its horn and siren
- * (out by the grille, up on the roof) through all of it.
+ * AI honks, and the doors and starter of the listener getting in and out. A crash knows both bodies
+ * (the listener's own car always as `body`), the wall's material and the ground under it; a scrape,
+ * the wall's material. Sounds of the listener's own car are heard from inside it: its crash, scrape
+ * and doors through no cabin, its horn and siren (out by the grille, up on the roof) through all of it.
  *
  * @module audio/director/vehicles
  */
@@ -11,9 +12,9 @@ import { forwardSpeed } from "../../sim/body.ts"
 import type { VehicleModel } from "../../sim/vehicles.ts"
 import { hash01 } from "../../tools/geometry.ts"
 import { mixGain } from "../acoustics.ts"
-import { surfaceAt } from "../places.ts"
-import { CRANK } from "../synth/impacts.ts"
-import type { HeardVehicle } from "../types.ts"
+import { surfaceAt, wallAt } from "../places.ts"
+import { CRANK, crashQuiet } from "../synth/impacts.ts"
+import type { HeardVehicle, Material, OneShot } from "../types.ts"
 import { type Frame, groundAt } from "./frame.ts"
 import type { Hearing, Source } from "./hearing.ts"
 import { ENGINE, HEIGHT, LEVELS, OWN_ENGINE_DB } from "./levels.ts"
@@ -47,9 +48,9 @@ export const makeVehicles = () => {
   /** Vehicle → when its engine catches, after the starter. */
   const cranking = new Map<number, number>()
   const sirens = new Set<number>()
-  /** Vehicle → its last crash; vehicle → until when it scrapes. */
+  /** Vehicle → its last crash; vehicle → until when it scrapes, and along what. */
   const crashes = new Map<number, { readonly at: number; readonly speed: number }>()
-  const scrapes = new Map<number, number>()
+  const scrapes = new Map<number, { readonly until: number; readonly material: Material }>()
 
   return {
     hear: (frame: Frame): void => {
@@ -76,22 +77,31 @@ export const makeVehicles = () => {
         frame.play({ kind: "door", model, open: false }, door, DOOR_CLOSES)
       }
 
-      for (const map of [cranking, scrapes]) for (const [id, until] of map) if (until <= now) map.delete(id)
+      for (const [id, until] of cranking) if (until <= now) cranking.delete(id)
+      for (const [id, { until }] of scrapes) if (until <= now) scrapes.delete(id)
       for (const [id, last] of crashes) if (now - last.at >= MERGE) crashes.delete(id)
       // The hardest hits first, so the softer tail of the same hit merges into them.
       const hits = heard.happenings.flatMap((h) => (h.kind === "impact" && h.hit !== "person" ? [h] : [])).sort((a, b) => b.speed - a.speed)
       for (const hit of hits) {
         const v = byId.get(hit.car)
         if (hit.speed < CRASH_FROM) {
-          if (hit.hit === "wall" && v !== undefined && Math.hypot(v.vx, v.vy) > SCRAPING) scrapes.set(hit.car, now + SCRAPE_HOLD)
+          if (hit.hit === "wall" && v !== undefined && Math.hypot(v.vx, v.vy) > SCRAPING) scrapes.set(hit.car, { until: now + SCRAPE_HOLD, material: wallAt(hit.x, hit.y) })
           continue
         }
         const last = Math.max(crashes.get(hit.car)?.speed ?? 0, hit.other === undefined ? 0 : (crashes.get(hit.other)?.speed ?? 0))
         if (hit.speed < HARDER * last) continue
         for (const id of [hit.car, hit.other]) if (id !== undefined) crashes.set(id, { at: now, speed: hit.speed })
-        const own = hit.car === mine || hit.other === mine
-        const at = frame.path(own ? undefined : `car:${hit.car}`, { x: hit.x, y: hit.y, z: groundAt(hit.x, hit.y) + HEIGHT.vehicle }, LEVELS.crash, { cabin: !own })
-        frame.play({ kind: "crash", speed: hit.speed, mass: hit.mass }, at)
+        // The contact sounds the same from either car: the listener's is always `body`. (On foot `mine` and a wall hit's `other` are both undefined.)
+        const theirs = mine !== undefined && hit.other === mine && hit.otherBody !== undefined
+        const own = theirs || hit.car === mine
+        const [body, other] = theirs ? [hit.otherBody, hit.body] : [hit.body, hit.otherBody]
+        const sound: Extract<OneShot, { readonly kind: "crash" }> = {
+          kind: "crash", speed: hit.speed, mass: hit.mass, body,
+          against: other === undefined ? { kind: "wall", material: wallAt(hit.x, hit.y) } : { kind: "car", body: other },
+          surface: surfaceAt(hit.x, hit.y), inside: own
+        }
+        const at = frame.path(own ? undefined : `car:${hit.car}`, { x: hit.x, y: hit.y, z: groundAt(hit.x, hit.y) + HEIGHT.vehicle }, LEVELS.crash, { cabin: !own, quiet: crashQuiet(sound) })
+        frame.play(sound, at)
       }
       for (const h of heard.happenings) {
         if (h.kind === "honk") {
@@ -130,7 +140,8 @@ export const makeVehicles = () => {
         }
         if (sirens.has(v.id)) frame.hold(`siren:${v.id}`, { kind: "siren" }, frame.path(key, at, LEVELS.siren, { doppler: true }))
         if (v.running && v.model === "truck" && forward < REVERSING) frame.hold(`beeper:${v.id}`, { kind: "beeper" }, frame.path(key, at, LEVELS.beeper, { doppler: true }))
-        if (scrapes.has(v.id)) frame.hold(`scrape:${v.id}`, { kind: "scrape", speed }, frame.path(key, at, LEVELS.scrape, { doppler: true, cabin: v.id !== mine }))
+        const scrape = scrapes.get(v.id)
+        if (scrape !== undefined) frame.hold(`scrape:${v.id}`, { kind: "scrape", speed, material: scrape.material }, frame.path(key, at, LEVELS.scrape, { doppler: true, cabin: v.id !== mine }))
       }
 
       car = mine

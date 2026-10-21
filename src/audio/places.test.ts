@@ -3,7 +3,7 @@ import { test } from "node:test"
 
 import { MAP } from "../sim/map/index.ts"
 import { SPEED_OF_SOUND } from "./acoustics.ts"
-import { ambienceAt, bells, birdSpot, dogsNear, echoesAt, forestAlong, streetAt, surfaceAt } from "./places.ts"
+import { ambienceAt, bells, birdSpot, dogsNear, echoesAt, forestAlong, streetAt, surfaceAt, wallAt } from "./places.ts"
 
 /** A small deterministic random source, so the checks never flake. */
 const seeded = (seed: number) => () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 2 ** 32)
@@ -21,6 +21,33 @@ test("surfaces: road carriageways by their OSM surface, the forest floor, a mead
   }
   assert.equal(surfaceAt(FOREST.x, FOREST.y), "leaves")
   assert.equal(surfaceAt(MEADOW.x, MEADOW.y), "grass")
+})
+
+test("walls: a tree trunk, buildings by kind and style, the guard rail, the stone wall and a cliff, each 0.3 m off; bare ground is earth", () => {
+  /** 0.3 m off the middle of the longest edge of `pts`, on its right (outside a counter-clockwise ring). */
+  const beside = (pts: ReadonlyArray<number>, closed: boolean) => {
+    let best = { x: 0, y: 0, length: 0 }
+    for (let i = closed ? 0 : 2, n = pts.length, j = closed ? n - 2 : 0; i < n; j = i, i += 2) {
+      const ex = pts[i]! - pts[j]!, ey = pts[i + 1]! - pts[j + 1]!, length = Math.hypot(ex, ey)
+      if (length > best.length) best = { x: (pts[i]! + pts[j]!) / 2 + (0.3 * ey) / length, y: (pts[i + 1]! + pts[j + 1]!) / 2 - (0.3 * ex) / length, length }
+    }
+    return best
+  }
+  const buildings = [
+    ["house", "stone", "stone"], ["house", "plaster", "masonry"], ["church", "church", "stone"], ["ruins", "ruin", "stone"],
+    ["greenhouse", "industrial", "glass"], ["industrial", "industrial", "sheet"], ["substation", "industrial", "sheet"]
+  ] as const
+  for (const [kind, style, expected] of buildings) {
+    const at = beside(MAP.buildings.find((b) => b.kind === kind && b.style === style)!.outer, true)
+    assert.equal(wallAt(at.x, at.y), expected, `${kind}/${style}`)
+  }
+  for (const [kind, expected] of [["guard_rail", "rail"], ["wall", "stone"], ["cliff", "rock"]] as const) {
+    const at = beside(MAP.barriers.find((b) => b.kind === kind)!.pts, false)
+    assert.equal(wallAt(at.x, at.y), expected, kind)
+  }
+  const { trees } = MAP
+  assert.equal(wallAt(trees[0]! + 0.55, trees[1]!), "tree")
+  assert.equal(wallAt(MEADOW.x, MEADOW.y), "earth")
 })
 
 test("ambience shares stay within 1 and tell the forest, the meadow and the village apart", () => {

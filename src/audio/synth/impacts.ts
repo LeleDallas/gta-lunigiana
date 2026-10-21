@@ -5,17 +5,20 @@
  * - `crash`: three tiers by impact speed × three variants. Light: a 90→38 Hz thump, a low body
  *   thud and trim rattling; medium adds the metal crunch and ringing panels (free-free bar modes
  *   1 : 2.756 : 5.404 : 8.933); heavy adds breaking glass. Loudness follows (speed / 15)^1.2, and
- *   heavier masses play slower, so lower.
+ *   heavier masses play slower, so lower. Only `speed` and `mass` count: the bodies, what they
+ *   hit, the surface and the cabin are for the crash renderer that replaces it.
  * - `thud`: a vehicle hitting a person, kept tasteful: a low thump and a cloth swish, no crunch.
  * - `door`: per model open (two latch clicks, the seal) and close (thump, latch, panel ring).
  * - `ignition`: the starter whirring with a dip at every compression, then the engine catching:
  *   the real engine synth flaring and settling, fading as the running engine voice takes over.
- * - `scrape` (a voice): metal grinding along a wall, ringing panels and grit, louder with speed.
+ * - `scrape` (a voice): metal grinding along a wall, ringing panels and grit, louder with speed;
+ *   the same along every material.
  *
  * @module audio/synth/impacts
  */
 import { VEHICLE_MODELS, type VehicleModel } from "../../sim/vehicles.ts"
 import { bufferOf, loop } from "../buffers.ts"
+import { gainToDb } from "../acoustics.ts"
 import type { Continuous, Kit, OneShot, Shot, VoiceFactory } from "../types.ts"
 import { engine, ENGINES } from "./engine.ts"
 import { bake, fadeOut, glide, jitter, normalise, perContext, pick, playBuffer, strike } from "./graph.ts"
@@ -33,6 +36,9 @@ export const crashLaw = (speed: number, mass: number): { readonly tier: number; 
   gain: Math.max(0.1, Math.min(1, (Math.max(0, speed) / 15) ** 1.2)),
   rate: Math.min(1.15, Math.max(0.8, Math.max(0.05, mass) ** -0.12))
 })
+
+/** How far (dB) a crash plays under its nominal peak, so masking counts the level played. ponytail: the old law's gain, until the crash renderer brings its own. */
+export const crashQuiet = (sound: Extract<OneShot, { readonly kind: "crash" }>): number => gainToDb(1 / crashLaw(sound.speed, sound.mass).gain)
 
 /** A baked sound for `ctx`, scaled to peak at `peak`. */
 const peaking = (ctx: BaseAudioContext, peak: number) => (samples: Float32Array<ArrayBuffer>): AudioBuffer => {

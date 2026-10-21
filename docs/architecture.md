@@ -80,11 +80,12 @@ Resources: `Time`, `Rng`, `Score` (`stolen`, `knocked`) and `View` (`turns`, the
 of the camera) are saved. `Input` is transient: it is
 rebuilt every step and never saved.
 
-Events are transient too. `Impact` (a vehicle hit a wall, another vehicle or a person: where, how
-hard, with how much mass) and `Honk` (an AI driver held up sounds the horn) carry moments that leave
-no trace in the components. `VehiclePhysics`, `Contacts` and `TrafficAI` emit them; only the audio
-schedule reads them ([audio.md](audio.md#data-flow)). Snapshots hold no events, and emitting them
-changes neither the determinism nor the saves test.
+Events are transient too. `Impact` (a vehicle hit a wall, another vehicle or a person: where, which
+is the contact point for a wall or a vehicle, how hard, with how much mass) and `Honk` (an AI driver
+held up sounds the horn) carry moments that leave no trace in the components. `VehiclePhysics`,
+`Contacts` and `TrafficAI` emit them; only the audio schedule reads them
+([audio.md](audio.md#data-flow)). Snapshots hold no events, and emitting them changes neither the
+determinism nor the saves test.
 
 Static data is module content, not state. `MAP` and `graph` (`src/sim/map/index.ts`), the wall,
 tree, building and edge lookups, and the per-model lane tables in `src/sim/route.ts` are built once

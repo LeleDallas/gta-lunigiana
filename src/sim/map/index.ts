@@ -21,7 +21,7 @@ import { BUILDING_STYLES, type BuildingStyle, isRoadClass, pushTrunk, type RoadC
 import raw from "./monzone.json" with { type: "json" }
 import { unpackRows, unpackTrees, unpackWalls } from "./packed.ts"
 
-export { AREA_KINDS, type AreaKind, BUILDING_STYLES, type BuildingStyle, isAreaKind, isDrivable, ROAD_CLASSES, type RoadClass } from "./kinds.ts"
+export { AREA_KINDS, type AreaKind, BUILDING_STYLES, type BuildingStyle, isAreaKind, isDrivable, ROAD_CLASSES, type RoadClass, TRUNK } from "./kinds.ts"
 
 /** Play area rectangle, metres. */
 interface Bounds { readonly minX: number; readonly minY: number; readonly maxX: number; readonly maxY: number }

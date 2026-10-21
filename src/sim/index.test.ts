@@ -72,7 +72,7 @@ test("driving: entering a parked car, the up key accelerates toward maxSpeed and
   assert.ok(view()!.pose.angle > heading + 0.3, `left turns counter-clockwise: ${heading} -> ${view()!.pose.angle}`)
 })
 
-test("driving into a building: the car stops at the wall without tunnelling, loses its speed, and the hit is a wall Impact", () => {
+test("driving into a building: the car stops at the wall without tunnelling, loses its speed, and the hit is a wall Impact where its nose meets the wall", () => {
   // Square on to an 11 m house wall on Via Cesare Battisti, 18.15 m to first contact.
   const car = { x: -433.525, y: 433.24, angle: 1.386 }
   const { run, view, world, heard } = start([...press(0, "action"), { frame: 2, press: ["up"] }], [door(car), { cars: [parkedCar("panda", 0xf2efe6, car)] }])
@@ -90,7 +90,11 @@ test("driving into a building: the car stops at the wall without tunnelling, los
   const hardest = heard.impacts.reduce((a, b) => (b.speed > a.speed ? b : a))
   assert.deepEqual([hardest.hit, hardest.car, hardest.mass, hardest.other], ["wall", id, VEHICLES.panda.mass, undefined])
   assert.ok(hardest.speed > 5 && hardest.speed < fastest, `hit at ${hardest.speed} m/s`)
-  assert.ok(Math.abs(progress(hardest) - 18.15) < 0.1, `at the wall: ${progress(hardest)}`)
+  // The contact point: the nose, half a length ahead of the centre, on the axis the car has kept since (it only bounced back along it).
+  const { pose } = frames.at(-1)!
+  const across = (p: { readonly x: number; readonly y: number }) => (p.y - pose.y) * Ops.cos(pose.angle) - (p.x - pose.x) * Ops.sin(pose.angle)
+  assert.ok(Math.abs(progress(hardest) - 18.15 - VEHICLES.panda.length / 2) < 0.1, `at the wall: ${progress(hardest)}`)
+  assert.ok(Math.abs(across(hardest)) < 0.1, `on the car's axis: ${across(hardest)}`)
 })
 
 test("contacts: a car rolling into a parked one is a car Impact at the closing speed, where the bumpers meet", () => {

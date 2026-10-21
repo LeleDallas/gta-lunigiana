@@ -37,11 +37,21 @@ const yawRate = (spec: VehicleSpec, v: number, steer: number, handbrake: boolean
 }
 
 /**
+ * Where a body of `spec` centred on (x, y) at heading `angle` meets what it moves `into` (a unit
+ * vector): the centre plus `into` times the body's support distance along it, as a box L×W.
+ */
+const contact = (spec: VehicleSpec, x: number, y: number, angle: number, into: Vec2.Vec2): Vec2.Vec2 => {
+  const fx = Ops.cos(angle), fy = Ops.sin(angle)
+  const reach = Math.abs(into.x * fx + into.y * fy) * spec.length / 2 + Math.abs(into.y * fx - into.x * fy) * spec.width / 2
+  return { x: x + into.x * reach, y: y + into.y * reach }
+}
+
+/**
  * Arcade (GTA2-ish) handling for every vehicle from its CarInput and
  * VEHICLES stats: velocity split into forward and sideways parts, sideways
  * slip dying out with grip (handbrake: drifts), and the body circles swept
  * against drive walls; a hit keeps the sliding part, bounces a little and
- * costs speed by how hard it was. Each hit is an Impact event.
+ * costs speed by how hard it was. Each hit is an Impact event at the contact point.
  */
 export const VehiclePhysics = Game.System("Lunigiana/VehiclePhysics", {
   queries: {
@@ -77,7 +87,10 @@ export const VehiclePhysics = Game.System("Lunigiana/VehiclePhysics", {
     const moved = turned ?? moveCar(model, pose, pose.angle, delta, walls)
     if (moved === undefined) {
       const speed = Math.sqrt(vx * vx + vy * vy)
-      if (speed > NOISE) events.impact.emit({ hit: "wall", x: pose.x, y: pose.y, speed, mass: spec.mass, car: entity.id })
+      if (speed > NOISE) {
+        const at = contact(spec, pose.x, pose.y, pose.angle, { x: vx / speed, y: vy / speed })
+        events.impact.emit({ hit: "wall", x: at.x, y: at.y, speed, mass: spec.mass, car: entity.id })
+      }
       data.motion.set({ vx: 0, vy: 0, spin: 0 })
       continue
     }
@@ -87,7 +100,10 @@ export const VehiclePhysics = Game.System("Lunigiana/VehiclePhysics", {
       const lost = Vec2.subtract({ x: vx, y: vy }, real)
       const impact = Vec2.length(lost)
       const into = Vec2.normalizeOr(lost, Vec2.zero)
-      if (impact > NOISE) events.impact.emit({ hit: "wall", x: moved.position.x, y: moved.position.y, speed: impact, mass: spec.mass, car: entity.id })
+      if (impact > NOISE) {
+        const at = contact(spec, moved.position.x, moved.position.y, turned === undefined ? pose.angle : angle, into)
+        events.impact.emit({ hit: "wall", x: at.x, y: at.y, speed: impact, mass: spec.mass, car: entity.id })
+      }
       const keep = Math.max(0.2, 1 - IMPACT_LOSS * impact)
       // Never faster than before the hit (push-outs from a rotation can add speed).
       const slideV = Vec2.clampLength(Vec2.scale(real, keep), Math.sqrt(vx * vx + vy * vy) * keep)

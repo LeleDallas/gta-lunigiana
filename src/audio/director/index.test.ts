@@ -16,12 +16,13 @@ import { TOWERS, windDb } from "./levels.ts"
  * ridge above Aiola (900 m) with no water within 400 m, Monzone station 68 m from the Torrente Lucido, a street
  * 50 m from Monzone Alto's tower, the woods above Isolano, in earshot of eleven bell towers, and the street of Monzone
  * where the game starts, 50 m from the Lucido behind the houses, with slopes to echo off; a bank 15 m from the Lucido
- * with nothing in the way, and the two flanks of Monte San Giorgio, 400 m apart.
+ * with nothing in the way, the two flanks of Monte San Giorgio, 400 m apart, and the rendered house wall on Via Cesare
+ * Battisti where src/sim/index.test.ts drives a Panda, on its cobbles.
  */
 const MEADOW = { x: -329, y: 1078 }, STREET = { x: -916.6, y: 1706.8 }, BEHIND = { x: -886.6, y: 1706.8 }, OPEN = { x: -937.8, y: 1728 }
 const RIDGE = { x: 1600, y: -494.5 }, STATION = { x: -494, y: 437 }, BELFRY = { x: -41.8, y: -306.6 }
 const HILLSIDE = { x: -950, y: 71 }, SPAWN = { x: -412.6, y: 437.8 }, BANK = { x: -418.6, y: 395.8 }
-const WEST_FLANK = { x: 785.7, y: -563.4 }, EAST_FLANK = { x: 1185.7, y: -563.4 }
+const WEST_FLANK = { x: 785.7, y: -563.4 }, EAST_FLANK = { x: 1185.7, y: -563.4 }, HOUSE_WALL = { x: -429.85, y: 452.9 }
 const FRAME = 1 / 60
 /** Screen-right on the ground, with the view in its home seat. */
 const SCREEN_RIGHT = screenAxes(0).right
@@ -78,6 +79,10 @@ const world = (at: { readonly x: number; readonly y: number }, more: Partial<Hea
 const away = (from: { readonly x: number; readonly y: number }, metres: number, dir: { readonly x: number; readonly y: number } = SCREEN_RIGHT) =>
   ({ x: from.x + metres * dir.x, y: from.y + metres * dir.y })
 const SOUTH = { x: 0, y: -1 }
+/** Car `car`, a Panda, hitting a wall at `at` nose first. */
+const wallHit = (at: { readonly x: number; readonly y: number }, speed: number, car = 1): Happening => ({
+  kind: "impact", hit: "wall", x: at.x, y: at.y, speed, mass: 1, car, body: { model: "panda", zone: "front" }
+})
 
 test("a running car 30 m away on screen-right is heard there; 2 km away it is not (proximity)", () => {
   const near = rig()
@@ -132,8 +137,7 @@ test("a wall impact at 10 m/s crashes; 300 m away it arrives after its travel ti
   const crash = (metres: number) => {
     const director = rig()
     const at = away(MEADOW, metres, SOUTH)
-    const hit: Happening = { kind: "impact", hit: "wall", x: at.x, y: at.y, speed: 10, mass: 1100, car: 1 }
-    director.hear(world(MEADOW, { vehicles: [car(1, "panda", at)], happenings: [hit] }))
+    director.hear(world(MEADOW, { vehicles: [car(1, "panda", at)], happenings: [wallHit(at, 10)] }))
     return director.take("crash")
   }
   const [far] = crash(300)
@@ -146,7 +150,7 @@ test("a wall hit split over two steps crashes once, a 1.5× harder one at once a
   const at = away(MEADOW, 10, SOUTH)
   const step = (speeds: ReadonlyArray<number>, frames = 1, vx = 8) => director.hear(world(MEADOW, {
     vehicles: [car(1, "panda", at, { vx })],
-    happenings: speeds.map((speed): Happening => ({ kind: "impact", hit: "wall", x: at.x, y: at.y, speed, mass: 1100, car: 1 }))
+    happenings: speeds.map((speed) => wallHit(at, speed))
   }), frames)
   step([7.1])
   step([4.4])
@@ -166,11 +170,60 @@ test("a wall hit split over two steps crashes once, a 1.5× harder one at once a
   assert.equal(director.take("crash").length, 0)
 })
 
+test("a crash into a house wall knows its masonry and the cobbles under it, a scrape along it the masonry; out on the meadow both are earth", () => {
+  const hits = (at: { readonly x: number; readonly y: number }) => {
+    const director = rig()
+    director.hear(world(at, { vehicles: [car(1, "panda", at, { vx: 8 })], happenings: [wallHit(at, 10)] }))
+    director.hear(world(at, { vehicles: [car(1, "panda", at, { vx: 8 })], happenings: [wallHit(at, 0.5)] }), 7)
+    const [crash] = director.take("crash"), scrape = director.held().get("scrape:1")?.sound
+    return [crash?.sound.kind === "crash" ? [crash.sound.against, crash.sound.surface] : undefined, scrape?.kind === "scrape" ? scrape.material : undefined]
+  }
+  assert.deepEqual(hits(HOUSE_WALL), [[{ kind: "wall", material: "masonry" }, "stone"], "masonry"])
+  assert.deepEqual(hits(away(MEADOW, 10, SOUTH)), [[{ kind: "wall", material: "earth" }, "grass"], "earth"])
+})
+
+test("a car crash heard from inside the struck car is that car's: its body first, the other the one it hit, from the cabin", () => {
+  const crash = (listener: number | undefined) => {
+    const director = rig()
+    const at = away(MEADOW, 3, SOUTH)
+    const hit: Happening = { kind: "impact", hit: "car", x: at.x, y: at.y, speed: 10, mass: 0.8, car: 1, other: 2, body: { model: "truck", zone: "front" }, otherBody: { model: "panda", zone: "rear" } }
+    director.hear(world(MEADOW, { vehicles: [car(1, "truck", at), car(2, "panda", at, { mine: listener === 2 })], happenings: [hit] }, listener))
+    const [played] = director.take("crash")
+    return played?.sound.kind === "crash" ? [played.sound.body, played.sound.against, played.sound.inside] : undefined
+  }
+  assert.deepEqual(crash(undefined), [{ model: "truck", zone: "front" }, { kind: "car", body: { model: "panda", zone: "rear" } }, false])
+  assert.deepEqual(crash(2), [{ model: "panda", zone: "rear" }, { kind: "car", body: { model: "truck", zone: "front" } }, true])
+})
+
+// Regression: on foot, a wall hit's missing `other` matched the missing car the listener sits in, so every wall crash was "their own".
+test("a wall crash heard on foot is not the listener's own: the building in the way muffles it, and it is not heard from a cabin", () => {
+  const crash = (at: { readonly x: number; readonly y: number }) => {
+    const director = rig()
+    director.hear(world(STREET, { vehicles: [car(1, "panda", at)], happenings: [wallHit(at, 10)] }))
+    return director.take("crash")[0]!
+  }
+  const behind = crash(BEHIND), open = crash(OPEN)
+  assert.ok(behind.at.gain < open.at.gain * dbToGain(-10), `${behind.at.gain} < ${open.at.gain}`)
+  assert.ok(behind.sound.kind === "crash" && !behind.sound.inside)
+})
+
+test("a 2 m/s bump plays quieter than a 20 m/s crash, so masking culls it nearer: both at full gain 300 m away, only the crash 1.2 km away", () => {
+  const gains = (metres: number) => [2, 20].map((speed) => {
+    const director = rig()
+    director.hear(world(MEADOW, { happenings: [wallHit(away(MEADOW, metres, SOUTH), speed)] }))
+    return director.take("crash")[0]?.at.gain
+  })
+  const [bump, crash] = gains(300)
+  assert.ok(bump !== undefined && bump === crash, `${bump} vs ${crash}`)
+  const [far, heavy] = gains(1200)
+  assert.ok(far === undefined && heavy !== undefined && heavy > 0, `${far} vs ${heavy}`)
+})
+
 test("a hard crash answers off the slopes, later and fainter; a soft one does not", () => {
   const crash = (speed: number) => {
     const director = rig()
     const at = away(SPAWN, 10, SOUTH)
-    director.hear(world(SPAWN, { vehicles: [car(1, "panda", at)], happenings: [{ kind: "impact", hit: "wall", x: at.x, y: at.y, speed, mass: 1100, car: 1 }] }))
+    director.hear(world(SPAWN, { vehicles: [car(1, "panda", at)], happenings: [wallHit(at, speed)] }))
     return director.take("crash")
   }
   const [direct, ...echoes] = crash(10)

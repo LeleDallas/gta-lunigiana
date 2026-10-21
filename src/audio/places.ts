@@ -1,5 +1,6 @@
 /**
- * What the map around the listener sounds like: the surface under a foot or a tyre, the mix of
+ * What the map around the listener sounds like: the surface under a foot or a tyre, what a car
+ * hit (the material of the drive wall at a contact point), the mix of
  * forest, open ground and village (the ambience beds), how enclosed a street is (the reverb room),
  * forest along a path (foliage loss), steep slopes that echo, and the fixed places that make
  * sound: church bells, farm dogs, birds in the trees. Running water is in places/water.ts.
@@ -10,10 +11,10 @@
  */
 import { coverName, mapCover, type Cover } from "../render/landcover.ts"
 import { staticGrid } from "../sim/collide.ts"
-import { buildingBoxes, buildingsIn, buildingStyleOf, districtAt, heightAt, MAP, type Road, treesIn } from "../sim/map/index.ts"
+import { type Building, buildingBoxes, buildingsIn, buildingStyleOf, districtAt, heightAt, MAP, type Road, treesIn, TRUNK } from "../sim/map/index.ts"
 import { hash01, segDist2 } from "../tools/geometry.ts"
 import { delayOf, EAR_HEIGHT, panOf } from "./acoustics.ts"
-import type { Surface } from "./types.ts"
+import type { Material, Surface } from "./types.ts"
 
 export { waterNear, type WaterHeard } from "./places/water.ts"
 
@@ -74,6 +75,49 @@ export const surfaceAt = (x: number, y: number): Surface => {
     if (depth >= deepest) [deepest, on] = [depth, r]
   })
   return on === undefined ? COVER_SURFACE[coverAt(x, y)] : (ROAD_SURFACE[on.surface] ?? "asphalt")
+}
+
+/** A building's walls by how they sound: greenhouses are glass, industrial buildings metal sheet, rubble stone and old buildings stone, the rest rendered masonry. */
+const buildingMaterial = (building: Building): Material => {
+  const style = buildingStyleOf(building)
+  return building.kind === "greenhouse" ? "glass"
+    : style === "industrial" ? "sheet"
+    : style === "stone" || style === "church" || style === "tower" || style === "ruin" ? "stone"
+    : "masonry"
+}
+
+/** The map's barriers (`Barrier.kind`) by how they sound. */
+const BARRIER_MATERIAL: Partial<Record<string, Material>> = { guard_rail: "rail", wall: "stone", cliff: "rock" }
+
+/** The distance from (x, y) to the polyline `pts`, m; `closed` adds the edge back to its start (a ring). */
+const distanceTo = (pts: ReadonlyArray<number>, closed: boolean, x: number, y: number): number => {
+  let d2 = Number.MAX_VALUE
+  for (let i = closed ? 0 : 2, n = pts.length, j = closed ? n - 2 : 0; i < n; j = i, i += 2) d2 = Math.min(d2, segDist2(x, y, pts[j]!, pts[j + 1]!, pts[i]!, pts[i + 1]!).d2)
+  return Math.sqrt(d2)
+}
+
+/**
+ * What a vehicle hitting a drive wall at the contact point (x, y) hit, by how it sounds: the
+ * nearest tree trunk, building wall or barrier within `reach` m, else earth (a steep bank, a
+ * stream's edge, the end of the map).
+ */
+export const wallAt = (x: number, y: number, reach = 3): Material => {
+  let nearest = reach, material: Material = "earth"
+  const offer = (d: number, what: Material) => {
+    if (d < nearest) [nearest, material] = [d, what]
+  }
+  const { trees } = MAP
+  treesIn(x - reach, y - reach, x + reach, y + reach, (i) => offer(Math.hypot(trees[3 * i]! - x, trees[3 * i + 1]! - y) - TRUNK / 2, "tree"))
+  buildingsIn(x - reach, y - reach, x + reach, y + reach, (i) => {
+    const building = MAP.buildings[i]!, what = buildingMaterial(building)
+    for (const ring of [building.outer, ...(building.holes ?? [])]) offer(distanceTo(ring, true, x, y), what)
+  })
+  // The map has a handful of barriers: every one is measured.
+  for (const { kind, pts } of MAP.barriers) {
+    const what = BARRIER_MATERIAL[kind]
+    if (what !== undefined) offer(distanceTo(pts, false, x, y), what)
+  }
+  return material
 }
 
 /** Shares 0…1 of the ground around a point: woods, open grass, scrub and fields, village (river beds and bare stone count as none). */

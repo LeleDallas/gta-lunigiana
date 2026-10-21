@@ -26,7 +26,9 @@ components, Input (horn key) ──────┴─► audio schedule (Lunigia
    the world's state:
    - `Impact` (`hit`, `x`, `y`, `speed`, `mass`, `car`, `other?`): a vehicle hit something this
      step. `VehiclePhysics` emits `wall` for every drive-wall hit faster than 0.05 m/s, with the
-     speed lost into the wall (a car wedged so that no move fits emits its whole speed).
+     speed lost into the wall (a car wedged so that no move fits emits its whole speed), at the
+     contact point: the car's centre plus the direction of the lost velocity (the velocity, when
+     wedged) times the body's reach that way, |u·f|·L/2 + |u·s|·W/2 for its L × W box.
      `Contacts` emits `car` when two vehicles close on each other: the closing speed, the reduced
      mass 1/(1/m₁ + 1/m₂), at the contact point (`car` and `other` follow query order, not who
      struck whom). It emits `person` for each knockdown: the car's speed before a pin stops it, the
@@ -44,7 +46,12 @@ components, Input (horn key) ──────┴─► audio schedule (Lunigia
      0.01 m/s, or spinning). Parked cars nobody touches are left out;
    - `people`: everyone on foot (pedestrians, and the player when not driving), with their
      fleeing and knocked-down flags;
-   - `happenings`: the `Impact` and `Honk` events since its last run, impacts first;
+   - `happenings`: the `Impact` and `Honk` events since its last run, impacts first. Each impact
+     carries the `body` of the vehicle `car` (and `otherBody` of `other`, for a `car` hit): its
+     model, and the zone the contact point lies in seen from its centre (within 45° of the
+     heading the front, within 45° of its reverse the rear, else the side). They come from every
+     vehicle, parked ones too (a struck parked car is not in `vehicles`); an impact whose vehicle
+     has despawned since is dropped;
    - `horn`: whether the horn key is held.
 
    It hands that to the `Audio` service and writes nothing (`src/render/index.test.ts` checks it).
@@ -89,7 +96,8 @@ components, Input (horn key) ──────┴─► audio schedule (Lunigia
   - vehicles: the listener's car and the running vehicles of the last frame (to hear getting in,
     getting out and the starter), the horn key's last state (the siren toggles on a press),
     engines still cranking, sirens on, each car's last crash (to merge one hit's steps) and the
-    cars scraping. Each entry ends when its time is over or its vehicle stops running;
+    cars scraping, with what they scrape along. Each entry ends when its time is over or its
+    vehicle stops running;
   - people: per person on foot, the last position, the step phase, the mood and the last voice
     cue. A person not heard in a frame (despawned, or the player now in a car) is dropped;
   - the valley: the water and dogs near the ears (looked up again every 0.25 s or 2 m), the eased
@@ -303,7 +311,7 @@ Continuous voices (held every frame they play):
 |---|---|---|---|
 | `engine` | `synth/engine.ts`: an oscillator at the firing frequency (a sawtooth, or a band-limited pulse for the Ape's two-stroke and the truck's diesel), a half-order sub, a waveshaper driven by the load, two exhaust formants, noise gated at the firing rate, and a turbo whine on the truck and the Giulia. Revs come from a virtual gearbox per model (`gearbox.ts`) | a vehicle runs (AI traffic, or the player at the wheel), once its starter, if any, has caught | at full load: Panda 90 (2 m), Ape 92 (2 m), truck 98 (4 m), Giulia 93 (2.5 m); the player's own 68 from the seat |
 | `tyres` | `synth/tyres.ts`: rolling noise rising as (v / 70 km/h)^1.5, a sett rumble at v / 0.14 m on stone, a two-tone squeal (980 and 1460 Hz) on asphalt and stone when sliding, a gravel crunch on loose ground; the truck's 6 dB louder and darker | a vehicle moves faster than 1 m/s. The surface is the road's OSM surface on a carriageway (or within 0.5 m of its edge), else the land cover's | 98 (2 m) |
-| `scrape` | `synth/impacts.ts`: band-passed noise, ringing panel modes, grit and a stick-slip judder | a car hits a wall at under 1.5 m/s while still moving faster than 2 m/s; held 0.2 s past the last such hit | 105 (2 m) |
+| `scrape` | `synth/impacts.ts`: band-passed noise, ringing panel modes, grit and a stick-slip judder, the same along every `material` | a car hits a wall at under 1.5 m/s while still moving faster than 2 m/s; held 0.2 s past the last such hit, along the material of the wall at that hit | 105 (2 m) |
 | `horn` | `synth/horns.ts`: Panda 420 Hz, Ape 610 Hz, truck air horn 150 + 185 Hz, Giulia 410 + 500 Hz | the player holds H at the wheel of anything but the Giulia | 116 (2 m) |
 | `siren` | `synth/horns.ts`: the Italian *bitonale*, 466 and 622 Hz for 0.75 s each (D.M. 20/03/1979) | toggled by H in the Giulia the player drives; it stops when they get out | 117 (2.5 m) |
 | `beeper` | `synth/horns.ts`: a 1 kHz tone, 0.5 s on and 0.5 s off | a running truck reverses (faster than 0.3 m/s backwards) | 100 (2 m) |
@@ -315,7 +323,7 @@ One-shots:
 
 | Kind | Made of | Plays when | Level |
 |---|---|---|---|
-| `crash` | `synth/impacts.ts`: three tiers (light under 4 m/s, medium under 10, heavy) × three variants rendered offline; loudness (speed / 15)^1.2 with a floor; a heavier mass plays lower | a `wall` or `car` Impact of 1.5 m/s or more. One hit spans a few steps: within 0.1 s of a car's crash only a 1.5× harder hit plays again | 115 (2 m) |
+| `crash` | `synth/impacts.ts`: three tiers (light under 4 m/s, medium under 10, heavy) × three variants rendered offline; loudness (speed / 15)^1.2 with a floor; a heavier mass plays lower. Only `speed` and `mass` count yet | a `wall` or `car` Impact of 1.5 m/s or more. One hit spans a few steps: within 0.1 s of a car's crash only a 1.5× harder hit plays again. Its params (below): the closing speed, the reduced mass, both bodies, the wall's material, the surface under the contact point, whether the listener sits in `body` | 115 (2 m) |
 | `thud` | a low thump and a cloth swish, full level from 12 m/s | a `person` Impact (a knockdown) | 85 (1 m) |
 | `groan` | `synth/voices.ts`, a formant voice | 0.25 s after a thud, from the person hit | 72 (1 m) |
 | `door` | per model: opening (latch clicks, the seal), closing (thump, latch, panel ring) | the player gets in (open, then close 0.7 s later) or out (at their new spot) | 82 (1 m) |
@@ -326,6 +334,17 @@ One-shots:
 | `bell` | `synth/nature.ts`: a bell's inharmonic partials (hum, prime, tierce, quint, nominal...), each split to beat; four primes rendered, any pitch resampled from the nearest | the computer's local clock: the hours (1–12 strokes, 2.5 s apart) on the hour and one stroke on the half hour, from the 4 loudest towers in earshot, each starting up to 6 s late | 118 (5 m) |
 | `bird` | `synth/nature.ts`: autumn calls of the robin, great tit, blackbird ("chink" or "seee") and chaffinch ("pink"), 35/30/20/15 % | from a tree 15–70 m away: 0.3 calls a second in full forest, plus 0.05 near houses | 85 (1 m) |
 | `bark` | `synth/nature.ts`: two to five barks of a big or a small dog through a formant tract | 183 farm dogs (about one in eight barns, sheds, houses and farm buildings with open ground and no paving 5 m out): those within 200 m bark every 45 s on average, four times as often while the player runs or drives within 30 m | 96 (1 m) |
+
+A crash's params say what met: `body` is the vehicle that hit (model and zone), `against` either
+the wall's `material` or the other vehicle's body. When the listener sits in the other car of a
+car–car crash the two swap, so `body` is always theirs (the contact sounds the same from either
+car) and `inside` says they hear it from that cabin. `surface` is what debris lands on, read at
+the contact point like a tyre's. The material of a drive wall (`wallAt` in `places.ts`) is that
+of the nearest wall source within 3 m of the contact point: a tree trunk (`tree`); a building's
+walls by kind and style (a greenhouse `glass`, the industrial style, which takes in substations
+and silos, `sheet`, the stone, church, tower and ruin styles `stone`, the rest `masonry`); a
+barrier (a guard rail `rail`, a wall `stone`, a cliff `rock`); anything else, a steep bank, a
+stream's edge or the end of the map, is `earth`.
 
 The bells are the tallest church or tower of each district, 22 in all. A tower of 10 m or less
 rings an 800 Hz prime; taller towers ring lower, down to 400 Hz at 30 m.
@@ -339,9 +358,11 @@ rings an 800 Hz prime; taller towers ring lower, down to 400 Hz at 30 m.
   with its physical params: an engine idles about 20 dB under full load at the redline, tyres
   follow the rolling law, a crash its speed. The level in the table is the one at that peak.
 - `BEDS`: the wind and cricket beds at the ears at full strength and density. `windDb` (here),
-  `cricketsQuiet` (`synth/nature.ts`) and `WALK_DB` (`synth/steps.ts`): how far the wind,
-  crickets and walking-step synths play under that, so masking counts the sound actually played.
-  The last two live beside the synths they describe, derived from the same numbers.
+  `cricketsQuiet` (`synth/nature.ts`), `WALK_DB` (`synth/steps.ts`) and `crashQuiet`
+  (`synth/impacts.ts`, for now the crash law's gain: 20 dB under at a bump, none from 15 m/s):
+  how far the wind, crickets, walking-step and crash synths play under that, so masking counts
+  the sound actually played. The last three live beside the synths they describe, derived from
+  the same numbers.
 - `HEIGHT`, `WATER_R_MIN`: source heights and the water's 1 m clamp.
 - `CAPS`, `KEEP_DB`, `TOWERS`: the voice caps and their hysteresis.
 - `DELAY_FROM` (40 m), `REVERB`, `ECHO` and `echoes(sound)`: delay, reverb sends and echoes.
@@ -418,13 +439,20 @@ own emitter and mixer:
 - **Listener:** the distance (a logarithmic slider, 0.5 m to 2 km), the side of the screen, a cabin
   (none or a model), the street room, and the master level meter.
 - **One panel per kind:** each continuous kind has Hold / Release and each one-shot Play, with a
-  control for every param (sliders, menus, checkboxes). Each panel shows how its sound is heard at
-  that spot: the level at 1 m (at the ears for the beds) and at the listener, the gain, pan,
-  lowpass, reverb send and delay. The first press starts the audio.
+  control for every param (sliders, menus, checkboxes). The crash's are flat: speed and mass
+  sliders, the `model` and `zone` of the body that hits, `against` (a material for a wall, or a
+  model for a car, struck on its `struck` zone), the `surface` and `inside`. Each panel shows how
+  its sound is heard at that spot: the level at 1 m (at the ears for the beds) and at the
+  listener (a crash `crashQuiet` under it), the gain, pan, lowpass, reverb send and delay. The
+  first press starts the audio.
 - **Render all** (also `window.lab.renderAll()`, which returns the rows) renders every voice and
-  shot offline at 48 kHz at a few representative params (59 renders, about 2 s) and tabulates peak,
+  shot offline at 48 kHz at a few representative params (75 renders, about 3 s) and tabulates peak,
   RMS (dBFS), spectral centroid (`measure.ts`), NaNs and length. It flags silence (peak under
   1e-4), clipping (over 0.95), NaNs, and any sound left after a voice's stop or a shot's end.
+  The crashes cover a matrix: a Panda into a house wall at 2 (a bump), 5, 14 and 20 m/s, a
+  Panda–Panda at 10, a Panda–truck at 12, an Ape into stone at 8, the Giulia into the guard rail
+  at 12, a Panda into a tree at 10 and into earth at 8, a side hit at 12, the cabin at 14 and the
+  Giulia wrecked at 40; the scrape plays along every material at 12 m/s and along masonry at 4.
   Adding a kind fails to compile until the page has a panel and render rows for it. Two low peaks
   are by design: the wind swells with gusts over seconds, so at strength 1 a 2 s render peaks near
   0.2–0.3 while its 64 s gust loop reaches 0.45–0.65; and the blackbird's thin "seee" (30 % of its
@@ -444,16 +472,16 @@ functions (`synth/world.test.ts` imports them to check).
 
 | File | Checks |
 |---|---|
-| `src/sim/index.test.ts`, `src/sim/walls.test.ts` | the events: a car driven into a building is a `wall` Impact at the wall; a car rolling into a parked one a `car` Impact at the closing speed, the reduced mass and where the bumpers meet; a knockdown one `person` Impact faster than `KNOCK_SPEED`; a car pinning the player a `person` Impact as fast as the car was; a car blocked by a parked one honks once per stuck episode, `HONK_STEPS` before each time it backs up |
-| `src/audio/index.test.ts` | `Hear`: the listener on foot and at the wheel with the horn held, AI traffic running while standing, an untouched car heard only while it moves, impacts then honks each heard once |
+| `src/sim/index.test.ts`, `src/sim/walls.test.ts` | the events: a car driven into a building is a `wall` Impact where its nose meets the wall; a car rolling into a parked one a `car` Impact at the closing speed, the reduced mass and where the bumpers meet; a knockdown one `person` Impact faster than `KNOCK_SPEED`; a car pinning the player a `person` Impact as fast as the car was; a car blocked by a parked one honks once per stuck episode, `HONK_STEPS` before each time it backs up |
+| `src/audio/index.test.ts` | `Hear`: the listener on foot and at the wheel with the horn held, AI traffic running while standing, an untouched car heard only while it moves, impacts (with the struck vehicle's model and zone; none for a vehicle gone since) then honks each heard once, an Ape rolling into a parked Panda front on rear |
 | `src/render/index.test.ts` | every system of the render and audio schedules declares no writes |
 | `src/audio/acoustics.test.ts` | the laws: the line source against the exact table, the air cutoffs, Doppler, the pan, diffraction, ground, foliage, masking, the mix calibration |
 | `src/audio/occlusion.test.ts` | path differences on real map spots: a flat meadow, Monzone Alto's 30 m tower, a bell over its own walls, Monte San Giorgio between its flanks |
-| `src/audio/places.test.ts`, `src/audio/places/water.test.ts` | surfaces, ambience shares, streets, echoes at Equi Terme, bells, dogs and birds, the Torrente Lucido from Monzone station, the Fontana di Aiola |
-| `src/audio/director/index.test.ts` | the director on a recording speaker at real map spots: proximity (in the open and behind a ridge), a building's muffling, Doppler, step cadence, travel delay, crash merging and scrapes, echoes, nothing before the context, the cabin, getting in and out, horn and siren, the bells, water and its masking, the valley's never-silent bed and the river 15 m away against behind the houses, voice caps and their hysteresis, flee cues |
+| `src/audio/places.test.ts`, `src/audio/places/water.test.ts` | surfaces, wall materials (a trunk, buildings by kind and style, the guard rail, the stone wall, a cliff, bare ground), ambience shares, streets, echoes at Equi Terme, bells, dogs and birds, the Torrente Lucido from Monzone station, the Fontana di Aiola |
+| `src/audio/director/index.test.ts` | the director on a recording speaker at real map spots: proximity (in the open and behind a ridge), a building's muffling, Doppler, step cadence, travel delay, crash merging and scrapes, a house wall's material and cobbles in the crash and scrape params, the bodies swapped for a listener in the struck car, a wall crash on foot muffled by the house in the way, a bump culled nearer than a crash, echoes, nothing before the context, the cabin, getting in and out, horn and siren, the bells, water and its masking, the valley's never-silent bed and the river 15 m away against behind the houses, voice caps and their hysteresis, flee cues |
 | `src/audio/director/hearing.test.ts`, `occluder.test.ts` | the reverb send; the obstacle cache's refresh and forgetting |
 | `src/audio/speaker.test.ts`, `mixer.test.ts`, `buffers.test.ts`, `measure.test.ts` | the one-shot cap, the speaker inert until a trusted gesture, the reverb crossfade, the level meter, seamless noise loops, the render measurements |
-| `src/audio/gearbox.test.ts`, `src/audio/synth/*.test.ts` | gearbox shifts; the engine, tyre and crash laws; step and cricket rates; bubbles at their Minnaert frequency; synth params clamped, NaN to silence |
+| `src/audio/gearbox.test.ts`, `src/audio/synth/*.test.ts` | gearbox shifts; the engine, tyre and crash laws (and `crashQuiet`); step and cricket rates; bubbles at their Minnaert frequency; synth params clamped, NaN to silence |
 
 ### In a browser
 
@@ -468,7 +496,7 @@ Measured in headless Chrome (`?seed=3`, keys sent over CDP, `gta.audio.level()` 
 standing at the spawn −40 to −42 dBFS, walking there with step peaks up to −20, 15 m from the
 Lucido in the clear −25, in the Carabinieri Giulia idling −30 and driving with the siren on −10.5
 (peaks −3.5), in a stolen Panda idling −29, at 18–22 m/s −14 and honking −13 (peaks −3.5); no console errors and no
-non-finite placement or param. On the audition page "Render all" gives 59 rows, none flagged.
+non-finite placement or param. On the audition page "Render all" gives 75 rows, none flagged.
 
 ## Known limits and tuning
 
@@ -506,7 +534,7 @@ Where to tune:
 | `src/audio/director/people.ts` | jumps, running, the shout radius and the cue gap |
 | `src/audio/director/world.ts` | the wind law and its floor (`STILL`), the beds and water compressed at their level, birds, dogs, the bell strokes, how often water and dogs are looked up |
 | `src/audio/director/occluder.ts` | the obstacle refresh rate, per-frame budget and forgetting |
-| `src/audio/places.ts`, `src/audio/places/water.ts` | surfaces, ambience, street probes, the echo search, bells, dogs, bird trees; water power, fountains and the Cascata |
+| `src/audio/places.ts`, `src/audio/places/water.ts` | surfaces, wall materials and their reach, ambience, street probes, the echo search, bells, dogs, bird trees; water power, fountains and the Cascata |
 | `src/audio/mixer.ts`, `src/audio/speaker.ts` | master gain, limiter, the two reverbs and their return; the one-shot cap |
 | `src/audio/gearbox.ts`, `src/audio/synth/*.ts` | each synth's own table: gear ratios, engines, horns, tyre grounds, treads, voices, calls, bubbles |
 

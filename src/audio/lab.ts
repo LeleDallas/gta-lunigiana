@@ -4,8 +4,9 @@
  * mixer from a distance and a side of the screen you pick, beside the level, gain, pan, lowpass
  * and reverb send the director gives it there: its calibration (director/levels.ts) through its
  * acoustic chain (director/hearing.ts), over open, flat ground with nothing in the way. "Render
- * all" renders every voice and shot offline at a few representative params and tabulates peak,
- * RMS, spectral centroid and NaNs; `window.lab.renderAll()` returns the same rows, for CDP checks.
+ * all" renders every voice and shot offline at a few representative params (the crashes over a
+ * matrix of bodies, targets and speeds, the scrape along every material) and tabulates peak, RMS,
+ * spectral centroid and NaNs; `window.lab.renderAll()` returns the same rows, for CDP checks.
  *
  * @module audio/lab
  */
@@ -18,29 +19,36 @@ import { BEDS, ENGINE, type Level, LEVELS, OWN_ENGINE_DB, REVERB, WATER_R_MIN, w
 import { type Emitter, makeEmitter } from "./emitter.ts"
 import { measure } from "./measure.ts"
 import { makeMixer, type Mixer } from "./mixer.ts"
+import { crashQuiet } from "./synth/impacts.ts"
 import { VEHICLE_SHOTS, VEHICLE_VOICES } from "./synth/vehicles.ts"
 import { WORLD_SHOTS, WORLD_VOICES } from "./synth/world.ts"
-import type { Continuous, Kit, OneShot, Shot, Shots, Surface, Voice, VoiceFactory, Voices } from "./types.ts"
+import type { Continuous, Kit, Material, OneShot, Shot, Shots, Surface, Voice, VoiceFactory, Voices, Zone } from "./types.ts"
 
 const VOICES = { ...VEHICLE_VOICES, ...WORLD_VOICES } satisfies Voices
 const SHOTS = { ...VEHICLE_SHOTS, ...WORLD_SHOTS } satisfies Shots
 
 type Sound = Continuous | OneShot
-type Body = Extract<Continuous, { readonly kind: "water" }>["body"]
+type Crash = Extract<OneShot, { readonly kind: "crash" }>
+type WaterBody = Extract<Continuous, { readonly kind: "water" }>["body"]
 
 /** The screen axes on the ground, with the view in its home seat. */
 const { right: SCREEN_RIGHT, up: SCREEN_UP } = screenAxes(0)
 
 // ponytail: water as a point source: the river (the Lucido) and the stream (a 4 m one) at their 2 m bank level + 6 dB, the fountain at
 // its 1 m level; the director takes each body's line-source level at the listener from places.
-const WATER_DB = { fountain: 65, stream: 61, river: 76 } as const satisfies Record<Body, number>
+const WATER_DB = { fountain: 65, stream: 61, river: 76 } as const satisfies Record<WaterBody, number>
 
-/** A source's calibration; `wet` marks one heard at the ears, with the director's fixed reverb send; `under`, a bed whose voice plays that many dB under its nominal by itself, which its gain gives back (world.ts). */
-type Calibration = Level & { readonly wet?: number; readonly under?: number }
+/**
+ * A source's calibration; `wet` marks one heard at the ears, with the director's fixed reverb send; `under`, a bed whose
+ * voice plays that many dB under its nominal by itself, which its gain gives back (world.ts); `quiet`, a crash that plays that
+ * many dB under its nominal, which masking counts (vehicles.ts).
+ */
+type Calibration = Level & { readonly wet?: number; readonly under?: number; readonly quiet?: number }
 
 /** `sound`'s calibration: the beds and the own engine (from the driver's seat, through no cabin) sound at the ears. */
 const sourceOf = (sound: Sound): Calibration =>
   sound.kind === "engine" ? (sound.inside ? { db: OWN_ENGINE_DB, rMin: 1, wet: 0 } : ENGINE[sound.model])
+  : sound.kind === "crash" ? { ...LEVELS.crash, quiet: crashQuiet(sound) }
   : sound.kind === "water" ? { db: WATER_DB[sound.body], rMin: WATER_R_MIN }
   : sound.kind === "wind" ? { db: windDb(sound.strength), rMin: 1, wet: REVERB.bed, under: BEDS.wind - windDb(sound.strength) }
   : sound.kind === "crickets" ? { db: BEDS.crickets, rMin: 1, wet: REVERB.bed }
@@ -58,24 +66,31 @@ const heard = (sound: Sound, where: Where): { readonly hearing: Hearing; readonl
   const at = { x: r * (where.side * SCREEN_RIGHT.x + ahead * SCREEN_UP.x), y: r * (where.side * SCREEN_RIGHT.y + ahead * SCREEN_UP.y), z: EAR_HEIGHT }
   const own = sound.kind === "engine" && sound.inside
   const hearing = hear({
-    ears: EARS, source: at, db: source.db, rMin: source.rMin, height: EAR_HEIGHT, delta: 0, forest: 0, ambient: AMBIENT_DB, street: where.street,
-    cabin: own ? undefined : where.cabin
+    ears: EARS, source: at, db: source.db, rMin: source.rMin, height: EAR_HEIGHT, quiet: source.quiet, delta: 0, forest: 0, ambient: AMBIENT_DB,
+    street: where.street, cabin: own ? undefined : where.cabin
   })
   const placement = { ...hearing.placement, gain: hearing.placement.gain * dbToGain(source.under ?? 0), wet: source.wet ?? hearing.placement.wet }
   return { hearing: { ...hearing, placement }, source }
 }
 
 const SURFACES = Object.keys({ asphalt: 0, stone: 0, gravel: 0, dirt: 0, grass: 0, leaves: 0 } satisfies Record<Surface, 0>)
+// Every key of a `satisfies Record<Material, 0>` is a Material.
+const MATERIALS = Object.keys({ masonry: 0, stone: 0, sheet: 0, glass: 0, rail: 0, rock: 0, earth: 0, tree: 0 } satisfies Record<Material, 0>) as ReadonlyArray<Material>
+const ZONES = Object.keys({ front: 0, side: 0, rear: 0 } satisfies Record<Zone, 0>)
 /** Menus for the string params. */
 const OPTIONS: Readonly<Record<string, ReadonlyArray<string>>> = {
   model: VEHICLE_MODELS,
   surface: SURFACES,
-  body: Object.keys({ fountain: 0, stream: 0, river: 0 } satisfies Record<Extract<Continuous, { readonly kind: "water" }>["body"], 0>),
+  material: MATERIALS,
+  zone: ZONES,
+  struck: ZONES,
+  against: [...MATERIALS, ...VEHICLE_MODELS],
+  body: Object.keys({ fountain: 0, stream: 0, river: 0 } satisfies Record<WaterBody, 0>),
   species: Object.keys({ robin: 0, tit: 0, blackbird: 0, chaffinch: 0 } satisfies Record<Extract<OneShot, { readonly kind: "bird" }>["species"], 0>)
 }
 /** Slider [min, max, step] per numeric param, or per `kind.param` where kinds differ. */
 const RANGES: Readonly<Record<string, readonly [number, number, number] | undefined>> = {
-  speed: [-10, 45, 0.5], "tyres.speed": [0, 45, 0.5], "scrape.speed": [0, 20, 0.5], "crash.speed": [0, 25, 0.5], "thud.speed": [0, 20, 0.5],
+  speed: [-10, 45, 0.5], "tyres.speed": [0, 45, 0.5], "scrape.speed": [0, 20, 0.5], "crash.speed": [0, 60, 0.5], "thud.speed": [0, 20, 0.5],
   throttle: [-1, 1, 0.05], slip: [0, 10, 0.1], mass: [0.2, 5, 0.1], pitch: [350, 900, 1]
 }
 const UNIT_RANGE = [0, 1, 0.01] as const
@@ -84,7 +99,7 @@ const UNIT_RANGE = [0, 1, 0.01] as const
 const HELD = {
   engine: { kind: "engine", model: "panda", speed: 10, throttle: 0.5, inside: false },
   tyres: { kind: "tyres", speed: 12, slip: 0, surface: "asphalt", heavy: false },
-  scrape: { kind: "scrape", speed: 8 },
+  scrape: { kind: "scrape", speed: 8, material: "masonry" },
   horn: { kind: "horn", model: "panda" },
   siren: { kind: "siren" },
   beeper: { kind: "beeper" },
@@ -92,8 +107,33 @@ const HELD = {
   wind: { kind: "wind", strength: 0.6, forest: 0.3 },
   crickets: { kind: "crickets", density: 0.7 }
 } as const satisfies { readonly [K in Continuous["kind"]]: Extract<Continuous, { readonly kind: K }> }
+
+/** The crash's params flat, one control each: `against` is a wall's material or the model of the car hit, on its `struck` zone. */
+interface CrashForm {
+  readonly kind: "crash"
+  readonly speed: number
+  readonly mass: number
+  readonly model: VehicleModel
+  readonly zone: Zone
+  readonly against: Material | VehicleModel
+  readonly struck: Zone
+  readonly surface: Surface
+  readonly inside: boolean
+}
+/** A Panda's nose into a rendered house wall, on asphalt, heard from outside. */
+const CRASH: CrashForm = { kind: "crash", speed: 8, mass: 1, model: "panda", zone: "front", against: "masonry", struck: "front", surface: "asphalt", inside: false }
+const isModel = (name: string): name is VehicleModel => (VEHICLE_MODELS as ReadonlyArray<string>).includes(name)
+/** The crash `form` describes. */
+const crashOf = ({ model, zone, against, struck, ...rest }: CrashForm): Crash => ({
+  ...rest, body: { model, zone }, against: isModel(against) ? { kind: "car", body: { model: against, zone: struck } } : { kind: "wall", material: against }
+})
+
+/** A one-shot panel's controls: its sound's params, the crash's flattened. */
+type Form = Exclude<OneShot, Crash> | CrashForm
+const soundOf = (form: Form): OneShot => (form.kind === "crash" ? crashOf(form) : form)
+
 const PLAYED = {
-  crash: { kind: "crash", speed: 8, mass: 1 },
+  crash: CRASH,
   thud: { kind: "thud", speed: 8 },
   door: { kind: "door", model: "panda", open: false },
   ignition: { kind: "ignition", model: "panda" },
@@ -105,7 +145,7 @@ const PLAYED = {
   bell: { kind: "bell", pitch: 600 },
   bird: { kind: "bird", species: "robin" },
   bark: { kind: "bark", big: true }
-} as const satisfies { readonly [K in OneShot["kind"]]: Extract<OneShot, { readonly kind: K }> }
+} as const satisfies { readonly [K in OneShot["kind"]]: Extract<Form, { readonly kind: K }> }
 
 /** Some sounds of every kind of `S`: a new kind fails to compile until "render all" plays it. */
 type Each<S extends Sound> = { readonly [K in S["kind"]]: ReadonlyArray<Extract<S, { readonly kind: K }>> }
@@ -128,7 +168,8 @@ const VOICE_RENDERS = {
     { kind: "tyres", speed: 10, slip: 0, surface: "stone", heavy: false },
     { kind: "tyres", speed: 15, slip: 3, surface: "gravel", heavy: true }
   ],
-  scrape: [{ kind: "scrape", speed: 4 }, { kind: "scrape", speed: 12 }],
+  // Full grinding from 12 m/s: peaks near 0.5.
+  scrape: [{ kind: "scrape", speed: 4, material: "masonry" }, ...MATERIALS.map((material) => ({ kind: "scrape", speed: 12, material }) as const)],
   horn: VEHICLE_MODELS.map((model) => ({ kind: "horn", model }) as const),
   siren: [{ kind: "siren" }],
   beeper: [{ kind: "beeper" }],
@@ -137,7 +178,19 @@ const VOICE_RENDERS = {
   crickets: [{ kind: "crickets", density: 0.3 }, { kind: "crickets", density: 1 }]
 } satisfies Each<Continuous>
 const SHOT_RENDERS = {
-  crash: [{ kind: "crash", speed: 2, mass: 1 }, { kind: "crash", speed: 7, mass: 1 }, { kind: "crash", speed: 15, mass: 1 }, { kind: "crash", speed: 15, mass: 4 }],
+  // A Panda into a house wall (a bump to a heavy hit), car–car pairs at their reduced mass, each other target, a side hit, the cabin, a wreck.
+  crash: ([
+    { speed: 2 }, { speed: 5 }, { speed: 14 }, { speed: 20 },
+    { speed: 10, mass: 0.5, against: "panda" },
+    { speed: 12, mass: 0.8, against: "truck" },
+    { speed: 8, mass: 0.6, model: "ape", against: "stone" },
+    { speed: 12, mass: 1.3, model: "carabinieri", against: "rail" },
+    { speed: 10, against: "tree" },
+    { speed: 8, against: "earth" },
+    { speed: 12, zone: "side" },
+    { speed: 14, inside: true },
+    { speed: 40, mass: 1.3, model: "carabinieri" }
+  ] satisfies ReadonlyArray<Partial<CrashForm>>).map((row) => crashOf({ ...CRASH, ...row })),
   thud: [{ kind: "thud", speed: 5 }, { kind: "thud", speed: 12 }],
   door: [{ kind: "door", model: "panda", open: true }, { kind: "door", model: "panda", open: false }, { kind: "door", model: "truck", open: false }],
   ignition: VEHICLE_MODELS.map((model) => ({ kind: "ignition", model }) as const),
@@ -180,7 +233,9 @@ interface Row {
   readonly flags: string
 }
 
-const paramsOf = (sound: Sound): string => Object.entries(sound).filter(([name]) => name !== "kind").map(([name, value]) => `${name}=${String(value)}`).join(" ")
+/** A param's value; a nested one's values joined by "/" (body=panda/front). */
+const shown = (value: unknown): string => (typeof value === "object" && value !== null ? Object.values(value).map(shown).join("/") : String(value))
+const paramsOf = (sound: Sound): string => Object.entries(sound).filter(([name]) => name !== "kind").map(([name, value]) => `${name}=${shown(value)}`).join(" ")
 
 /** The row for `sound` measured over [from, to] s of `audio`, which must be silent from `quiet` s on. */
 const rowOf = (sound: Sound, audio: AudioBuffer, from: number, to: number, quiet: number): Row => {
@@ -254,7 +309,7 @@ const wake = (): Live => {
 }
 
 /** A control per param of `defaults` in `box`; returns a reader of the current params. */
-const controls = <S extends Sound>(box: HTMLElement, defaults: S): (() => S) => {
+const controls = <F extends { readonly kind: string }>(box: HTMLElement, defaults: F): (() => F) => {
   const readers: Array<readonly [string, () => unknown]> = []
   for (const [name, value] of Object.entries(defaults)) {
     if (name === "kind") continue
@@ -269,8 +324,8 @@ const controls = <S extends Sound>(box: HTMLElement, defaults: S): (() => S) => 
     } else {
       const [min, max, step] = RANGES[`${defaults.kind}.${name}`] ?? RANGES[name] ?? UNIT_RANGE
       const input = Object.assign(element("input", label), { type: "range", min: String(min), max: String(max), step: String(step), value: String(value) })
-      const shown = element("output", label, String(value))
-      input.addEventListener("input", () => (shown.textContent = input.value))
+      const output = element("output", label, String(value))
+      input.addEventListener("input", () => (output.textContent = input.value))
       readers.push([name, () => Number(input.value)])
     }
   }
@@ -288,10 +343,13 @@ const modelOf = (sound: Continuous): VehicleModel | undefined => ("model" in sou
 const voiceIn = ({ ctx, kit }: Live, emitter: Emitter, sound: Continuous): Voice<Continuous> =>
   (VOICES[sound.kind] as VoiceFactory<Continuous>)({ ctx, out: emitter.input, cents: emitter.cents, kit })
 
-const panel = <S extends Sound>(parent: HTMLElement, defaults: S, label: string, press: (read: () => S, button: HTMLButtonElement) => void): void => {
+/** A panel for the sound `soundOf` makes of the params on its controls (from `defaults`). */
+const panel = <F extends { readonly kind: string }, S extends Sound>(
+  parent: HTMLElement, defaults: F, soundOf: (form: F) => S, label: string, press: (read: () => S, button: HTMLButtonElement) => void
+): void => {
   const box = element("fieldset", parent)
   element("legend", box, defaults.kind)
-  const read = controls(box, defaults)
+  const form = controls(box, defaults), read = () => soundOf(form())
   const button = element("button", box, label)
   button.addEventListener("click", () => press(read, button))
   panels.push({ read, readout: element("output", box) })
@@ -314,7 +372,7 @@ const build = (): void => {
   const cabin = byId<HTMLSelectElement>("cabin")
   for (const model of VEHICLE_MODELS) cabin.add(new Option(model, model))
   for (const defaults of Object.values(HELD)) {
-    panel(byId("held"), defaults as Continuous, "Hold", (read, button) => {
+    panel(byId("held"), defaults as Continuous, (sound) => sound, "Hold", (read, button) => {
       const audio = wake(), now = audio.ctx.currentTime, held = holding.get(defaults.kind)
       if (held !== undefined) {
         held.voice.stop(now)
@@ -330,7 +388,7 @@ const build = (): void => {
     })
   }
   for (const defaults of Object.values(PLAYED)) {
-    panel(byId("played"), defaults as OneShot, "Play", (read) => {
+    panel(byId("played"), defaults as Form, soundOf, "Play", (read) => {
       const audio = wake()
       // The first press waits for the shots' renders.
       void audio.ready.then(() => {
