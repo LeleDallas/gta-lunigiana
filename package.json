@@ -9,7 +9,7 @@
     "fetch-osm": "node src/tools/fetch-osm.ts",
     "fetch-rt": "node src/tools/fetch-rt.ts",
     "fetch-rer": "node src/tools/fetch-rer.ts",
-    "dev": "vite",
+    "dev": "vite --host",
     "build": "vite build",
     "preview": "vite preview"
   },

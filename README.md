@@ -104,7 +104,7 @@ pnpm install
 pnpm dev
 ```
 
-Then open `http://localhost:5173`. Every load is a new world. Add `?seed=N` (for example `http://localhost:5173/?seed=42`) to replay the same world: the seed drives every random choice, so the same seed and the same keys give the same game.
+Then open `http://localhost:5173`. The server listens on the local network too, so a phone or another computer on the same network can play: open the `Network` address that Vite prints. Anyone on that network can reach it, so stop it on a shared network you don't trust. Every load is a new world. Add `?seed=N` (for example `http://localhost:5173/?seed=42`) to replay the same world: the seed drives every random choice, so the same seed and the same keys give the same game.
 
 Choose **Cesena** on the title card, or open `http://localhost:5173/?map=cesena&seed=42`. Cesena is a separate 4 × 4 km map around the historic centre, with the Savio, the railway station and surrounding neighbourhoods. It uses OpenStreetMap streets and building footprints and Regione Emilia-Romagna's 5 m terrain model. It does not replace or extend Lunigiana. Building heights without OSM height tags and road widths are defaults, not surveyed Cesena measurements.
 
@@ -122,11 +122,29 @@ The same keys walk and drive; the table shows what each does in both modes:
 | Q / E | turn the view a quarter left / right | same |
 | Space | | handbrake |
 | H | | horn while held; in the Carabinieri car, siren on or off |
-| M | full map (pauses the game); M or Esc closes it | same |
+| M | full map (pauses the game); M, Esc or a click closes it | same |
 | Esc | settings, which pause the game: the vehicle physics (Simulation, Balanced or Arcade; a new game starts on Balanced); Esc or Resume closes them. With the full map open, Esc closes the map instead | same |
 | P (dev builds only) | debug menu: the vehicle physics presets and the handling knobs, for every vehicle at once; P closes it, and so does Esc while it has the focus | same |
 
-The bindings live in `bindings` in `src/sim/schema.ts`. The HUD shows the street and district you’re in, cars stolen, people hit, the action the key would take, a speedometer while driving, and a minimap. M opens the full map: the whole area north-up with the villages, hamlets and main peaks named and your position marked.
+The bindings live in `bindings` in `src/sim/schema.ts`. The HUD shows the street and district you’re in, cars stolen, people hit, the action the key would take, a speedometer while driving, and a minimap. M, or a click on the minimap, opens the full map: the whole area north-up with the villages, hamlets and main peaks named and your position marked.
+
+### Touch controls on a phone or tablet
+
+Where a touch screen is the main pointer, the game runs in mobile mode: the controls are on the screen, so no keyboard or mouse is needed, and the game is always landscape. A phone held upright shows the game turned a quarter, to be held sideways. On Android, the first tap also takes the game full screen and locks it to landscape. On foot a stick walks; in a vehicle, buttons take its place. The controls press the same keys as the keyboard:
+
+| Control | On foot | Driving |
+|---|---|---|
+| Stick: a thumb on the left half | walk along the screen directions | |
+| ◀ / ▶ on the left | | steer left / right |
+| Gas / Brake on the right | | throttle / brake, then reverse |
+| Run | sprint | |
+| Steal, Enter, Carjack or Exit (shown only when it would act) | enter the nearest vehicle | get out |
+| ↺ / ↻ | turn the view a quarter left / right | same |
+| Hand brake | | handbrake |
+| Horn | | horn while held; in the Carabinieri car, siren on or off |
+| A tap on the minimap | full map (pauses the game); a tap closes it | same |
+
+The settings have no touch control yet: Esc on a keyboard opens them.
 
 ## How the game sounds
 
@@ -134,7 +152,7 @@ The browser synthesises every sound with Web Audio, with no sample files: engine
 
 Each sound reaches you through outdoor acoustics. It fades with distance and under the background noise, so you hear only what’s near. Houses and hills muffle it, the air dulls it, its pitch shifts as it passes, far crashes arrive late, and loud ones echo off the slopes.
 
-The first key or click once the game has loaded, the one that dismisses the title card, starts the sound. See [docs/audio.md](docs/audio.md) for the details.
+The first key, click or tap once the game has loaded, the one that dismisses the title card, starts the sound. See [docs/audio.md](docs/audio.md) for the details.
 
 ## Package scripts
 
@@ -142,7 +160,7 @@ Every script runs with `pnpm`:
 
 | Script | What it does |
 |---|---|
-| `pnpm dev` | Vite dev server on port 5173 |
+| `pnpm dev` | Vite dev server on port 5173, open to the local network (`--host`) |
 | `pnpm build` | production build into `dist/` (the Pages workflow adds `--base=./`) |
 | `pnpm preview` | serves `dist/` on port 4173 |
 | `pnpm check` | `typecheck`, then `lint`, then `test` |
@@ -167,12 +185,12 @@ The simulation, the browser hosts and the map tools live in separate folders:
 | `src/sim/map/` | the generated maps (`monzone.bin`, `cesena.bin`), their shared decoder, types and lookups (heights, walls, road graph, ground elevation, surfaces, land cover) |
 | `src/render/` | Three.js host code: pixel pipeline, static world meshes, actor meshes, tyre marks and smoke, the render schedule |
 | `src/audio/` | Web Audio host code: the audio schedule, the acoustics director, the speaker and mixer, the synths, the audition page |
-| `src/hud/` | DOM HUD: the title card as loading screen, location names, score, prompt, speedometer, minimap, full map (M), settings (Esc) with the vehicle physics, and the dev-only debug menu (P) for the vehicle handling, both setting it through one store |
+| `src/hud/` | DOM HUD: the title card as loading screen, location names, score, prompt, speedometer, minimap, full map (M), touch controls (mobile mode), settings (Esc) with the vehicle physics, and the dev-only debug menu (P) for the vehicle handling, both setting it through one store |
 | `src/tools/` | the region-aware map pipeline (`build-map.ts`, `region.ts`), the downloaders (`fetch-osm.ts`, `fetch-rt.ts`, `fetch-rer.ts`) and a top-down preview renderer |
 | `src/maps.ts` | browser map catalogue and validation of the `?map=` choice |
 | `src/boot.ts` | browser entry: downloads the map with progress, then imports the game |
 | `src/main.ts` | browser host: builds the scene, makes the runtime, runs the fixed loop |
-| `index.html` | canvas, HUD markup and title card (the loading screen) |
+| `index.html` | canvas, HUD and touch-control markup, title card (the loading screen), and the switch to mobile mode |
 | `lab.html` | the audio audition page (dev server only) |
 | `data/raw/` | pinned map inputs: regional OSM extracts, Regione Toscana CTR and LiDAR, Emilia-Romagna DTM |
 | `docs/` | architecture, map pipeline, gameplay and audio notes; `docs/standards/` holds the checks for each part of the game |

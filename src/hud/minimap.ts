@@ -108,15 +108,14 @@ const drawBase = (document: Document): HTMLCanvasElement => {
   return canvas
 }
 
-/** The minimap canvas (`size` px square, drawn at half resolution for chunky pixels) and its per-frame draw. */
-export const makeMinimap = (document: Document, size = 180) => {
+/** The minimap canvas (90 px square, which hud.css shows larger for chunky pixels) and its per-frame draw. */
+export const makeMinimap = (document: Document) => {
   const canvas = document.createElement("canvas")
   canvas.className = "minimap"
-  canvas.width = canvas.height = size / 2
-  canvas.style.width = canvas.style.height = `${size}px`
+  canvas.width = canvas.height = SPAN * BASE
   const base = drawBase(document)
   const ctx = canvas.getContext("2d")
-  const s = canvas.width, zoom = s / SPAN / BASE
+  const s = canvas.width
   return {
     canvas,
     /** Draws the map around (x, y), turned with the view's `yaw`, with the player arrow pointing along `angle` (radians CCW from east). */
@@ -129,7 +128,6 @@ export const makeMinimap = (document: Document, size = 180) => {
       ctx.setTransform(1, 0, 0, 1, s / 2, s / 2)
       const rotation = minimapRotation(yaw)
       ctx.rotate(rotation)
-      ctx.scale(zoom, zoom)
       ctx.drawImage(base, -(x - MAP.bounds.minX) * BASE, -(MAP.bounds.maxY - y) * BASE)
       ctx.setTransform(1, 0, 0, 1, s / 2, s / 2)
       ctx.rotate(rotation - angle)

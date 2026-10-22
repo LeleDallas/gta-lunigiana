@@ -1,7 +1,8 @@
 /**
  * The title card (markup in index.html) as the loading screen: a line that the game is in early
  * development, a bar and the name of the step running while the map downloads and the game
- * builds, an error with a retry if that fails, and "Press any key" once the first frame is drawn.
+ * builds, an error with a retry if that fails, and "Press any key" ("Tap to play" in mobile mode)
+ * once the first frame is drawn.
  * It imports nothing, so `boot.ts` can show it before the game modules (and the map they read)
  * load. Also holds the DOM lookup the HUD shares.
  *
@@ -66,7 +67,11 @@ export const loadFailed = (document: Document, error: unknown): void => {
   retry.focus()
 }
 
-/** Swaps the bar for "Press any key" and hides the card on the first key press or click after that. */
+/**
+ * Swaps the bar for "Press any key" ("Tap to play" in mobile mode) and hides the card on the first
+ * key press, or click or tap on it, after that. On the click, not the press: hidden on the press,
+ * the card would let the tap's click land on whatever lies under it (the minimap opens the map).
+ */
 export const titleReady = (window: Window): void => {
   const document = window.document, title = element(document, "title")
   element(document, "title-load").hidden = true
@@ -74,8 +79,8 @@ export const titleReady = (window: Window): void => {
   const dismiss = () => {
     title.hidden = true
     window.removeEventListener("keydown", dismiss)
-    window.removeEventListener("pointerdown", dismiss)
+    title.removeEventListener("click", dismiss)
   }
   window.addEventListener("keydown", dismiss)
-  window.addEventListener("pointerdown", dismiss)
+  title.addEventListener("click", dismiss)
 }
