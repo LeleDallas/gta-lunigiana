@@ -7,7 +7,8 @@ Checks for a change in `src/render`, the camera, the view or the keys, on top of
   for a change: real low-poly 3D rendered at low resolution and upscaled nearest-neighbour, with
   no sprites; an orthographic camera at 30°, for exact 2:1 pixel lines; the home view north-west of
   the player; quarter turns on Q/E, eased over about 1/3 s; the sun turning with the view; F or
-  Enter as the action key.
+  Enter as the action key; on a touch screen, every control on the screen and the game landscape
+  only, turned a quarter when the phone is held upright.
 - **Axes**: Three.js world axes are (east, up, −north), so the map point (x, y) at height h is
   (x, h, −y).
 - **Streaming**: a chunk build keeps giving the same result as cutting the same area from a

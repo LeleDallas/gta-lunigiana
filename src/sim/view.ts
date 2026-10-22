@@ -28,5 +28,5 @@ export const LOOK_AHEAD = { seconds: 0.6, max: 14 } as const
  * up. Populate spawns, and quietly removes bodies, only beyond it. The diagonal does not depend on
  * which way the view is turned.
  */
-// ponytail: sized for 16:9; ultrawide screens see ~15 m further. Cap PixelView's aspect if that pop-in shows.
+// ponytail: sized for 16:9; ultrawide screens, and phones held sideways (up to 17 m, under mobile mode's corner controls), see further. Cap PixelView's aspect if that pop-in shows.
 export const VIEW_REACH = 90

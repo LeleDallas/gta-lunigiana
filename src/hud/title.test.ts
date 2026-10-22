@@ -9,9 +9,9 @@ const readme = readFileSync(new URL("../../README.md", import.meta.url), "utf8")
 /** Whether index.html's markup hides the element with `id` before any script runs. */
 const hiddenAtLoad = (id: string) => new RegExp(`id="${id}"[^>]*\\shidden[\\s>]`).test(html)
 
-/** The title card's elements as plain objects, as index.html starts them, in a window whose events tests dispatch. */
+/** The title card's elements as plain event targets, as index.html starts them, in a window whose events tests dispatch. */
 const page = () => {
-  const nodes = new Map(["title", "title-load", "title-go"].map((id) => [id, { hidden: hiddenAtLoad(id) }]))
+  const nodes = new Map(["title", "title-load", "title-go"].map((id) => [id, Object.assign(new EventTarget(), { hidden: hiddenAtLoad(id) })]))
   const window = Object.assign(new EventTarget(), { document: { getElementById: (id: string) => nodes.get(id) ?? null } })
   return { window: window as unknown as Window, node: (id: string) => nodes.get(id)! }
 }
@@ -23,6 +23,16 @@ test("the card shows the bar until the game is ready, then asks for a key and hi
   titleReady(window)
   assert.deepEqual([node("title-load").hidden, node("title-go").hidden], [true, false], "ready: Press any key")
   window.dispatchEvent(new Event("keydown"))
+  assert.equal(node("title").hidden, true)
+})
+
+// Regression: hidden on the press, the card let the tap's click land on the minimap under it, which opened the map.
+test("a tap hides the card on its click, not its press, so the click lands on the card", () => {
+  const { window, node } = page()
+  titleReady(window)
+  window.dispatchEvent(new Event("pointerdown"))
+  assert.equal(node("title").hidden, false, "pressed: still showing")
+  node("title").dispatchEvent(new Event("click"))
   assert.equal(node("title").hidden, true)
 })
 

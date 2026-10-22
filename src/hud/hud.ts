@@ -10,12 +10,18 @@ import { makeMinimap } from "./minimap.ts"
 import { element } from "./title.ts"
 import { makeWorldMap } from "./worldmap.ts"
 
+/** What the action key would do now, and to which vehicle (none when getting out); undefined when nothing. */
+export const actionFor = (view: PlayerViewModel): { readonly verb: string; readonly vehicle?: string } | undefined => {
+  if (view.mode === "driving") return { verb: "exit" }
+  if (view.mode === "down" || view.nearby === undefined) return undefined
+  const { occupied, stolen, label } = view.nearby
+  return { verb: occupied ? "carjack" : stolen ? "enter" : "steal", vehicle: label }
+}
+
 /** The action prompt for the current view, or "" when there is nothing to do. */
 export const promptText = (view: PlayerViewModel): string => {
-  if (view.mode === "driving") return "F — exit"
-  if (view.mode === "down" || view.nearby === undefined) return ""
-  const { occupied, stolen, label } = view.nearby
-  return occupied ? `F — carjack ${label}` : stolen ? `F — enter ${label}` : `F — steal ${label}`
+  const action = actionFor(view)
+  return action === undefined ? "" : action.vehicle === undefined ? `F — ${action.verb}` : `F — ${action.verb} ${action.vehicle}`
 }
 
 /** Speedometer reading in km/h (always positive, rounded). */
@@ -28,9 +34,14 @@ export const makeHud = (document: Document) => {
   const speedo = element(document, "hud-speedo"), speed = element(document, "hud-speed"), vehicle = element(document, "hud-vehicle")
   const prompt = element(document, "hud-prompt")
   const minimap = makeMinimap(document)
-  element(document, "hud-minimap").append(minimap.canvas)
   const worldMap = makeWorldMap(document)
   let last = { x: Number.NaN, y: Number.NaN, angle: 0 }
+  const toggleMap = (): void => (worldMap.open ? worldMap.hide() : worldMap.show(last.x, last.y, last.angle))
+  const corner = element(document, "hud-minimap")
+  corner.append(minimap.canvas)
+  // A touch screen has no M key: a tap on the minimap opens the map, and one on the map closes it.
+  corner.addEventListener("click", toggleMap)
+  element(document, "hud-map").addEventListener("click", () => worldMap.hide())
   const set = (node: HTMLElement, text: string) => {
     if (node.textContent !== text) node.textContent = text
   }
@@ -42,7 +53,7 @@ export const makeHud = (document: Document) => {
     /** Whether the full map is open (the host pauses the game while it is). */
     mapOpen: (): boolean => worldMap.open,
     /** Opens the full map at the last drawn player position, or closes it. */
-    toggleMap: (): void => (worldMap.open ? worldMap.hide() : worldMap.show(last.x, last.y, last.angle)),
+    toggleMap,
     closeMap: (): void => worldMap.hide(),
     /** Repaints the open map (after the pixel ratio changes without a resize). */
     repaintMap: (): void => {
@@ -88,11 +99,11 @@ export const toggleMapOnKey = (window: Pick<Window, "addEventListener">, hud: { 
 
 /**
  * The fixed-loop update with the full map able to pause the game: `tick` while it is closed;
- * while it is open, `skip`, after draining the keyboard's press edges so keys tapped on the map do
- * not act when play resumes (held keys stay held).
+ * while it is open, `skip`, after draining the controls' press edges (keys and touch) so presses
+ * made on the map do not act when play resumes (held keys stay held).
  */
-export const pausable = <R>(paused: () => boolean, keyboard: { readonly snapshot: () => unknown }, tick: () => R, skip: R) => (): R => {
+export const pausable = <R>(paused: () => boolean, controls: { readonly snapshot: () => unknown }, tick: () => R, skip: R) => (): R => {
   if (!paused()) return tick()
-  keyboard.snapshot()
+  controls.snapshot()
   return skip
 }
