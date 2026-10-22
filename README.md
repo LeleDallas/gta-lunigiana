@@ -1,7 +1,7 @@
 # Grand Theft Auto: Lunigiana
 
 > [!WARNING]
-> **Grand Theft Auto: Lunigiana is in early development.** Expect bugs, crashes and rough edges, and expect things to change or break from one version to the next. Today you can play one valley, about 6% of the planned map.
+> **Grand Theft Auto: Lunigiana is in early development.** Today you can play one valley, about 6% of the planned map.
 
 ![Title card](docs/screenshots/title.png)
 
