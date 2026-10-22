@@ -1,7 +1,8 @@
 /**
- * The full map (M, or Esc to close): the whole play area north-up over the screen, painted afresh
- * at screen resolution, with the villages and hamlets named and the player as an arrow. While it is
- * open the host stops ticking the simulation and drawing the world (`main.ts`).
+ * The full map (M or a tap on the minimap; Esc or a tap closes it): the whole play area north-up
+ * over the screen, painted afresh at screen resolution, with the villages and hamlets named and the
+ * player as an arrow. While it is open the host stops ticking the simulation and drawing the world
+ * (`main.ts`).
  *
  * @module hud/worldmap
  */
@@ -78,7 +79,8 @@ export const makeWorldMap = (document: Document) => {
 
   const paint = () => {
     if (ctx === null || mark === null) return
-    const width = window.innerWidth, height = window.innerHeight, dpr = window.devicePixelRatio
+    // The dialog's own box, not the window's: a phone held upright lays the page out sideways (hud.css).
+    const width = root.clientWidth, height = root.clientHeight, dpr = window.devicePixelRatio
     for (const [c, g] of [[canvas, ctx], [marker, mark]] as const) {
       c.width = Math.round(width * dpr)
       c.height = Math.round(height * dpr)

@@ -1,7 +1,9 @@
 # Gameplay
 
 All rules are simulation systems in `src/sim/systems`. The step order is in
-[architecture.md](architecture.md). Units are metres, seconds and radians. One step is 1/60 s.
+[architecture.md](architecture.md). Units are metres, seconds and radians. One step is 1/60 s. The
+keys named here are the keyboard's; in mobile mode the touch controls press the same keys
+([architecture.md](architecture.md#input)).
 
 ## Start
 

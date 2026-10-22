@@ -6,6 +6,11 @@
     <title>Grand Theft Auto: Lunigiana</title>
     <link rel="icon" href="data:," />
     <link rel="stylesheet" href="/src/hud/hud.css" />
+    <script>
+      // Mobile mode, where a touch screen is the main pointer: controls on the screen and the game
+      // always landscape (hud.css, src/hud/touch.ts). Set before the first paint, so the card shows right.
+      if (matchMedia("(pointer: coarse)").matches) document.documentElement.classList.add("touch")
+    </script>
   </head>
   <body>
     <canvas id="game"></canvas>
@@ -18,15 +23,28 @@
         <div><dt>Auto rubate <small>cars stolen</small></dt><dd id="hud-stolen">0</dd></div>
         <div><dt>Persone investite <small>people hit</small></dt><dd id="hud-knocked">0</dd></div>
       </dl>
-      <div id="hud-prompt" hidden></div>
+      <div id="hud-prompt" class="for-keys" hidden></div>
       <div id="hud-speedo" hidden><span id="hud-speed">0</span><span class="unit">km/h</span><div id="hud-vehicle"></div></div>
       <div id="hud-minimap"></div>
       <div id="hud-map" role="dialog" aria-modal="true" aria-labelledby="hud-map-title" aria-describedby="hud-map-desc" tabindex="-1" hidden>
         <div class="map-head">
           <div><span class="map-title" id="hud-map-title">Mappa</span> <small>map</small></div>
           <div class="map-here" id="hud-map-desc">Qui <small>you are here</small> <span id="hud-map-here"></span></div>
-          <div class="map-keys">M · Esc — chiudi <small>close</small></div>
+          <div class="map-keys"><span class="for-keys">M · Esc — chiudi <small>close</small></span><span class="for-touch">Tocca — chiudi <small>tap to close</small></span></div>
         </div>
+      </div>
+      <div id="hud-touch" class="for-touch" aria-hidden="true">
+        <div class="on-foot" id="hud-stick"><div class="knob"></div></div>
+        <div class="pad driving steer" id="hud-touch-left">&#x25C0;&#xFE0E;</div>
+        <div class="pad driving steer" id="hud-touch-right">&#x25B6;&#xFE0E;</div>
+        <div class="pad driving pedal" id="hud-touch-up">Gas</div>
+        <div class="pad driving pedal" id="hud-touch-down">Brake</div>
+        <div class="pad" id="hud-touch-action"></div>
+        <div class="pad on-foot" id="hud-touch-sprint">Run</div>
+        <div class="pad driving" id="hud-touch-handbrake">Hand<br />brake</div>
+        <div class="pad driving" id="hud-touch-horn">Horn</div>
+        <div class="pad turn" id="hud-touch-turnLeft">↺</div>
+        <div class="pad turn" id="hud-touch-turnRight">↻</div>
       </div>
       <div class="credits">Map data © OpenStreetMap contributors (ODbL) · Fonte dei dati: Regione Toscana – CTR 1:2000, Rilievi LIDAR, Uso e copertura del suolo (CC BY 4.0), DTM 10x10 (CC BY 3.0 IT)</div>
     </div>
@@ -46,7 +64,11 @@
         <h1><small>Grand Theft Auto</small> Lunigiana</h1>
         <p class="sub">Monzone · Equi Terme · Vinca · Gragnola — Valle del Lucido (MS)</p>
         <p class="warn">Il gioco è in fase di sviluppo iniziale <small>early development</small></p>
-        <dl class="keys">
+        <dl class="keys for-touch">
+          <div><dt>Left thumb</dt><dd>walk · steer</dd></div>
+          <div><dt>Minimap</dt><dd>map (pauses)</dd></div>
+        </dl>
+        <dl class="keys for-keys">
           <div><dt>WASD / ↑←↓→</dt><dd>walk · drive</dd></div>
           <div><dt>Shift</dt><dd>sprint</dd></div>
           <div><dt>F / Enter</dt><dd>enter · exit · steal</dd></div>
@@ -62,7 +84,7 @@
           <p id="title-error" role="alert" hidden></p>
           <button id="title-retry" type="button" hidden>Retry</button>
         </div>
-        <p class="go" id="title-go" hidden>Press any key</p>
+        <p class="go" id="title-go" hidden><span class="for-keys">Press any key</span><span class="for-touch">Tap to play</span></p>
         <p class="fine">Map data © OpenStreetMap contributors (ODbL)<br />Fonte dei dati: Regione Toscana – CTR 1:2000, Rilievi LIDAR,<br />Uso e copertura del suolo (CC BY 4.0), DTM 10x10 (CC BY 3.0 IT)</p>
       </div>
     </div>

@@ -6,7 +6,8 @@
  * animation frame the render and audio schedules, the camera, world streaming, the frame and the
  * HUD. While the full map (M) or the settings (Esc) are open, both are skipped and the sound is
  * suspended: the game is paused. The build runs in steps the title card names; the card says
- * "Press any key" once the first frame is drawn.
+ * "Press any key" once the first frame is drawn. In mobile mode (index.html) the touch controls
+ * add to the keys.
  *
  * @module main
  */
@@ -25,6 +26,7 @@ import { makeHandlingStore } from "./hud/handling.ts"
 import { makeHud, pausable, routeOverlayKeys } from "./hud/hud.ts"
 import { makeSettings } from "./hud/settings.ts"
 import { element, step, titleReady } from "./hud/title.ts"
+import { holdLandscape, makeTouchControls, withTouch } from "./hud/touch.ts"
 import { groundY, terrainY } from "./render/ground.ts"
 import { blend, Effects, makeEffects, makeRegistries, People, render, RenderClock, Vehicles } from "./render/index.ts"
 import { PALETTE } from "./render/palette.ts"
@@ -69,7 +71,8 @@ const view = new PixelView(renderer)
 const reach = () => Math.hypot(view.view.x, view.view.y) / 2 / WIDEST_ZOOM
 /** Milliseconds per frame spent building chunks (at least one chunk is built when any is missing). */
 const STREAM_BUDGET_MS = 4
-const resize = () => view.resize(innerWidth, innerHeight, devicePixelRatio)
+// The page's box, not the window: a phone held upright lays the page out sideways (hud.css).
+const resize = () => view.resize(document.body.clientWidth, document.body.clientHeight, devicePixelRatio)
 resize()
 /** A resize clears the canvas, and behind the settings nothing is drawn: draw the frozen scene again (set once the settings exist). */
 let redrawPaused = (): void => {}
@@ -89,17 +92,19 @@ const onDpr = () => {
 dpr.addEventListener("change", onDpr, { once: true })
 
 const keyboard = Keyboard.actions(window, bindings)
+const pad = document.documentElement.classList.contains("touch") ? makeTouchControls(document, canvas) : undefined
+const controls = pad === undefined ? keyboard : withTouch(keyboard, pad.touch, pad.shown)
 const renderClock = { alpha: 0 }
 const { people, vehicles } = makeRegistries(scene)
 const effects = makeEffects(scene)
-// The speaker starts its AudioContext on the first key or click from here on: pressed while loading, or the one that dismisses the title card.
+// The speaker starts its AudioContext on the first key, click or tap from here on: pressed while loading, or the one that dismisses the title card.
 const speaker = makeSpeaker(window, { ...VEHICLE_VOICES, ...WORLD_VOICES } satisfies Voices, { ...VEHICLE_SHOTS, ...WORLD_SHOTS } satisfies Shots)
 const director = makeDirector(speaker)
 const made = makeRuntime({
   // `?seed=123` replays a world; otherwise every load is a new one.
   seed: Number(new URLSearchParams(location.search).get("seed") ?? Math.floor(Math.random() * 2 ** 32)) >>> 0,
   services: Game.Runtime.services(
-    Game.Runtime.service(KeyboardInput, keyboard),
+    Game.Runtime.service(KeyboardInput, controls),
     Game.Runtime.service(People, people),
     Game.Runtime.service(Vehicles, vehicles),
     Game.Runtime.service(RenderClock, renderClock),
@@ -164,6 +169,7 @@ const draw = (frame: FixedLoop.Frame): void => {
   world.update(view.focus, view.yaw, reach(), STREAM_BUDGET_MS)
   view.render(scene)
   hud.update(player, x, y, angle, view.yaw)
+  pad?.draw(player)
 }
 
 // The first frame here, shader compiles included: one that throws lands on the card (boot.ts),
@@ -171,13 +177,13 @@ const draw = (frame: FixedLoop.Frame): void => {
 // starts the render schedule reading Skid events before the first update.
 draw({ elapsedSeconds: 0, fixedSteps: 0, alpha: 0, droppedSeconds: 0 })
 // Keys pressed while loading arrive during the steps: drop their presses (held keys stay held).
-keyboard.snapshot()
+controls.snapshot()
 const loop = FixedLoop.start({
   source: BrowserTickSource.make(window),
   step: STEP,
   maxFrameSeconds: 0.25,
   maxStepsPerFrame: 5,
-  update: pausable(paused, keyboard, () => runtime.tick(update), Result.success(undefined)),
+  update: pausable(paused, controls, () => runtime.tick(update), Result.success(undefined)),
   // Paused, nothing is drawn: the map covers the screen, the settings dim the last frame drawn, and actors stay put (no interpolation
   // jitter).
   render: (frame) => {
@@ -195,6 +201,7 @@ routeOverlayKeys(window, {
   closeMap: hud.closeMap,
   toggleSettings: settings.toggle
 })
+if (pad !== undefined) holdLandscape(window)
 titleReady(window)
 
 // Dev only: the Ritmo monitor (backslash toggles it), the handling debug menu (P) and a handle for

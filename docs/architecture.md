@@ -8,8 +8,8 @@ one request, the handling the player picks in the settings or the dev debug menu
 `SetHandling` events that a system applies.
 
 ```
-keyboard ──► KeyboardInput service ──► CaptureInput ──► Input resource ──► systems
-                                                                             │
+keys, touch ──► KeyboardInput service ──► CaptureInput ──► Input resource ──► systems
+                                                                                │
              HUD ◄── PlayerView (inspector) ◄────────── world (components, resources, events)
              three.js nodes ◄── render schedule (RenderSync) ◄──┤
              speakers ◄── director ◄── audio schedule (Hear) ◄──┘
@@ -141,7 +141,12 @@ see [audio.md](audio.md#where-state-lives)).
 ## Input
 
 1. `src/main.ts` makes `Keyboard.actions(window, bindings)` and passes it as the `KeyboardInput`
-   service.
+   service. In mobile mode ([HUD](#hud)) it passes `withTouch` (`src/hud/touch.ts`) instead: the
+   keyboard's snapshot with the touch controls' added. The stick holds the direction keys it leans
+   more than 22.5° toward, so it has the keys' eight directions, and each button holds its key;
+   every key has a button. A key is held while any of them holds it, so the sim cannot tell a tap
+   from a key. Only the controls shown in the player's mode count: one the mode hides under a
+   thumb that stays down (the stick on getting in, ◀ on getting out) lets go of its keys.
 2. `CaptureInput` (Ritmo's `InputCapture.system`) copies its snapshot into the `Input` resource
    at the start of each step.
 3. Systems read `Input`: `held` for movement, steering and handbrake, `pressed` (once per press)
@@ -172,8 +177,8 @@ the map, builds in named steps, and asks for a key only once the first frame is 
 5. `main.ts` draws the first frame itself, shader compiles included: a throw there reaches the
    card, where inside the loop's animation frame it would stop the loop behind "Press any key".
    It then drops the presses of keys hit while loading (held keys stay held, as `pausable` does),
-   starts the loop, arms M and calls `titleReady`. The card swaps the bar for "Press any key" and
-   hides on the next key or click.
+   starts the loop, arms M and calls `titleReady`. The card swaps the bar for "Press any key"
+   ("Tap to play" in mobile mode) and hides on the next key, click or tap.
 6. If any step throws (the download, a missing WebGL), the card keeps the step's name, shows the
    error (`role="alert"`) and a Retry button that reloads; a failed module import stays failed
    until a reload. Retry stops Enter and Space from reaching the game's keyboard, which cancels
@@ -205,7 +210,7 @@ since its own last run, so a reader that has never run would miss the first step
 2. ticks the `render` and `audio` schedules (`runtime.tick(render, audio)`);
 3. reads `PlayerView` and moves and turns the camera;
 4. streams the static world around the camera focus (see below);
-5. renders the pixel view, then updates the HUD.
+5. renders the pixel view, then updates the HUD and, in mobile mode, the touch controls.
 
 The seed comes from `?seed=N`, or a random 32-bit number.
 
@@ -337,8 +342,8 @@ turns (the stereo image turns with the screen), and hands them as plain `Heard` 
 `Audio` service.
 `main.ts` provides the director (`src/audio/director`, plain TypeScript), which runs the outdoor
 acoustics and drives the Web Audio speaker (`src/audio/speaker.ts`) and its synths
-(`src/audio/synth`). The speaker starts its AudioContext on the first key or click once it exists
-(made during the last loading steps, so normally the one that dismisses the title card), and
+(`src/audio/synth`). The speaker starts its AudioContext on the first key, click or tap once it
+exists (made during the last loading steps, so normally the one that dismisses the title card), and
 suspends it while the full map or the settings are open or the tab is hidden. In dev builds
 `gta.audio` exposes the speaker, its output level and the context. Everything else is in
 [audio.md](audio.md).
@@ -353,28 +358,32 @@ the `PlayerView` inspector (`src/sim/views.ts`) and the map; the handling store 
   `driving`, `down`), the driven vehicle's label and speed, the vehicle in reach (label,
   occupied, stolen), the score, and the view's quarter turns.
 - `vehicleInReach` (`src/sim/body.ts`) answers both the HUD prompt and the `EnterExit` action, so
-  the prompt never offers something the key will not do.
+  the prompt never offers something the key will not do. The touch controls' action button shows
+  the prompt's verb (`actionFor` in `src/hud/hud.ts`).
 - Location: the name of the nearest road within 15 m, if it has one (tracks and paths skipped,
   so an unnamed road never borrows a side street's name), and the district disc from `districtAt`. Looked up again only after moving 2 m.
 - The minimap is drawn once to an offscreen canvas and then blitted around the player, 300 m
   across, turned with the view so that screen-up is up. At 0.3 px/m, the minimap's own scale (90
   canvas px over 300 m, so the blit is 1:1), the whole map is 2340 × 3000 px (7 MP, 28 MB): under
   every browser's canvas limit (the strictest, Safari's, is 16.7 MP). Drawing it takes ≈ 15 ms at
-  load; the per-frame blit ≈ 1 ms.
-- The full map (`src/hud/worldmap.ts`, `#hud-map` in `index.html`): the key labelled M toggles
-  it (matched by the character it types, so AZERTY works; non-Latin layouts fall back to the key's
-  position) and Esc closes it; repeats and Ctrl/Cmd/Alt chords are ignored. It paints the whole
-  area north-up at screen resolution with the same layers as the minimap (`paintMap`), but roads
-  light and at least 1.5–2 px wide so the network reads. It names the OSM villages (big, placed
-  first) and hamlets (`place=*` POIs, localities left out), then the peaks that are HUD landmark
-  districts (Monte Sagro, Pizzo d'Uccello...), once per name; a label that would overlap another
-  or the north arrow is dropped with its dot. The player is a red arrow in a red ring (no label is
-  red), drawn on its own canvas over the map so CSS blinks it (steady under
-  `prefers-reduced-motion`), with a 1 km bar and the player's district in the header. It is repainted on open, on
-  resize, and when the pixel ratio changes. The dialog takes focus when it opens, so screen
-  readers announce its title and the district.
+  load; the per-frame blit ≈ 1 ms. hud.css shows its 90 px at 180 CSS px (120 in mobile mode),
+  and a click or tap on it opens the full map.
+- The full map (`src/hud/worldmap.ts`, `#hud-map` in `index.html`): the key labelled M toggles it
+  (matched by the character it types, so AZERTY works; non-Latin layouts fall back to the key's
+  position) and Esc closes it; repeats and Ctrl/Cmd/Alt chords are ignored. A click or tap on the
+  minimap opens it, one on the map closes it. It paints the whole area north-up at the resolution of
+  its own box (the page's, which a phone held upright lays out sideways) with the same layers as the
+  minimap (`paintMap`), but roads light and at least 1.5–2 px wide so the network reads. It names
+  the OSM villages (big, placed first) and hamlets (`place=*` POIs, localities left out), then the
+  peaks that are HUD landmark districts (Monte Sagro, Pizzo d'Uccello...), once per name; a label
+  that would overlap another or the north arrow is dropped with its dot. The player is a red arrow
+  in a red ring (no label is red), drawn on its own canvas over the map so CSS blinks it (steady
+  under `prefers-reduced-motion`), with a 1 km bar and the player's district in the header. It is
+  repainted on open, on resize, and when the pixel ratio changes. The dialog takes focus when it
+  opens, so screen readers announce its title and the district.
 - The settings (`src/hud/settings.ts`), in every build: Esc opens and closes them, except that
-  Esc closes the full map first while it is open, and does nothing on the title card. They pause
+  Esc closes the full map first while it is open, and does nothing on the title card; mobile mode
+  has no touch control for them yet. They pause
   the game as the map does, the last frame drawn dimmed behind them (drawn again when the window
   is resized). Their Gameplay section holds "Vehicle physics": a radio button for each preset
   (`HANDLING_PRESETS`, with its description), the current one checked, and none with a Custom note
@@ -387,18 +396,45 @@ the `PlayerView` inspector (`src/sim/views.ts`) and the map; the handling store 
 - While the full map or the settings are open the host pauses the game: the FixedLoop keeps
   running, but `pausable` (`src/hud/hud.ts`) skips the sim update and `main.ts` skips the frame
   (no world render, so actors do not jitter between `PrevPose` and `Pose`, and no audio tick) and
-  suspends the AudioContext (`speaker.pause`). Each skipped update drains the keyboard's press
-  edges, so a key tapped on the map (F, Enter) does nothing on resume, while a key held through
-  the pause is still held.
+  suspends the AudioContext (`speaker.pause`). Each skipped update drains the controls' press
+  edges, keys and touch, so a key tapped on the map (F, Enter) does nothing on resume, while a key
+  held through the pause is still held.
 - The debug menu (`src/hud/debug.ts`) sets the handling ([gameplay.md](gameplay.md#handling)) in
   dev builds only: `main.ts` loads it inside its `import.meta.env.DEV` block, beside the Ritmo
-  monitor, so production builds leave it out. P or the Debug button beside the Ritmo monitor
-  opens and closes it. It has a button for each preset, Custom shown when the knobs match none,
+  monitor, so production builds leave it out. P or the Debug button beside the Ritmo monitor's
+  (bottom left; top centre in mobile mode, off the touch controls) opens and closes it. It has a button for each preset, Custom shown when the knobs match none,
   and a control for every knob. It reads the handling from the store, not from the game: the game
   applies a `SetHandling` event only on its next step, and not while the full map or the settings
   pause it, so reading the game could show and store a stale value. Keys pressed inside it do not
   reach the game. What it sets goes through the store, so the settings show it and a reload keeps
   it.
+- Mobile mode: an inline script in `index.html`'s head marks the page `touch` when a touch screen
+  is the main pointer (`(pointer: coarse)`), before the first paint, so the title card shows right.
+  hud.css then shows the touch controls and a smaller HUD (the minimap top left, the speedometer
+  and credits between the left controls and the right ones) and hides the key prompt: the action
+  button shows its verb, without the vehicle. The card trades its key list for two touch hints and
+  "Tap to play", and hides on the tap's click, not its press, so the click cannot land on the
+  minimap under it. The keyboard keeps working. In headless Chrome emulating an 844 × 390 phone at 3× on an M4
+  Pro, the view is 633 × 293 texels and runs at 60 fps with no frame over 30 ms while the stick is
+  held; no real phone has been measured.
+- Touch controls (`src/hud/touch.ts`, `#hud-touch`): Ritmo's `Touch` tracks the fingers on the
+  canvas. On foot, a thumb on the left half brings the stick under it (full tilt at 56 px), and
+  Run shows on the right. In a car the stick goes, and buttons hold the arrow keys like the
+  keyboard: ◀ and ▶ on the left steer, Gas and Brake take the bottom right, and Hand brake, the
+  action button and Horn a row above them. The action button shows only when it would act; ↺ and
+  ↻ always. The zones are read from the drawn buttons on every new touch, so they follow
+  hud.css and the mode, and a control the mode hides lets go of its key. `withTouch` turns them
+  into keys ([Input](#input)).
+- Landscape only: a phone held upright lays the page out sideways (`width: 100dvh`, the height
+  Safari's toolbars leave) and turns it a quarter clockwise, to be held sideways (hud.css). The
+  renderer and the full map size to the page's box, not the window, and each touch is turned back
+  through the inverse of the page's transform about its origin (`unturn`) before `Touch` reads it.
+  The settings dialog opens in the top layer, which the page's turn does not reach, so it turns
+  on its own.
+  On the first tap's click, `holdLandscape` asks for the full screen and then locks the screen to
+  landscape, which Android grants; iPhones grant neither to a page, so the page turns itself there.
+  It waits for the click because the full screen uses up the tap's user activation, which the
+  speaker needs first, on the `touchend`, to start the sound.
 
 ## Checks
 
