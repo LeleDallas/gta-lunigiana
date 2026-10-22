@@ -6,7 +6,10 @@ All rules are simulation systems in `src/sim/systems`. The step order is in
 ## Start
 
 `SpawnWorld` puts the player on the Via Cesare Battisti sidewalk in front of the Carabinieri
-station. 200 of the map's parked spots (`PARKED`) get a car, picked at random, so the cars spread
+station in Lunigiana, or beside a central connected street in Cesena. The map build rejects
+positions inside buildings and requires an open walking route to the street, so the player can
+leave the starting spot. 200 of the map's parked spots (`PARKED`) get a car, picked at random,
+so the cars spread
 over the villages as the spots do. The two spots nearest the station get Carabinieri cars. The rest
 are randomly chosen spots, about 80% Pandas and 20% Apes. On a tertiary-road spot where it fits,
 a roll under 10% makes a marble truck instead, at most two of them. The world's `Rng` makes every
