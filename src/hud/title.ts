@@ -1,8 +1,9 @@
 /**
- * The title card (markup in index.html) as the loading screen: a bar and the name of the step
- * running while the map downloads and the game builds, an error with a retry if that fails, and
- * "Press any key" once the first frame is drawn. It imports nothing, so `boot.ts` can show it
- * before the game modules (and the map they read) load. Also holds the DOM lookup the HUD shares.
+ * The title card (markup in index.html) as the loading screen: a line that the game is in early
+ * development, a bar and the name of the step running while the map downloads and the game
+ * builds, an error with a retry if that fails, and "Press any key" once the first frame is drawn.
+ * It imports nothing, so `boot.ts` can show it before the game modules (and the map they read)
+ * load. Also holds the DOM lookup the HUD shares.
  *
  * @module hud/title
  */

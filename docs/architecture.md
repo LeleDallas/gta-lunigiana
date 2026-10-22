@@ -121,8 +121,8 @@ memory of each sound source (pruned as sources go; see [audio.md](audio.md#where
 
 ## Start-up
 
-The title card doubles as the loading screen: the game downloads the map, builds in named steps,
-and asks for a key only once the first frame is drawn.
+The title card doubles as the loading screen: it says the game is in early development, downloads
+the map, builds in named steps, and asks for a key only once the first frame is drawn.
 
 1. `index.html` is static, so the card shows before any script runs. Its entry, `src/boot.ts`,
    is a few kB and imports only the card (`src/hud/title.ts`) and the map file's handover
