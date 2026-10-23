@@ -3,13 +3,16 @@ import { test } from "node:test"
 
 import { Color, GreaterDepth, Group, ShaderMaterial } from "three"
 
+import { LOOK } from "../../sim/testing.ts"
 import { VEHICLE_MODELS, VEHICLES } from "../../sim/vehicles.ts"
-import { PersonNode, vehicleNode } from "../actors.ts"
+import { vehicleNode } from "../actors.ts"
 import { solidMaterial } from "../geometry.ts"
 import { makeRegistries } from "../index.ts"
 import { PALETTE } from "../palette.ts"
+import { PersonNode } from "../people.ts"
 import { vehicleLampMaterials } from "../sky/glow.ts"
 import { SKY_UNIFORMS } from "../sky/uniforms.ts"
+import { shownProxy } from "../testing.ts"
 
 test("every vehicle model has white head lamps on its front face and red tail lamps on its back, inside its x-ray box", () => {
   const white = new Color(PALETTE.marbleWhite),
@@ -41,12 +44,11 @@ test("every vehicle model has white head lamps on its front face and red tail la
     }
     assert.ok(heads > 0 && tails > 0, `${model}: ${heads / 36} head and ${tails / 36} tail lamps`)
     assert.equal(node.lamps.parent, node.body, "they ride on the body (its cg offset)")
-    node.xray.geometry.computeBoundingBox()
+    node.showXray(true)
+    const box = shownProxy(node)!.geometry
+    box.computeBoundingBox()
     lamps.computeBoundingBox()
-    assert.ok(
-      node.xray.geometry.boundingBox!.containsBox(lamps.boundingBox!),
-      `${model}: inside the x-ray box`,
-    )
+    assert.ok(box.boundingBox!.containsBox(lamps.boundingBox!), `${model}: inside the x-ray box`)
   }
 })
 
@@ -65,12 +67,10 @@ test("vehicle lamps: one geometry per model, never freed with a node; off until 
 // Regression: the x-ray was an unlit MeshBasicMaterial, so the post pass's night exposure (× 4) clipped its yellow to lemon (255, 255, 118).
 test("the x-ray silhouette keeps its yellow on screen at any exposure: it divides by the post pass's, and shows only where the world hides the actor", () => {
   const car = vehicleNode("panda", 0xb8312b, solidMaterial),
-    walker = new PersonNode(
-      { skin: 0xe7b896, hair: 0x2b1d14, shirt: 0xf0c93c, pants: 0x1d2b4f },
-      solidMaterial,
-    )
+    walker = new PersonNode(LOOK, solidMaterial)
   for (const node of [car, walker]) {
-    const material = node.xray.material
+    node.showXray(true)
+    const material = shownProxy(node)!.material
     assert.ok(material instanceof ShaderMaterial, "a shader that reads the exposure")
     assert.equal(
       material.uniforms["uExposure"],

@@ -11,6 +11,7 @@
 import { BufferGeometry, Float32BufferAttribute, Group, type InstancedMesh, Mesh } from "three"
 
 import { VehicleNode } from "./actors.ts"
+import { bloodMaterial } from "./blood.ts"
 import {
   actorMaterial,
   decalMaterial,
@@ -33,15 +34,21 @@ export const standIns = (): { readonly group: Group; readonly dispose: () => voi
   const shape = triangle(),
     group = new Group()
   const car = new VehicleNode("panda", 0xffffff, shape, actorMaterial)
+  car.showXray(true) // x-ray boxes are built the first time they show
   // One broadleaf at the origin: an InstancedMesh with instance colours, as every chunk's trees are.
   const trees: Array<InstancedMesh> = treeMeshes(
     { broadleaf: [0, 0, 1, 1], conifer: [] },
     treeMaterial,
   )
   group.add(
-    ...[solidMaterial, decalMaterial, waterMaterial, glowMaterial, vehicleLampMaterials.on].map(
-      (material) => new Mesh(shape, material),
-    ),
+    ...[
+      solidMaterial,
+      decalMaterial,
+      waterMaterial,
+      glowMaterial,
+      vehicleLampMaterials.on,
+      bloodMaterial,
+    ].map((material) => new Mesh(shape, material)),
     car,
     ...trees,
   )

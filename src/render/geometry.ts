@@ -32,7 +32,7 @@ export const decalMaterial = weatherMaterial(decal(), "road")
 export const waterMaterial = weatherMaterial(decal(), "water")
 /** The trees (instanced): snow on the canopies' tops, wet, cloud shadows, canopies swaying by whole texels in the wind. */
 export const treeMaterial = weatherMaterial(flat(), "tree")
-/** People and vehicles: cloud shadows only (no snow on a passer-by's head or a car's roof). */
+/** People, animals and vehicles: cloud shadows only (no snow on a passer-by's head or a car's roof). */
 export const actorMaterial = weatherMaterial(flat(), "actor")
 
 const linearCache = new Map<number, readonly [number, number, number]>()

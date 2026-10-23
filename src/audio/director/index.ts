@@ -2,10 +2,11 @@
  * The director: the brain of proximity and physical behaviour between the `Heard` frames of the
  * audio schedule and a `Speaker`. Each frame it finds the listener's ears (and the cabin around
  * them), the weather there (the sim's own laws, at the ears' height), the masking floor, how
- * enclosed the street is and the rock faces that echo, lets its vehicle, people, world and thunder
- * parts place every sound through the acoustic chain (hearing.ts), keeps the loudest voices of each
- * kind up to their caps, and flushes the speaker. Pure TypeScript: Node tests drive it with a
- * recording speaker and a seeded random source.
+ * enclosed the street is and the rock faces that echo, lets its parts place every sound through
+ * the acoustic chain (hearing.ts), keeps the loudest voices of each kind up to their caps, and
+ * flushes the speaker. Its parts: vehicles, people (steps and cries), talk (conversations),
+ * animals, the world around and thunder. Pure TypeScript: Node tests drive it with a recording
+ * speaker and a seeded random source.
  *
  * Time is the speaker's: before its context exists (and while it is suspended) no time passes;
  * the director still tracks who sits where, but measures and plays nothing. The bells follow the
@@ -19,9 +20,11 @@ import { screenAxes } from "../../sim/view.ts"
 import { EAR_HEIGHT } from "../acoustics.ts"
 import { echoesAt, type Echo } from "../places.ts"
 import type { Heard, Speaker } from "../types.ts"
+import { makeAnimals } from "./animals.ts"
 import { commit, groundAt, makeFrame, type Offer } from "./frame.ts"
 import { makeOccluder } from "./occluder.ts"
 import { makePeople } from "./people.ts"
+import { makeTalk } from "./talk.ts"
 import { makeThunder } from "./thunder.ts"
 import { makeVehicles } from "./vehicles.ts"
 import { makeWorld } from "./world.ts"
@@ -32,7 +35,7 @@ const MAX_DT = 0.25
 const ECHOES_EVERY = 1,
   ECHOES_MOVED = 10
 
-/** The director playing through `speaker`; `random` drives birds, owls and dogs. */
+/** The director playing through `speaker`; `random` drives birds, owls, dogs, animal calls and what people say. */
 export const makeDirector = (
   speaker: Speaker,
   options: { readonly random?: () => number } = {},
@@ -41,6 +44,8 @@ export const makeDirector = (
   const occluder = makeOccluder(),
     vehicles = makeVehicles(),
     people = makePeople(),
+    talk = makeTalk(),
+    animals = makeAnimals(),
     world = makeWorld(),
     thunder = makeThunder()
   let last: number | undefined, ground: number | undefined
@@ -112,6 +117,8 @@ export const makeDirector = (
       })
       vehicles.hear(frame)
       people.hear(frame)
+      talk.hear(frame)
+      animals.hear(frame)
       world.hear(frame)
       thunder.hear(frame)
       if (live) occluder.refresh(now)

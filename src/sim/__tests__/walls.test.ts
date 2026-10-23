@@ -46,6 +46,7 @@ import {
   facing,
   FAR,
   INTO,
+  LOOK,
   MID,
   ON_BATTISTI,
   press,
@@ -95,8 +96,6 @@ test("wallsNear: a box touching only the corner of a tree's trunk square returns
 
 // Regressions: nothing (pushed, thrown, shoved, getting out, turning) ends up inside a building.
 
-const LOOK = { skin: 0xc68e6a, hair: 0x2b1d14, shirt: 0xb8312b, pants: 0x1d2b4f }
-
 test("contacts: a car pushing or knocking a pedestrian against a house wall never puts them through it", () => {
   for (const speed of [2.5, 8]) {
     const at = { ...facing(0.4), angle: 0 }
@@ -104,7 +103,7 @@ test("contacts: a car pushing or knocking a pedestrian against a house wall neve
       LOOK,
       at,
       { edge: walkIndex.nearest(at.x, at.y), forward: true, side: 0 },
-      { mood: "walk", until: 0 },
+      { mood: "walk", until: 0, fx: 0, fy: 0 },
     )
     const { run, world } = start(
       [],
@@ -136,6 +135,7 @@ test("contacts: a car pushing or knocking a pedestrian against a house wall neve
         ),
       )
     })
+    // Down or, at 8 m/s about 1 time in 20, killed (the dead are down too): which one is the death roll's, not the walls'.
     if (speed > 5) assert.ok(ped().down, "knocked down")
   }
 })
@@ -341,7 +341,9 @@ const bodyGap = (a: PoseValue, b: PoseValue): number => {
  * A traffic car at `at` on Via Cesare Battisti, standing or rolling at `speed` m/s, among Pandas parked at `parked`, run for `frames`
  * (with `regime` given, under that weather settled, the clock stopped and the weather's grip loss at the real 1): how often it touched
  * a car, how far it backed up (m), its top speed (m/s), its controls after the last frame, and the closest its body came to each
- * parked car (m), over the whole run and from the step it first backed up to get unstuck.
+ * parked car (m), over the whole run and from the step it first backed up to get unstuck. Staged alone: a coin from the shared Rng
+ * decides whether the car turns round when it first backs up, and the people and animals Populate brings draw on that Rng too. These
+ * scenes measure it backing along its lane, which is how the coin falls with seed 1 and no one else around.
  */
 const trafficAmong = (
   at: PoseValue,
@@ -362,6 +364,7 @@ const trafficAmong = (
         traffic: [battistiTraffic(0xd4a85e, at, speed)],
       },
     ],
+    { alone: true },
   )
   if (regime !== undefined) {
     runtime.send(SetHandling, { key: "weatherGrip", value: 1 })
@@ -521,7 +524,12 @@ test("pedestrians: a walker whose verge is blocked by a parked car gets past it"
   const at = { ...lanePoint(lane, 2, side), angle: heading }
   const blocker = { ...lanePoint(lane, 8, side), angle: heading }
   assert.ok(walkClear(at) && carClear("panda", blocker), "a clear verge to stage on")
-  const walker = pedestrian(LOOK, at, { ...BATTISTI, side }, { mood: "walk", until: 0 })
+  const walker = pedestrian(
+    LOOK,
+    at,
+    { ...BATTISTI, side },
+    { mood: "walk", until: 0, fx: 0, fy: 0 },
+  )
   const { run, world } = start(
     [],
     [FAR, { cars: [parkedCar("panda", 0x3d6155, blocker)], peds: [walker] }],
@@ -552,7 +560,11 @@ test("pedestrians: a walker wedged in a house corner on its verge turns back", (
     [],
     [
       { x: at.x + 100, y: at.y, angle: 0 },
-      { peds: [pedestrian(LOOK, at, { edge, forward, side }, { mood: "walk", until: 0 })] },
+      {
+        peds: [
+          pedestrian(LOOK, at, { edge, forward, side }, { mood: "walk", until: 0, fx: 0, fy: 0 }),
+        ],
+      },
     ],
   )
   const id = world().peds[0]!.id

@@ -1,6 +1,6 @@
 /**
- * One frame of the director, shared by its vehicle, people, world and thunder parts: the listener's
- * ears and surroundings (the weather there too), where things stand (`groundAt`), the way from any
+ * One frame of the director, shared by its vehicle, people, talk, animal, world and thunder parts:
+ * the listener's ears and surroundings (the weather there too), where things stand (`groundAt`), the way from any
  * source to them (`path`, with the ground under it, its snow, and its obstacles, cached per key), and
  * the frame's requests. One-shots play at once (a crash, an explosion or thunder no louder than its
  * `MOST_DB`), loud ones with their echoes off rock faces, and can be cut short (`stop`); continuous
@@ -41,7 +41,7 @@ export interface Frame {
   /** Speaker time, s, and the time since the last frame (0 while the audio is off or paused). */
   readonly now: number
   readonly dt: number
-  /** The audio context exists: before, nothing is measured or played. */
+  /** The audio context exists: before it (behind the title card) every path is silent and nothing is played. */
   readonly live: boolean
   readonly ears: Ears
   /** The weather at the ears: the air's temperature, the rain and snow falling, the ground's wetness and snow cover. */

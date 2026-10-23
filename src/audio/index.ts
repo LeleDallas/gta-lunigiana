@@ -2,9 +2,10 @@
  * The audio schedule: once per animation frame it projects what can be heard into plain `Heard`
  * data (the player's ears; vehicles someone drives, that move or that burn, with the drivetrain's
  * revs and load from their worn engines, their damage, whether they burn, whether their wheels or
- * their body are down and how their tyres skid; people on foot; the Impact, Honk, Explosion and
- * Lightning events since the last frame, each impact with the bodies it struck; the horn key; the
- * game clock's day, time and sun, and a copy of the weather) and hands it to the `Audio` service.
+ * their body are down and how their tyres skid; people on foot, with who they are, what they are
+ * doing and who they walk with; the animals; the Impact, Honk, Cry, Explosion and Lightning events
+ * since the last frame, each impact with the bodies it struck; the horn key; the game clock's day,
+ * time and sun, and a copy of the weather) and hands it to the `Audio` service.
  * No acoustics here: the director behind the service decides what is loud enough and where it sits,
  * and works out the weather at the ears.
  * Read-only towards the world, like render (render/__tests__/index.test.ts checks every described schedule).
@@ -18,12 +19,16 @@ import { hullDown, overturned } from "../sim/chassis.ts"
 import { burning, destroyed } from "../sim/damage.ts"
 import { engineRevs } from "../sim/drivetrain.ts"
 import {
+  Animal,
   CarInput,
   Chassis,
+  Cry,
   Damage,
+  Dead,
   Down,
   Driving,
   Explosion,
+  Follows,
   Game,
   GameClock,
   Honk,
@@ -35,6 +40,7 @@ import {
   Person,
   Player,
   Pose,
+  Roam,
   Skid,
   Time,
   Traffic,
@@ -50,6 +56,7 @@ import type {
   Body,
   Happening,
   Heard,
+  HeardAnimal,
   HeardPerson,
   HeardSky,
   HeardVehicle,
@@ -134,12 +141,24 @@ const Hear = Game.System(
         selection: {
           pose: Game.Query.read(Pose),
           motion: Game.Query.read(Motion),
+          person: Game.Query.read(Person),
           pedestrian: Game.Query.optional(Pedestrian),
+          follows: Game.Query.optional(Follows),
           down: Game.Query.optional(Down),
+          dead: Game.Query.optional(Dead),
           player: Game.Query.optional(Player),
         },
-        with: [Person],
         without: [Driving],
+      }),
+      animals: Game.Query({
+        selection: {
+          pose: Game.Query.read(Pose),
+          motion: Game.Query.read(Motion),
+          animal: Game.Query.read(Animal),
+          roam: Game.Query.read(Roam),
+          down: Game.Query.optional(Down),
+          dead: Game.Query.optional(Dead),
+        },
       }),
     },
     resources: {
@@ -153,6 +172,7 @@ const Hear = Game.System(
       impacts: Game.System.readEvent(Impact),
       honks: Game.System.readEvent(Honk),
       skids: Game.System.readEvent(Skid),
+      cries: Game.System.readEvent(Cry),
       lightning: Game.System.readEvent(Lightning),
       explosions: Game.System.readEvent(Explosion),
     },
@@ -248,9 +268,21 @@ const Hear = Game.System(
             zone: face === undefined ? zoneOf(found.model, found, x, y) : FACE_ZONE[face],
           }
     }
+    // Who walks with whom: each follower with its leader, and a leader with the first person following it (a dog on a lead is no partner).
+    const partners = new Map<number, number>()
+    for (const { entity, data } of queries.people.each()) {
+      const follows = data.follows.value()
+      if (follows === undefined) continue
+      const leader = Game.Entity.id(follows.leader)
+      partners.set(entity.id, leader)
+      if (!partners.has(leader)) partners.set(leader, entity.id)
+    }
     const people = queries.people.each().map(({ entity, data }): HeardPerson => {
       const at = data.pose.get(),
-        v = data.motion.get()
+        v = data.motion.get(),
+        { age, female } = data.person.get(),
+        ped = data.pedestrian.value(),
+        partner = partners.get(entity.id)
       return {
         id: entity.id,
         x: at.x,
@@ -258,8 +290,31 @@ const Hear = Game.System(
         vx: v.vx,
         vy: v.vy,
         player: data.player.present,
-        fleeing: data.pedestrian.value()?.mood === "flee",
+        age,
+        female,
+        mood: ped?.mood ?? "walk",
+        fx: ped?.fx ?? at.x,
+        fy: ped?.fy ?? at.y,
         down: data.down.present,
+        dead: data.dead.present,
+        ...(partner === undefined ? {} : { with: partner }),
+      }
+    })
+    const animals = queries.animals.each().map(({ entity, data }): HeardAnimal => {
+      const at = data.pose.get(),
+        v = data.motion.get(),
+        { species, size } = data.animal.get()
+      return {
+        id: entity.id,
+        species,
+        x: at.x,
+        y: at.y,
+        vx: v.vx,
+        vy: v.vy,
+        size,
+        mood: data.roam.get().mood,
+        down: data.down.present,
+        dead: data.dead.present,
       }
     })
     const happenings: Array<Happening> = [
@@ -274,6 +329,7 @@ const Hear = Game.System(
         return [{ kind: "impact", ...hit, body, ...(otherBody === undefined ? {} : { otherBody }) }]
       }),
       ...events.honks.all().map((honk) => ({ kind: "honk" as const, ...honk })),
+      ...events.cries.all().map((cry) => ({ kind: "cry" as const, ...cry })),
       ...events.lightning.all().map(({ x, y, bolt, power, seed }) => ({
         kind: "lightning" as const,
         x,
@@ -297,6 +353,7 @@ const Hear = Game.System(
       },
       vehicles,
       people,
+      animals,
       happenings,
       horn: resources.input.get().horn.held,
       sky: skyAt(resources.clock.get().seconds),

@@ -61,7 +61,8 @@ export const freeDoor = (pose: PoseValue, model: VehicleModel) =>
 
 /**
  * The driver of a vehicle of `model` at `pose` getting out at its first free door, as a pedestrian with a look drawn from `random`
- * who flees along the verge on that side (so they do not run back through the car) until step `until`; none when no door is free.
+ * who flees from it along the verge on that side (so they do not run back through the car) until step `until`; none when no door
+ * is free.
  */
 export const fleeingDriver = (
   pose: PoseValue,
@@ -79,7 +80,7 @@ export const fleeingDriver = (
     randomLook(random),
     { x: door.x, y: door.y, angle: Ops.atan2(door.y - pose.y, door.x - pose.x) },
     { edge, forward, side: (right ? 1 : -1) * walkSide(roadOf(edge)) },
-    { mood: "flee", until },
+    { mood: "flee", until, fx: pose.x, fy: pose.y },
   )
 }
 

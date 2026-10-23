@@ -2,7 +2,9 @@ import { Clock } from "@typeonce/ritmo"
 import { Random } from "@typeonce/ritmo-math"
 
 import { afterHit, barrierSpeeds, destroyed, groundHit } from "../damage.ts"
+import { FAUNA } from "../fauna.ts"
 import {
+  Animal,
   Autopilot,
   CarInput,
   Damage,
@@ -29,7 +31,8 @@ import { FLEE_TIME } from "./pedestrians.ts"
  * at the impact's speed, the ground as `groundHit` takes it (a landing on the wheels less the bump
  * stops, a roll by the body's speed too), two vehicles each by the other's share of their masses. A
  * crash's further contacts with the same thing cost only what a harder one adds. Knocking a person
- * down costs nothing. A traffic car destroyed, by a crash or by a blast (`Explode`), is abandoned:
+ * down costs nothing; an animal struck costs its share of the two masses, as a vehicle would (a cow
+ * dents the car, a cat does not). A traffic car destroyed, by a crash or by a blast (`Explode`), is abandoned:
  * its driver gets out at the first free door and flees, and it stays where it stops, its handbrake
  * on.
  */
@@ -48,6 +51,7 @@ export const CrashDamage = Game.System(
         },
         without: [Pedestrian],
       }),
+      animals: Game.Query({ selection: { animal: Game.Query.read(Animal) } }),
     },
     resources: {
       rng: Game.System.writeResource(Rng),
@@ -71,6 +75,12 @@ export const CrashDamage = Game.System(
         const found = vehicles.get(id)
         return found === undefined ? undefined : VEHICLES[found.data.vehicle.get().model].mass
       }
+      const animals = new Map<number, number>(
+        queries.animals.each().map(({ entity, data }) => {
+          const { species, size } = data.animal.get()
+          return [entity.id, FAUNA[species].mass * size * size * size]
+        }),
+      )
       // Each vehicle's hardest hit this step on each thing it struck (another vehicle's id, −1 a wall or the ground).
       const hardest = new Map<number, Map<number, number>>()
       const hit = (id: number, speed: number, struck: number) => {
@@ -93,6 +103,13 @@ export const CrashDamage = Game.System(
               ),
               -1,
             )
+          continue
+        }
+        if (impact.hit === "animal") {
+          const a = massOf(impact.car),
+            b = impact.other === undefined ? undefined : animals.get(impact.other)
+          if (a !== undefined && b !== undefined && impact.other !== undefined)
+            hit(impact.car, barrierSpeeds(impact.speed, a, b)[0], impact.other)
           continue
         }
         if (impact.hit !== "car" || impact.other === undefined) {

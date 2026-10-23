@@ -1,8 +1,9 @@
 /**
  * Test kit for the director's tests: real map spots, a director on a recording speaker with a
- * seeded random source, and `Heard` frames built from a few vehicles, people and happenings, at a
- * calm mid-morning (10:10 on 22 October, the sun 22° up, dry, the usual wind) under which every
- * law of the day and the weather is the identity, unless a test sets its own sky or weather.
+ * seeded random source, and `Heard` frames built from a few vehicles, people, animals and
+ * happenings, at a calm mid-morning (10:10 on 22 October, the sun 22° up, dry, the usual wind) under
+ * which every law of the day and the weather is the identity, unless a test sets its own sky or
+ * weather.
  *
  * @module audio/director/testing
  */
@@ -14,10 +15,12 @@ import { initialWeather } from "../../sim/sky/weather.ts"
 import { VEHICLES, type VehicleModel } from "../../sim/vehicles.ts"
 import { screenAxes } from "../../sim/view.ts"
 import { skyAt } from "../index.ts"
+import { seeded } from "../speech/testing.ts"
 import type {
   Continuous,
   Happening,
   Heard,
+  HeardAnimal,
   HeardPerson,
   HeardVehicle,
   OneShot,
@@ -81,11 +84,11 @@ export const CALM: WeatherValue = {
   snowLine: NO_SNOW,
 }
 
-/** A small deterministic random source. */
-const seeded = (seed: number) => () => (seed = (seed * 1664525 + 1013904223) >>> 0) / 2 ** 32
+// The speech tests' mulberry32: a plain LCG's consecutive draws correlate, so a rare event's draw fixed the line drawn next.
+export { seeded }
 
 /** A one-shot played at speaker time `t`, `delay` s ahead. */
-interface Played {
+export interface Played {
   readonly sound: OneShot
   readonly at: Placement
   readonly delay: number
@@ -160,7 +163,7 @@ export const car = (
 })
 /** A Panda revving at the redline under full load. */
 export const FULL = { rpm: VEHICLES.panda.engine.redline, load: 1 } as const
-/** Person `id` standing at `at`. */
+/** Person `id` standing at `at`: a man, walking. */
 export const person = (
   id: number,
   at: { readonly x: number; readonly y: number },
@@ -172,8 +175,32 @@ export const person = (
   vx: 0,
   vy: 0,
   player: false,
-  fleeing: false,
+  age: "adult",
+  female: false,
+  mood: "walk",
+  fx: at.x,
+  fy: at.y,
   down: false,
+  dead: false,
+  ...more,
+})
+/** Animal `id` of `species`, idle at `at`, of its species' usual size. */
+export const animal = (
+  id: number,
+  species: HeardAnimal["species"],
+  at: { readonly x: number; readonly y: number },
+  more: Partial<HeardAnimal> = {},
+): HeardAnimal => ({
+  id,
+  species,
+  x: at.x,
+  y: at.y,
+  vx: 0,
+  vy: 0,
+  size: 1,
+  mood: "idle",
+  down: false,
+  dead: false,
   ...more,
 })
 /** The listener at `at` (in `car` when given), with `more` of the world, at the tests' sky and weather unless it sets them. */
@@ -185,6 +212,7 @@ export const world = (
   listener: { x: at.x, y: at.y, vx: 0, vy: 0, car, turns: 0 },
   vehicles: [],
   people: [],
+  animals: [],
   happenings: [],
   horn: false,
   sky: MORNING,

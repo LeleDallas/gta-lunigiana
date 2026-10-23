@@ -26,7 +26,7 @@ the game seconds each 60 Hz step adds.
   Without a `start` the runtime begins at `DEFAULT_START`, 2026-10-22 08:00 CEST (1792648800), so
   tests replay the same day. Behind the title card the clock is held at rate 0 (`holdClock`,
   `src/hud/title.ts`) and set going at rate 1 when the card goes, so play starts at 08:00 however
-  long the card stayed up; traffic and people move on behind it.
+  long the card stayed up; traffic, people and animals move on behind it.
 - **Requests.** `SetClock { seconds?, rate? }` sets the time, the rate or both (`setClock`,
   `src/sim/sky/clock.ts`): the seconds are rounded and kept from 2000-01-01 to 2100-01-01 UTC
   (`SECONDS_RANGE`, inside the calendar's summer-time rule), the rate is a whole number from 0 to
@@ -684,8 +684,8 @@ storms.
   ([How it sounds](#how-it-sounds)). It needs a player: without one the cell stands still and
   nothing flashes.
 - The cell's and the lightning's draws come from `WeatherRng`, the weather's own saved random
-  stream, so the weather never changes traffic, pedestrians or parking; the day plan draws from the
-  weather seed and the day alone, so a storm never changes the days that follow.
+  stream, so the weather never changes traffic, people, animals or parking; the day plan draws from
+  the weather seed and the day alone, so a storm never changes the days that follow.
 
 ## Grip
 

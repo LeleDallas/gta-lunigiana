@@ -183,7 +183,7 @@ export const Explode = Game.System(
           motion = data.motion.get()
         data.motion.set({ ...motion, vx: motion.vx + dir.x * fling, vy: motion.vy + dir.y * fling })
         if (gap < BLAST.kill && !data.dead.present)
-          commands.insert(entity, [Down, { until: step }], [Dead, { at: step }])
+          commands.insert(entity, [Down, { until: step }], [Dead, { since: step }])
         else if (!data.down.present)
           commands.insert(entity, [Down, { until: step + Clock.steps(DOWN_TIME) }])
       }
@@ -200,13 +200,19 @@ export const Explode = Game.System(
         // Nobody's foot on the pedals any more: the shell is left on its handbrake, as when the player gets out.
         car.data.input.set({ throttle: 0, steer: 0, handbrake: true })
         commands.remove(entity, Driving)
-        commands.insert(entity, [Down, { until: step }], [Dead, { at: step }])
+        commands.insert(entity, [Down, { until: step }], [Dead, { since: step }])
       }
       // Walkers who heard it run.
       for (const { entity, data } of queries.walkers.each()) {
         const at = data.pose.get()
         if (hit.has(entity.id) || Vec2.distanceSquared(at, blast.at) >= BLAST.scare ** 2) continue
-        data.ped.set({ mood: "flee", until: step + Clock.steps(FLEE_TIME), blocked: 0 })
+        data.ped.set({
+          mood: "flee",
+          until: step + Clock.steps(FLEE_TIME),
+          blocked: 0,
+          fx: blast.at.x,
+          fy: blast.at.y,
+        })
         data.route.set(runFrom(data.route.get(), at, blast.at))
       }
     }
@@ -234,7 +240,7 @@ export const Respawn = Game.System(
   ({ queries, resources, commands }) => {
     const { step } = resources.time.get()
     for (const { entity, data } of queries.player.each()) {
-      if (step < data.dead.get().at + Clock.steps(WASTED)) continue
+      if (step < data.dead.get().since + Clock.steps(WASTED)) continue
       const start = MAP.spawns.player
       data.pose.set(start)
       data.prev.set(start)

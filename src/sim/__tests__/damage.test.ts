@@ -34,6 +34,7 @@ import {
   facing,
   FAR,
   forward,
+  LOOK,
   ON_BATTISTI,
   press,
   rolling,
@@ -44,8 +45,6 @@ import {
   wear,
 } from "../testing.ts"
 import { VEHICLE_MODELS, VEHICLES, type VehicleModel } from "../vehicles.ts"
-
-const LOOK = { skin: 0xc68e6a, hair: 0x2b1d14, shirt: 0xb8312b, pants: 0x1d2b4f }
 
 test("damage law: a scuff is free, a hit at a model's durability destroys it, and what wrecks a Panda only dents the truck", () => {
   for (const model of VEHICLE_MODELS) {
@@ -148,7 +147,7 @@ test("crashes: a car that pins a pedestrian against a wall still crashes into it
     LOOK,
     { ...facing(0.4), angle: 0 },
     { edge: 0, forward: true, side: 0 },
-    { mood: "walk", until: 0 },
+    { mood: "walk", until: 0, fx: 0, fy: 0 },
   )
   const alone = crash("panda", 25).damage,
     through = crash("panda", 25, [walker]).damage
@@ -174,19 +173,12 @@ test("crashes: a Panda rammed into a parked truck takes the hit, the truck hardl
   assert.ok(stageOf(panda) !== "light", `the Panda: ${panda}`)
   assert.equal(truck, 0, "the truck barely moved")
 
-  // A walker coming down the lane line 25 m ahead, on the next edge, as in the knockdown test.
+  // A walker going away down the lane line 25 m ahead, on the next edge, as in the knockdown test: it hears the car too late
+  // to get out of its way (one walking toward it would see it coming and step aside).
   const next = straightOn(BATTISTI),
     side = laneSide(next, "panda")
-  const at = {
-    ...lanePoint(laneOf(next.edge, next.forward), 5, side),
-    angle: ON_BATTISTI.angle + Math.PI,
-  }
-  const walker = pedestrian(
-    LOOK,
-    at,
-    { edge: next.edge, forward: !next.forward, side: -side },
-    { mood: "walk", until: 0 },
-  )
+  const at = { ...lanePoint(laneOf(next.edge, next.forward), 5, side), angle: ON_BATTISTI.angle }
+  const walker = pedestrian(LOOK, at, { ...next, side }, { mood: "walk", until: 0, fx: 0, fy: 0 })
   const hit = start(
     [],
     [door(ON_BATTISTI), { cars: [rolling("panda", ON_BATTISTI, 12, 0.3)], peds: [walker] }],

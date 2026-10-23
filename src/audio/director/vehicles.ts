@@ -3,11 +3,12 @@
  * worn by its damage and cut by its misfires, a destroyed vehicle's fire until it blows up and the
  * blast, tyres rolling and skidding, horns and the Carabinieri siren (both dead with the engine), the
  * truck's reversing beeper, crashes into walls, vehicles and the ground, the suspension bottoming out,
- * scrapes along walls and the ground, people hit, AI honks, and the doors and starter of the listener
- * getting in and out. A crash knows both bodies and how worn each is where it was hit, the wall's or the
- * ground's material and the ground under the car; a scrape, the material; a blast, the ground its debris
- * rains on. Sounds of the listener's own car are heard from inside it: its crash, clunk, scrape and
- * doors through no cabin, its horn and siren (out by the grille, up on the roof) through all of it.
+ * scrapes along walls and the ground, people and animals hit (a person who lives groans), AI honks,
+ * and the doors and starter of the listener getting in and out. A crash knows both bodies and how
+ * worn each is where it was hit, the wall's or the ground's material and the ground under the car; a
+ * scrape, the material; a blast, the ground its debris rains on. Sounds of the listener's own car are
+ * heard from inside it: its crash, clunk, scrape and doors through no cabin, its horn and siren (out
+ * by the grille, up on the roof) through all of it.
  *
  * @module audio/director/vehicles
  */
@@ -34,6 +35,7 @@ import type {
 import { type Frame, groundAt } from "./frame.ts"
 import type { Hearing, Source } from "./hearing.ts"
 import { ENGINE, HEIGHT, LEVELS, OWN_ENGINE_DB } from "./levels.ts"
+import { cueVoice } from "./people.ts"
 
 /** Tyres roll audibly above this speed, m/s; the beeper sounds below this forward speed. */
 const ROLLING = 1,
@@ -54,7 +56,7 @@ const MERGE = 0.1,
 const SWITCH = 0.25
 /** How many vehicles' wear is remembered, the most recently crashed. */
 const WORN = 256
-/** A person hit groans this long after the thud, s; a door closes this long after it opened, s. */
+/** A person hit (and alive) groans this long after the thud, s; a door closes this long after it opened, s. */
 const GROAN_AFTER = 0.25,
   DOOR_CLOSES = 0.7
 
@@ -183,7 +185,9 @@ export const makeVehicles = () => {
       for (const [id, last] of crashes) if (now - last.at >= MERGE) crashes.delete(id)
       // The hardest hits first, so the softer tail of the same hit merges into them.
       const hits = heard.happenings
-        .flatMap((h) => (h.kind === "impact" && h.hit !== "person" ? [h] : []))
+        .flatMap((h) =>
+          h.kind === "impact" && h.hit !== "person" && h.hit !== "animal" ? [h] : [],
+        )
         .sort((a, b) => b.speed - a.speed)
       for (const hit of hits) {
         const v = byId.get(hit.car),
@@ -264,19 +268,25 @@ export const makeVehicles = () => {
             { kind: "explosion", surface },
             frame.path(`car:${h.car}`, h, LEVELS.explosion),
           )
-        } else if (h.kind === "impact" && h.hit === "person") {
+        } else if (h.kind === "impact" && (h.hit === "person" || h.hit === "animal")) {
+          // The body hit: a thud from the car, and a person who lives groans (an animal's pain is its own cry, in animals.ts).
           const who = h.other ?? h.car,
-            key = `person:${who}`,
+            key = `${h.hit}:${who}`,
             at = { x: h.x, y: h.y, z: groundAt(h.x, h.y) + HEIGHT.person }
           frame.play(
             { kind: "thud", speed: h.speed },
             frame.path(key, at, LEVELS.thud, { cabin: h.car !== mine }),
           )
-          frame.play(
-            { kind: "groan", voice: hash01(who) },
-            frame.path(key, at, LEVELS.groan),
-            GROAN_AFTER,
-          )
+          const person =
+            h.hit === "person" && h.fatal !== true
+              ? heard.people.find((p) => p.id === who)
+              : undefined
+          if (person !== undefined)
+            frame.play(
+              { kind: "groan", voice: cueVoice(person) },
+              frame.path(key, at, LEVELS.groan),
+              GROAN_AFTER,
+            )
         }
       }
 

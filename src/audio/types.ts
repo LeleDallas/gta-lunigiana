@@ -2,9 +2,9 @@
  * The audio host's shared vocabulary. Three layers meet here:
  *
  * - `Heard`: what the world sounds like this frame, as plain data. The audio schedule reads it
- *   from the simulation (components, the `Impact`, `Skid`, `Honk`, `Explosion` and `Lightning`
- *   events, the horn key, the game clock and the weather) and hands it to the `Audio` service once
- *   per animation frame.
+ *   from the simulation (components, the `Impact`, `Skid`, `Honk`, `Cry`, `Explosion` and
+ *   `Lightning` events, the horn key, the game clock and the weather) and hands it to the `Audio`
+ *   service once per animation frame.
  * - The director (pure TypeScript, tested in Node) turns `Heard` into sound requests: continuous
  *   voices it holds frame after frame (`Continuous`) and one-shots (`OneShot`), each with a
  *   `Placement` computed from acoustics (spreading, air absorption, occlusion, Doppler, cabin).
@@ -17,8 +17,9 @@
  * @module audio/types
  */
 import type { Surface } from "../sim/map/surface.ts"
-import type { WeatherValue } from "../sim/schema.ts"
+import type { Age, Feeling, Mood, Species, WeatherValue } from "../sim/schema.ts"
 import type { VehicleModel } from "../sim/vehicles.ts"
+import type { Speech } from "./speech/types.ts"
 
 export type { Surface }
 
@@ -85,7 +86,7 @@ export interface HeardVehicle {
   readonly burning: boolean
 }
 
-/** A person on foot (the player too, unless in a car). */
+/** A person on foot (the player too, unless in a car), alive or dead. */
 export interface HeardPerson {
   readonly id: number
   readonly x: number
@@ -93,19 +94,42 @@ export interface HeardPerson {
   readonly vx: number
   readonly vy: number
   readonly player: boolean
-  /** A pedestrian running away (Pedestrian mood "flee"). */
-  readonly fleeing: boolean
-  /** Knocked down. */
+  /** Who speaks: age group and sex set the voice's register. */
+  readonly age: Age
+  readonly female: boolean
+  /** What a pedestrian is doing (the player walks), about the point (fx, fy): the chat partner, a threat, a victim (the player's own position). */
+  readonly mood: Mood
+  readonly fx: number
+  readonly fy: number
+  /** Knocked down, or lying dead (the dead are down too). */
   readonly down: boolean
+  /** Killed: lies where it fell. */
+  readonly dead: boolean
+  /** The person they walk with: a party's leader, or (for the leader) one of the people following them. */
+  readonly with?: number
+}
+
+/** An animal: species, `size` × its species' usual, what it does (Roam mood), knocked down or dead. */
+export interface HeardAnimal {
+  readonly id: number
+  readonly species: Species
+  readonly x: number
+  readonly y: number
+  readonly vx: number
+  readonly vy: number
+  readonly size: number
+  readonly mood: "idle" | "walk" | "flee"
+  readonly down: boolean
+  readonly dead: boolean
 }
 
 /** Something that happened since the last frame, known only inside a simulation system. */
 export type Happening =
   | {
       readonly kind: "impact"
-      /** What the vehicle `car` hit: a wall, another vehicle (`other`), a person (`other`), or the ground (`face`). */
-      readonly hit: "wall" | "car" | "person" | "ground"
-      /** Where: the contact point (a wall, a vehicle or the ground), or the person. */
+      /** What the vehicle `car` hit: a wall, another vehicle (`other`), a person or an animal (`other`), or the ground (`face`). */
+      readonly hit: "wall" | "car" | "person" | "animal" | "ground"
+      /** Where: the contact point (a wall, a vehicle or the ground), or the person or animal. */
       readonly x: number
       readonly y: number
       /** Impact speed, m/s: the closing speed at contact, or the car's speed. */
@@ -116,6 +140,8 @@ export type Happening =
       readonly other?: number
       /** The face of the body that struck the ground (hit "ground"). */
       readonly face?: "under" | "roof" | "side" | "front" | "rear"
+      /** A person or animal hit that killed them. */
+      readonly fatal?: boolean
       /** The vehicle `car`'s model and the zone of it the hit landed on; `otherBody`, the vehicle `other`'s (hit "car"). */
       readonly body: Body
       readonly otherBody?: Body
@@ -127,6 +153,14 @@ export type Happening =
       readonly model: VehicleModel
       readonly x: number
       readonly y: number
+    }
+  | {
+      /** A person or animal `who` cried out at (x, y), in `feeling` (the sim's `Cry`). */
+      readonly kind: "cry"
+      readonly who: number
+      readonly x: number
+      readonly y: number
+      readonly feeling: Feeling
     }
   | {
       /** Lightning (the sim's `Lightning`): a bolt to the ground at (x, y) when `bolt`, else a flash in the cloud above it; `power` 0…1; `seed` shapes its thunder. */
@@ -175,6 +209,7 @@ export interface Heard {
   readonly listener: HeardListener
   readonly vehicles: ReadonlyArray<HeardVehicle>
   readonly people: ReadonlyArray<HeardPerson>
+  readonly animals: ReadonlyArray<HeardAnimal>
   readonly happenings: ReadonlyArray<Happening>
   /** The player holds the horn key (it sounds only from the driver's seat). */
   readonly horn: boolean
@@ -292,10 +327,21 @@ export type OneShot =
       readonly run: boolean
       readonly snow: boolean
     }
-  /** Human cues; `voice` 0…1 picks the speaker (pitch, sex) so one person keeps one voice. */
+  /** A line of speech in a speaker's voice: said in conversation (`talk`), or yelled (`yell`: a cry, a call, a robbed driver). */
+  | ({ readonly kind: "talk" } & Speech)
+  | ({ readonly kind: "yell" } & Speech)
+  /** Non-verbal human cues; `voice` 0…1 picks the speaker (pitch, sex) so one person keeps one voice. */
   | { readonly kind: "scream"; readonly voice: number }
-  | { readonly kind: "shout"; readonly voice: number }
   | { readonly kind: "groan"; readonly voice: number }
+  /** Animal calls; `size` × the species' usual body sets the pitch (bigger is lower). A cow's moo, a pig's grunt and squeal, a dog's yelp. */
+  | { readonly kind: "moo"; readonly size: number }
+  | { readonly kind: "grunt"; readonly size: number }
+  | { readonly kind: "squeal"; readonly size: number }
+  | { readonly kind: "yelp"; readonly size: number }
+  /** A cat's meow, or (`yowl`) its long, harsh, loud cry of pain. */
+  | { readonly kind: "meow"; readonly size: number; readonly yowl: boolean }
+  /** A cat hissing at a threat. */
+  | { readonly kind: "hiss"; readonly size: number }
   /** One stroke of a church bell with prime partial `pitch` Hz. */
   | { readonly kind: "bell"; readonly pitch: number }
   /** A songbird by day; the tawny owl (`owl`) at night. */

@@ -841,14 +841,3 @@ test("twenty running cars around: only the eight loudest, nearest engines play, 
   director.hear(world(MEADOW, { vehicles: cars(40) }))
   assert.deepEqual(engines(), [...nearest.filter((key) => key !== "engine:8"), "engine:9"].sort())
 })
-
-test("a pedestrian who turns from walking to fleeing screams or shouts once, not again while still fleeing", () => {
-  const director = rig()
-  const at = away(MEADOW, 10, SOUTH)
-  director.hear(world(MEADOW, { people: [person(4, at)] }), 10)
-  director.hear(world(MEADOW, { people: [person(4, at, { fleeing: true })] }), 6 * 60)
-  assert.equal(
-    director.plays.filter((p) => p.sound.kind === "scream" || p.sound.kind === "shout").length,
-    1,
-  )
-})

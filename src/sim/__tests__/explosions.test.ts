@@ -15,6 +15,7 @@ import {
   battistiTraffic,
   burning,
   door,
+  LOOK,
   ON_BATTISTI,
   press,
   start,
@@ -22,7 +23,6 @@ import {
   wear,
 } from "../testing.ts"
 
-const LOOK = { skin: 0xc68e6a, hair: 0x2b1d14, shirt: 0xb8312b, pants: 0x1d2b4f }
 const lane = laneOf(BATTISTI.edge, BATTISTI.forward)
 /** A spot `along` m down the Battisti lane, `out` m to its left (toward the north verge). */
 const on = (along: number, out = 0) => {
@@ -37,7 +37,7 @@ const bystander = (along: number, out: number) => {
     LOOK,
     at,
     { edge: walkIndex.nearest(at.x, at.y), forward: true, side: 0 },
-    { mood: "walk", until: 0 },
+    { mood: "walk", until: 0, fx: 0, fy: 0 },
   )
 }
 
@@ -112,7 +112,12 @@ test("explosions: people on foot die near the blast and stay down, those farther
   const ped = (id: number) => world().peds.find((p) => p.id === id)!
   run(12)
   assert.deepEqual(
-    [ped(killed!).dead, ped(knocked!).dead, ped(knocked!).down, ped(scared!).down],
+    [
+      ped(killed!).dead !== undefined,
+      ped(knocked!).dead !== undefined,
+      ped(knocked!).down,
+      ped(scared!).down,
+    ],
     [true, false, true, false],
   )
   assert.equal(ped(scared!).mood, "flee")
@@ -125,7 +130,7 @@ test("explosions: people on foot die near the blast and stay down, those farther
   run(240)
   assert.ok(Vec2.distance(ped(killed!), on(32, 2.5)) > 1, "the blast throws the dead")
   assert.deepEqual(
-    [ped(killed!).dead, ped(killed!).down, ped(knocked!).down],
+    [ped(killed!).dead !== undefined, ped(killed!).down, ped(knocked!).down],
     [true, true, false],
     "the dead stay down; the knocked get up",
   )
@@ -203,14 +208,14 @@ test("explosions: the blast reaches people from the wreck's body, not its centre
   )
 })
 
-test("explosions: a body is removed once out of view", () => {
+test("explosions: a body is removed once far behind, out of view", () => {
   const { runtime, run, world } = start(
     [],
     [door(on(120)), { cars: [burning("panda", on(30), 10)], peds: [bystander(32, 2.5)] }],
   )
   run(12)
   const [body] = world().peds
-  assert.equal(body?.dead, true)
+  assert.notEqual(body?.dead, undefined)
   assert.ok(runtime.tick(Game.Schedule(teleport({ ...ON_BATTISTI, x: ON_BATTISTI.x + 200 }))).ok)
   run(40)
   assert.equal(

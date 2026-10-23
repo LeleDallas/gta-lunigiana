@@ -25,6 +25,7 @@ import {
 } from "./schema.ts"
 import { setClock } from "./sky/clock.ts"
 import { initialWeather, setWeather } from "./sky/weather.ts"
+import { Animals, Startle } from "./systems/animals.ts"
 import { Contacts, Recover } from "./systems/contacts.ts"
 import { CrashDamage } from "./systems/damage.ts"
 import { PlayerDrive, RideAlong } from "./systems/drive.ts"
@@ -32,8 +33,10 @@ import { EnterExit } from "./systems/enter-exit.ts"
 import { Explode, Respawn } from "./systems/explosions.ts"
 import { PlayerFoot } from "./systems/foot.ts"
 import { Pedestrians } from "./systems/pedestrians.ts"
+import { Perceive } from "./systems/perceive.ts"
 import { VehiclePhysics } from "./systems/physics.ts"
-import { Populate } from "./systems/populate.ts"
+import { FillAnimals, PopulateAnimals } from "./systems/populate-animals.ts"
+import { FillPeople, Populate } from "./systems/populate.ts"
 import { AdvanceClock, AdvanceWeather } from "./systems/sky.ts"
 import { SpawnWorld } from "./systems/spawn.ts"
 import { TrafficAI } from "./systems/traffic.ts"
@@ -133,13 +136,17 @@ const ApplyWeather = Game.System(
 
 /**
  * Ticked once after the runtime is made. The apply systems run here too so they are listening before the host can send: a request
- * sent before the first update would otherwise be dropped by whichever schedule ticks first.
+ * sent before the first update would otherwise be dropped by whichever schedule ticks first. The first fill of people and animals
+ * runs once the player stands at the start, so the world is peopled from the first frame.
  */
 export const setup = Game.Schedule(
   SpawnWorld,
   ApplyHandling,
   ApplyClock,
   ApplyWeather,
+  Game.Schedule.applyDeferred(),
+  FillPeople,
+  FillAnimals,
   Game.Schedule.applyDeferred(),
 )
 /** One fixed step of the game. */
@@ -161,13 +168,18 @@ export const update = Game.Schedule(
   PlayerDrive,
   TrafficAI,
   Pedestrians,
+  Animals,
   VehiclePhysics,
   Contacts,
   CrashDamage,
   RideAlong,
   Recover,
+  // After the contacts: this step's hits and crashes are events, which a save drops, so they are taken in the step they happen.
+  Perceive,
+  Startle,
   Respawn,
   Populate,
+  PopulateAnimals,
   Game.Schedule.applyDeferred(),
 )
 
@@ -178,7 +190,7 @@ export const DEFAULT_START = 1792648800
  * are the same sequence at an offset the seed sets. Measured over all 2³² seeds, the offset is as good as random: two streams of N
  * draws each overlap for about 2N/2³² of the seeds (1 in 2000 at a million draws); the closest is 7179 draws (seed 137 773 472), and
  * every seed from 0 to 200 000 is at least 1.2 million apart. Where they overlap the weather only repeats numbers the world drew: it
- * never changes traffic, pedestrians or parking.
+ * never changes traffic, people, animals or parking.
  */
 const WEATHER_SEED = 0x9e3779b9
 
@@ -225,7 +237,7 @@ export const lintTarget = async (): Promise<Lint.Target<typeof Game.schema, type
   // Loaded here, not at the top: the render and audio schedules are host code, outside the simulation.
   // oxlint-disable-next-line no-restricted-imports -- the lint target describes the render schedule
   const { render } = await import("../render/index.ts")
-  // oxlint-disable-next-line no-restricted-imports -- and the audio schedule, the only reader of Honk
+  // oxlint-disable-next-line no-restricted-imports -- and the audio schedule, the only reader of Cry
   const { audio } = await import("../audio/index.ts")
   // The host's handling store (src/hud/handling.ts, behind the settings and the dev debug menu) sends SetHandling with runtime.send;
   // the host sends SetClock to hold the clock behind the title card (holdClock, src/hud/title.ts), and the dev debug menu sends

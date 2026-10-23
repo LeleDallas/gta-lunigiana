@@ -36,6 +36,16 @@ export const PALETTE = {
   signalRed: 0xb8312b,
   signYellow: 0xf0c93c,
   flameOrange: 0xe8762c,
+  // Not from the village photos: what the people and animals wear and bleed. A flat cap's tweed in two muted weaves, worn
+  // dark leather shoes, the pink of a snout or an udder, a dark nose, a cow's pale horn, and a pool of blood, dark red as it
+  // soaks into stone and asphalt.
+  tweedBrown: 0x6e624d,
+  tweedGrey: 0x5c5d55,
+  shoe: 0x2e2621,
+  snoutPink: 0xe2a29a,
+  nose: 0x1c1a19,
+  horn: 0xd8cdb4,
+  blood: 0x6b0d10,
   // Night and weather (render/sky): window glass by day, lit windows, lanterns and their light, headlight beams, rain, snow, lightning.
   windowGlass: 0x323a46,
   windowLit: 0xffc56e,

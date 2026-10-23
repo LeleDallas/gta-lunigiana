@@ -4,9 +4,11 @@ import { test } from "node:test"
 import { Group, InstancedMesh, type Material, Mesh, type Object3D, Vector3 } from "three"
 
 import { MAP } from "../../sim/map/index.ts"
-import { PersonNode, vehicleNode } from "../actors.ts"
+import { LOOK } from "../../sim/testing.ts"
+import { vehicleNode } from "../actors.ts"
 import { actorMaterial } from "../geometry.ts"
 import { terrainY } from "../ground.ts"
+import { PersonNode } from "../people.ts"
 import { vehicleLampMaterials } from "../sky/glow.ts"
 import { standIns } from "../stand-ins.ts"
 import { World } from "../world.ts"
@@ -32,11 +34,11 @@ test("the stand-ins hold every material the streamed world and the actors draw, 
   ] as const)
     world.update(new Vector3(x, terrainY(x, y), -y), 0, 60, Infinity)
   const car = vehicleNode("panda", 0xb8312b, actorMaterial),
-    walker = new PersonNode(
-      { skin: 0xe7b896, hair: 0x2b1d14, shirt: 0xf0c93c, pants: 0x1d2b4f },
-      actorMaterial,
-    )
+    walker = new PersonNode(LOOK, actorMaterial)
   car.setLamps(true)
+  // The player and the car they drive show their x-ray boxes, built the first time they show.
+  car.showXray(true)
+  walker.showXray(true)
   const drawn = [...meshes(parent), ...meshes(car), ...meshes(walker)]
   assert.ok(drawn.length > 20)
   for (const mesh of drawn)

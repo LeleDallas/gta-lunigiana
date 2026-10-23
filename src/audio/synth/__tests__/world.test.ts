@@ -14,10 +14,17 @@ test("the world synths load in Node: no Web Audio at module top level", () => {
     "bell",
     "bird",
     "groan",
+    "grunt",
+    "hiss",
+    "meow",
+    "moo",
     "scream",
-    "shout",
+    "squeal",
     "step",
+    "talk",
     "thunder",
+    "yell",
+    "yelp",
   ])
 })
 

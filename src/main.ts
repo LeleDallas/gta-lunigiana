@@ -30,6 +30,7 @@ import { element, holdClock, step, titleReady } from "./hud/title.ts"
 import { holdLandscape, makeTouchControls, withTouch } from "./hud/touch.ts"
 import { groundY } from "./render/ground.ts"
 import {
+  Animals,
   blend,
   Effects,
   makeEffects,
@@ -120,7 +121,7 @@ const pad = document.documentElement.classList.contains("touch")
   : undefined
 const controls = pad === undefined ? keyboard : withTouch(keyboard, pad.touch, pad.shown)
 const renderClock = { alpha: 0 }
-const { people, vehicles } = makeRegistries(scene)
+const { people, animals, vehicles } = makeRegistries(scene)
 const effects = makeEffects(scene)
 // The speaker starts its AudioContext on the first key, click or tap from here on: pressed while loading, or the one that dismisses the title card.
 const speaker = makeSpeaker(
@@ -143,6 +144,7 @@ const made = makeRuntime({
   services: Game.Runtime.services(
     Game.Runtime.service(KeyboardInput, controls),
     Game.Runtime.service(People, people),
+    Game.Runtime.service(Animals, animals),
     Game.Runtime.service(Vehicles, vehicles),
     Game.Runtime.service(RenderClock, renderClock),
     Game.Runtime.service(Effects, effects),

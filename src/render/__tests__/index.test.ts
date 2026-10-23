@@ -31,17 +31,20 @@ import {
   battistiTraffic,
   burning,
   door,
+  LOOK,
   ON_BATTISTI,
   press,
   stage,
   World,
 } from "../../sim/testing.ts"
 import { VEHICLE_MODELS, VEHICLES } from "../../sim/vehicles.ts"
-import { PersonNode, vehicleBody, vehicleNode, wheelLayout } from "../actors.ts"
+import { vehicleBody, vehicleNode, wheelLayout } from "../actors.ts"
+import { AnimalNode } from "../animals.ts"
 import { FIREBALL, FLASH } from "../blasts.ts"
 import { actorMaterial, linear, solidMaterial } from "../geometry.ts"
 import { yOf } from "../ground.ts"
 import {
+  Animals,
   Effects,
   makeEffects,
   makeRegistries,
@@ -53,21 +56,25 @@ import {
   Vehicles,
 } from "../index.ts"
 import { PALETTE } from "../palette.ts"
+import { PersonNode } from "../people.ts"
 import { vehicleLampMaterials } from "../sky/glow.ts"
 import { SkyHost } from "../sky/host.ts"
 import type { LitCar } from "../sky/night-lights.ts"
+import { shownProxy } from "../testing.ts"
 import { PLUMES_AT_ONCE } from "../wrecks.ts"
 
 // Regression: detached vehicle nodes kept their x-ray geometry, so despawned traffic leaked GPU buffers.
-test("registries: a detached node frees its own geometry, not its vehicle's shared body", () => {
-  const { people, vehicles } = makeRegistries(new Group())
+test("registries: a detached node frees its own geometry (frames, pool, proxy), not its vehicle's shared body", () => {
+  const { people, animals, vehicles } = makeRegistries(new Group())
   const car = vehicles.ensure(1, () => vehicleNode("panda", 0xb8312b, solidMaterial))
-  const person = people.ensure(
-    2,
+  const person = people.ensure(2, () => new PersonNode(LOOK, solidMaterial, 2))
+  const cat = animals.ensure(
+    3,
     () =>
-      new PersonNode(
-        { skin: 0xe7b896, hair: 0x2b1d14, shirt: 0xf0c93c, pants: 0x1d2b4f },
+      new AnimalNode(
+        { species: "cat", coat: 0x8a857c, patch: 0x4e4a45, size: 1 },
         solidMaterial,
+        3,
       ),
   )
   const freed = new Set<string>()
@@ -75,20 +82,49 @@ test("registries: a detached node frees its own geometry, not its vehicle's shar
     name: string,
     geometry: { addEventListener: (type: "dispose", listener: () => void) => void },
   ) => geometry.addEventListener("dispose", () => freed.add(name))
-  watch("car x-ray", car.xray.geometry)
+  car.showXray(true)
+  watch("car x-ray", shownProxy(car)!.geometry)
   watch("car body", car.body.geometry)
   // Blown up, it is left a charred shell: shared like the intact body.
   car.body.geometry = vehicleBody("panda", 0xb8312b, true)
   watch("car shell", car.body.geometry)
-  watch("person x-ray", person.xray.geometry)
-  person.frames.forEach((frame, i) => watch(`frame ${i}`, frame))
-  assert.ok(vehicles.remove(1) && people.remove(2))
+  // The person shows its walking, running and lying proxies in turn.
+  person.showXray(true)
+  for (const [gait, speed, down] of [
+    ["walk", 1.4, false],
+    ["run", 4, false],
+    ["lying", 0, true],
+  ] as const) {
+    person.speed = speed
+    person.lie(down, false)
+    person.pose()
+    watch(`person ${gait} x-ray`, shownProxy(person)!.geometry)
+  }
+  for (const [who, node] of [
+    ["person", person],
+    ["cat", cat],
+  ] as const) {
+    watch(`${who} pool`, node.pool.geometry)
+    for (const [name, frame] of Object.entries(node.frames)) watch(`${who} ${name}`, frame)
+  }
+  assert.ok(vehicles.remove(1) && people.remove(2) && animals.remove(3))
   assert.deepEqual([...freed].sort(), [
     "car x-ray",
-    "frame 0",
-    "frame 1",
-    "frame 2",
-    "person x-ray",
+    "cat pool",
+    "cat stand",
+    "cat step1",
+    "cat step2",
+    "person lying x-ray",
+    "person pool",
+    "person run x-ray",
+    "person run1",
+    "person run2",
+    "person shock",
+    "person stand",
+    "person talk",
+    "person walk x-ray",
+    "person walk1",
+    "person walk2",
   ])
   assert.equal(car.parent, null)
 })
@@ -135,8 +171,9 @@ test("the host schedules (render, audio) read the world and never write it", asy
     const steps = described.schedules.find((s) => s.name === name)?.steps ?? []
     const names = new Set(steps.flatMap((step) => (step.kind === "system" ? [step.system] : [])))
     const systems = described.systems.filter((s) => names.has(s.name))
-    // Sync and place people and vehicles, mark the driven car, draw the tyre marks and smoke, feed the sky.
-    if (name === "render") assert.equal(systems.length, 7)
+    // Sync and place people, animals and vehicles, mark the driven car, spread the blood pools, draw the tyre marks and smoke,
+    // feed the sky.
+    if (name === "render") assert.equal(systems.length, 10)
     assert.ok(systems.length > 0, `${name} has systems`)
     for (const s of systems) {
       const writes = [
@@ -151,14 +188,15 @@ test("the host schedules (render, audio) read the world and never write it", asy
 })
 
 // Regression: people and cars were drawn with the terrain's material, so above the snow line they turned to white stipple.
-test("the render schedule draws people and vehicles with the actor material: cloud shadows, no snow or wet on them", () => {
+test("the render schedule draws people, animals and vehicles with the actor material: cloud shadows, no snow or wet on them", () => {
   const scene = new Group(),
-    { people, vehicles } = makeRegistries(scene)
+    { people, animals, vehicles } = makeRegistries(scene)
   const made = makeRuntime({
     seed: 42,
     services: Game.Runtime.services(
       Game.Runtime.service(KeyboardInput, Keyboard.scripted(bindings, [])),
       Game.Runtime.service(People, people),
+      Game.Runtime.service(Animals, animals),
       Game.Runtime.service(Vehicles, vehicles),
       Game.Runtime.service(RenderClock, { alpha: 0 }),
       Game.Runtime.service(Effects, makeEffects(scene)),
@@ -168,14 +206,19 @@ test("the render schedule draws people and vehicles with the actor material: clo
   assert.ok(made.ok)
   assert.ok(made.value.tick(setup).ok && made.value.tick(render).ok)
   const walkers = [...people.entries()].map(([, node]) => node),
+    beasts = [...animals.entries()].map(([, node]) => node),
     cars = [...vehicles.entries()].map(([, node]) => node)
-  assert.ok(walkers.length > 0 && cars.length > 0, "the spawn has people and cars")
-  for (const node of [...walkers, ...cars]) assert.equal(node.body.material, actorMaterial)
+  assert.ok(
+    walkers.length > 0 && beasts.length > 0 && cars.length > 0,
+    "the spawn has people, animals and cars",
+  )
+  for (const node of [...walkers, ...beasts, ...cars])
+    assert.equal(node.body.material, actorMaterial)
 })
 
 test("lamps: the player's car and traffic shine and get the sky's headlight beams, parked cars stay dark", () => {
   const scene = new Group(),
-    { people, vehicles } = makeRegistries(scene),
+    { people, animals, vehicles } = makeRegistries(scene),
     sky = new SkyHost(scene, { reduced: () => false })
   const beams: Array<LitCar> = [],
     car = sky.car.bind(sky)
@@ -188,6 +231,7 @@ test("lamps: the player's car and traffic shine and get the sky's headlight beam
     services: Game.Runtime.services(
       Game.Runtime.service(KeyboardInput, Keyboard.scripted(bindings, press(0, "action"))),
       Game.Runtime.service(People, people),
+      Game.Runtime.service(Animals, animals),
       Game.Runtime.service(Vehicles, vehicles),
       Game.Runtime.service(RenderClock, { alpha: 0 }),
       Game.Runtime.service(Effects, makeEffects(scene)),
@@ -257,7 +301,8 @@ test("a vehicle's node sits at its centre of mass between the last two steps, an
   placeVehicle(node, prev, pose, chassis, 1)
   near(node.position.y, yOf(300), "height at the current step")
   near(node.body.position.y, -cg, "the body hangs its ground line cg under the node")
-  near(node.xray.position.y, -cg, "and so does its x-ray proxy")
+  node.showXray(true)
+  near(shownProxy(node)!.position.y, -cg, "and so does its x-ray proxy")
   node.updateMatrixWorld(true)
   const tilt = tiltOf(chassis.pitch, chassis.roll),
     c = Math.cos(pose.angle),
@@ -354,13 +399,14 @@ const shell = (pose: PoseValue) =>
 /** The game drawn into a scene of its own, the player on foot 55 m down the road and the `cars` on it; `frame` steps and draws. */
 const drawn = (cars: ReadonlyArray<ReturnType<typeof burning>>) => {
   const scene = new Group(),
-    { people, vehicles } = makeRegistries(scene),
+    { people, animals, vehicles } = makeRegistries(scene),
     effects = makeEffects(scene)
   const made = makeRuntime({
     seed: 1,
     services: Game.Runtime.services(
       Game.Runtime.service(KeyboardInput, Keyboard.scripted(bindings, [])),
       Game.Runtime.service(People, people),
+      Game.Runtime.service(Animals, animals),
       Game.Runtime.service(Vehicles, vehicles),
       Game.Runtime.service(RenderClock, { alpha: 0 }),
       Game.Runtime.service(Effects, effects),
