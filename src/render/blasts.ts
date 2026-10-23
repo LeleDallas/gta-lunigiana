@@ -24,7 +24,8 @@ import {
 } from "three"
 
 import { along, fireMaterial, fireShape, HOT, hot } from "./fire.ts"
-import { paint, solidMaterial } from "./geometry.ts"
+import { actorMaterial, paint } from "./geometry.ts"
+import { DRAW_ORDER } from "./order.ts"
 import { PALETTE } from "./palette.ts"
 import { Pool } from "./pool.ts"
 import { between, Smoke } from "./smoke.ts"
@@ -280,18 +281,25 @@ export class Blasts {
       random,
       BLASTS_AT_ONCE * DEBRIS.count,
       shardShape,
-      solidMaterial,
+      actorMaterial, // lit like the cars it came off: shaded by the clouds, not snowed on
       0,
     )
     // Fire over the smoke it rolls into: the flash first, the fireball and the sparks through it.
-    this.flash = new Burst(FLASH, random, BLASTS_AT_ONCE * FLASH.count, flashShape, fireMaterial, 1)
+    this.flash = new Burst(
+      FLASH,
+      random,
+      BLASTS_AT_ONCE * FLASH.count,
+      flashShape,
+      fireMaterial,
+      DRAW_ORDER.flames,
+    )
     this.fireball = new Burst(
       FIREBALL,
       random,
       BLASTS_AT_ONCE * FIREBALL.count,
       fireShape,
       fireMaterial,
-      2,
+      DRAW_ORDER.fireball,
     )
     this.embers = new Burst(
       EMBERS,
@@ -299,7 +307,7 @@ export class Blasts {
       BLASTS_AT_ONCE * EMBERS.count,
       fireShape,
       fireMaterial,
-      2,
+      DRAW_ORDER.fireball,
     )
   }
 

@@ -30,6 +30,7 @@ import {
   SetHandling,
   Vehicle,
 } from "../schema.ts"
+import type { GroundWeather } from "../sky/local.ts"
 import { drive, forward, ON_BATTISTI, rolling, start } from "../testing.ts"
 import { VEHICLES, type VehicleModel } from "../vehicles.ts"
 
@@ -38,17 +39,19 @@ const With = (knobs: Partial<Record<HandlingKey, number>>) => ({ ...REAL_HANDLIN
 const coast = { throttle: 0, steer: 0, handbrake: false }
 const full = { throttle: 1, steer: 0, handbrake: false }
 
-/** Metres a `model` takes to stop from `speed` m/s on `surface` with the pedal floored backwards. */
+/** Metres a `model` takes to stop from `speed` m/s on `surface` (dry, or as wet and snowy as `weather`) with the pedal floored backwards. */
 const stopping = (
   model: VehicleModel,
   speed: number,
   surface: Surface,
   knobs: Partial<Record<HandlingKey, number>>,
+  weather?: GroundWeather,
 ) => {
   let stopped: number | undefined
   drive(model, 600, () => ({ throttle: -1, steer: 0, handbrake: false }), {
     speed,
     surface,
+    weather,
     handling: With(knobs),
     each: (_, s) => {
       if (stopped === undefined && forward(s) <= 0.1) stopped = s.pose.x
@@ -223,6 +226,30 @@ test("grip: at ×1.5 a Panda held at full lock at 10 m/s rolls over; halving the
   assert.equal(tips({ grip: 1.5, weightTransfer: 0.5 }), false)
 })
 
+test("weather grip loss: a Panda braking from 50 km/h stops about 1.3 times further on a wet road and 3 times on packed snow; at 0 the weather changes nothing", () => {
+  const kmh50 = 50 / 3.6,
+    wet = { wet: 1, snow: 0 },
+    snow = { wet: 0, snow: 1 }
+  const dry = stopping("panda", kmh50, "asphalt", {})
+  const ratio = (weather: GroundWeather, knobs: Partial<Record<HandlingKey, number>> = {}) =>
+    stopping("panda", kmh50, "asphalt", knobs, weather) / stopping("panda", kmh50, "asphalt", knobs)
+  // ABS holds the tyres near their peak: the distance goes about as 1 / the peak friction (0.72 wet, 0.27 on snow), less what rolling and the air take.
+  assert.ok(ratio(wet) > 1.25 && ratio(wet) < 1.45, `wet: ×${ratio(wet)} of ${dry} m`)
+  assert.ok(ratio(snow) > 2.7 && ratio(snow) < 3.7, `snow: ×${ratio(snow)}`)
+  assert.ok(
+    ratio(wet, { weatherGrip: 0.6 }) < ratio(wet) &&
+      ratio(snow, { weatherGrip: 0.6 }) < ratio(snow) / 1.5,
+    "balanced's share loses less",
+  )
+  assert.equal(stopping("panda", kmh50, "asphalt", { weatherGrip: 0 }, wet), dry)
+  assert.equal(stopping("panda", kmh50, "asphalt", { weatherGrip: 0 }, snow), dry)
+  assert.equal(
+    stopping("panda", kmh50, "asphalt", {}, { wet: 0, snow: 0 }),
+    dry,
+    "dry ground is dry",
+  )
+})
+
 test("off-road grip loss: at 0 a Panda climbs a 15% grass bank as on asphalt", () => {
   const bank: Ground = (x) => 100 + 0.15 * x
   const climb = (looseGround: number) =>
@@ -294,6 +321,25 @@ test("steering at speed: doubled, a Panda at 20 m/s turns its wheels further", (
       handling: With({ steering }),
     }).chassis.steer
   assert.ok(lock(2) > lock(1) * 1.5, `${lock(2)} against ${lock(1)} rad`)
+})
+
+// Design: the steering's lock at speed follows the grip the weather leaves; no test reached physics passing it on.
+test("weather grip loss: at 15 m/s a Panda turns its wheels less on a wet road and much less on snow; at 0 the weather changes nothing", () => {
+  const lock = (weather?: GroundWeather, knobs: Partial<Record<HandlingKey, number>> = {}) =>
+    drive("panda", 30, () => ({ throttle: 0, steer: 1, handbrake: false }), {
+      speed: 15,
+      weather,
+      handling: With(knobs),
+    }).chassis.steer
+  const dry = lock(),
+    wet = { wet: 1, snow: 0 },
+    snow = { wet: 0, snow: 1 }
+  assert.ok(
+    lock(wet) < dry * 0.95 && lock(snow) < dry * 0.75,
+    `wet ×${lock(wet) / dry}, snow ×${lock(snow) / dry} of ${dry} rad`,
+  )
+  assert.equal(lock(wet, { weatherGrip: 0 }), dry)
+  assert.equal(lock(snow, { weatherGrip: 0 }), dry)
 })
 
 test("steering speed: doubled, the wheels turn twice as far in the first steps", () => {

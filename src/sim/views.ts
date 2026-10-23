@@ -8,6 +8,7 @@ import {
   Down,
   Driving,
   Game,
+  GameClock,
   Handling,
   Motion,
   Player,
@@ -19,7 +20,10 @@ import {
   Traffic,
   Vehicle,
   View,
+  Weather,
+  type WeatherValue,
 } from "./schema.ts"
+import { type RomeTime, romeTime } from "./sky/calendar.ts"
 import { VEHICLES } from "./vehicles.ts"
 
 /** Plain view data for the camera and HUD. */
@@ -129,4 +133,30 @@ export const HandlingView = Game.Inspector(
     resources: { handling: Game.System.readResource(Handling) },
   },
   ({ resources }) => resources.handling.get(),
+)
+
+/** The game clock and the weather, as plain data for the render's sky, the audio, the HUD clock and the dev debug menu. */
+export interface SkyViewModel {
+  /** Game time (Unix UTC seconds) and game seconds per step: the sky moves smoothly drawn at `seconds + alpha · rate`. */
+  readonly seconds: number
+  readonly rate: number
+  /** The Europe/Rome wall clock at `seconds`. */
+  readonly local: RomeTime
+  /** The `Weather` resource: the sky module's pure functions (`conditionsAt`, `fogLayers`, `windAt`, `sunAt`…) take it. */
+  readonly weather: WeatherValue
+}
+
+/** The sky the host draws, plays and shows: the clock, Rome's wall clock and the weather. */
+export const SkyView = Game.Inspector(
+  "Lunigiana/SkyView",
+  {
+    resources: {
+      clock: Game.System.readResource(GameClock),
+      weather: Game.System.readResource(Weather),
+    },
+  },
+  ({ resources }): SkyViewModel => {
+    const { seconds, rate } = resources.clock.get()
+    return { seconds, rate, local: romeTime(seconds), weather: resources.weather.get() }
+  },
 )

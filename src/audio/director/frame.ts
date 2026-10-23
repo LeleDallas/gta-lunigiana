@@ -1,15 +1,16 @@
 /**
- * One frame of the director, shared by its vehicle, people and world parts: the listener's ears
- * and surroundings, where things stand (`groundAt`), the way from any source to them (`path`, with
- * the ground under it and its obstacles, cached per key), and the frame's requests. One-shots play
- * at once (a crash or an explosion no louder than `MOST_DB`), loud ones with their echoes off rock
- * faces; continuous voices are offered (`hold`) and `commit` keeps the loudest of each kind up to
- * its cap.
+ * One frame of the director, shared by its vehicle, people, world and thunder parts: the listener's
+ * ears and surroundings (the weather there too), where things stand (`groundAt`), the way from any
+ * source to them (`path`, with the ground under it, its snow, and its obstacles, cached per key), and
+ * the frame's requests. One-shots play at once (a crash, an explosion or thunder no louder than its
+ * `MOST_DB`), loud ones with their echoes off rock faces, and can be cut short (`stop`); continuous
+ * voices are offered (`hold`) and `commit` keeps the loudest of each kind up to its cap.
  *
  * @module audio/director/frame
  */
 import { groundZ } from "../../sim/map/ground.ts"
 import { heightAt } from "../../sim/map/index.ts"
+import type { Conditions } from "../../sim/sky/local.ts"
 import type { VehicleModel } from "../../sim/vehicles.ts"
 import {
   airCutoff,
@@ -40,7 +41,11 @@ export interface Frame {
   /** Speaker time, s, and the time since the last frame (0 while the audio is off or paused). */
   readonly now: number
   readonly dt: number
+  /** The audio context exists: before, nothing is measured or played. */
+  readonly live: boolean
   readonly ears: Ears
+  /** The weather at the ears: the air's temperature, the rain and snow falling, the ground's wetness and snow cover. */
+  readonly air: Conditions
   /** The model of the vehicle the listener sits in. */
   readonly inside: VehicleModel | undefined
   /** The masking floor at the ears, dB(A). */
@@ -52,6 +57,8 @@ export interface Frame {
   readonly hold: (key: string, sound: Continuous, at: Hearing) => void
   /** Plays a one-shot `after` s past its travel time (ignored when inaudible). */
   readonly play: (sound: OneShot, at: Hearing, after?: number) => void
+  /** Fades out what is left of one-shot `sound`, played earlier, and of its echoes. */
+  readonly stop: (sound: OneShot) => void
 }
 
 /** A continuous voice offered this frame. */
@@ -69,6 +76,7 @@ export interface Setup {
   /** The audio context exists: before, nothing is measured or played (state is still tracked). */
   readonly live: boolean
   readonly ears: Ears
+  readonly air: Conditions
   readonly inside: VehicleModel | undefined
   readonly ambient: number
   readonly street: number
@@ -95,12 +103,12 @@ const finite = (p: Placement): boolean =>
 
 /** This frame's view and requests. */
 export const makeFrame = (setup: Setup): Frame => {
-  const { ears, inside, ambient, street, speaker, occluder, now } = setup
+  const { ears, air, inside, ambient, street, speaker, occluder, now } = setup
   const cabin = inside === undefined ? undefined : CABIN[inside]
   const play = (sound: OneShot, at: Hearing, after = 0) => {
     const delay = at.delay + after
     if (!at.audible || !finite(at.placement) || !Number.isFinite(delay)) return
-    // A crash's or an explosion's direct sound only: its echoes, far under it, keep the way's own level.
+    // The direct sound only: its echoes, far under it, keep the way's own level.
     const most = MOST[sound.kind]
     speaker.play(
       sound,
@@ -138,7 +146,9 @@ export const makeFrame = (setup: Setup): Frame => {
     heard: setup.heard,
     now,
     dt: setup.dt,
+    live: setup.live,
     ears,
+    air,
     inside,
     ambient,
     random: setup.random,
@@ -167,6 +177,8 @@ export const makeFrame = (setup: Setup): Frame => {
         db: level.db,
         rMin: level.rMin,
         height,
+        aloft: level.aloft,
+        snow: air.snowCover,
         quiet: way.quiet,
         delta: between.delta,
         forest: between.forest,
@@ -181,6 +193,7 @@ export const makeFrame = (setup: Setup): Frame => {
       if (at.audible && finite(at.placement)) setup.offers.push({ key, sound, at })
     },
     play,
+    stop: (sound) => speaker.stop(sound),
   }
 }
 

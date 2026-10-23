@@ -15,6 +15,7 @@ import { WHEELS_DOWN } from "../sim/chassis.ts"
 import type { DamageStage } from "../sim/damage.ts"
 import type { VehicleNode } from "./actors.ts"
 import { along, fireMaterial, fireShape, HOT } from "./fire.ts"
+import { DRAW_ORDER } from "./order.ts"
 import { PALETTE } from "./palette.ts"
 import { Pool } from "./pool.ts"
 import { between, type PuffLook, Smoke } from "./smoke.ts"
@@ -104,7 +105,7 @@ class Flames {
 
   constructor(random: () => number, max: number) {
     this.random = random
-    this.flames = new Pool(fireShape, fireMaterial, max, STRIDE, 1) // over the smoke it burns in
+    this.flames = new Pool(fireShape, fireMaterial, max, STRIDE, DRAW_ORDER.flames) // over the smoke it burns in
   }
 
   get mesh(): InstancedMesh {

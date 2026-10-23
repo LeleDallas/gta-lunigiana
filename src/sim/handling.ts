@@ -46,6 +46,16 @@ export const HANDLING = {
     description:
       "How much stone, gravel, dirt, grass and leaves differ from asphalt in grip, sliding and rolling drag. 1 is real; 0 drives every surface like asphalt.",
   },
+  weatherGrip: {
+    group: "Tyres",
+    label: "Weather grip loss",
+    kind: "share",
+    min: 0,
+    max: 1,
+    step: 0.05,
+    description:
+      "How much wet ground and snow cover take away from the tyres' grip. 1 is real: a wet road keeps about 0.72 of its dry grip and packed snow about 0.27, so stops are longer and corners slower; 0 drives as on a dry day whatever the weather.",
+  },
   power: {
     group: "Engine and brakes",
     label: "Engine power",
@@ -187,6 +197,7 @@ export type HandlingValue = Readonly<Record<HandlingKey, number>>
 export const REAL_HANDLING = {
   grip: 1,
   looseGround: 1,
+  weatherGrip: 1,
   power: 1,
   brakes: 1,
   drag: 1,
@@ -214,16 +225,17 @@ export const HANDLING_PRESETS = {
   simulation: {
     label: "Simulation",
     description:
-      "Every vehicle as its real data says. Cars slide on gravel and grass, wheels lock and spin without driver aids, and the Ape and the laden truck roll over in sharp turns.",
+      "Every vehicle as its real data says. Cars slide on gravel, grass, wet roads and snow, wheels lock and spin without driver aids, and the Ape and the laden truck roll over in sharp turns.",
     values: REAL_HANDLING,
   },
   balanced: {
     label: "Balanced",
     description:
-      "Realistic with the rough edges filed off: a little more grip, power and braking, ABS and traction control on every vehicle, half the grip lost off the road. Cars stay upright in corners; the Ape still tips in a hard handbrake turn, and the laden truck at full lock from about 84 km/h.",
+      "Realistic with the rough edges filed off: a little more grip, power and braking, ABS and traction control on every vehicle, half the grip lost off the road and a little more than half lost in the wet and on snow. Cars stay upright in corners; the Ape still tips in a hard handbrake turn, and the laden truck at full lock from about 84 km/h.",
     values: {
       grip: 1.1,
       looseGround: 0.5,
+      weatherGrip: 0.6,
       power: 1.15,
       brakes: 1.15,
       drag: 0.9,
@@ -242,10 +254,11 @@ export const HANDLING_PRESETS = {
   arcade: {
     label: "Arcade",
     description:
-      "Pure fun: huge grip everywhere, off the road too, rocket acceleration, very short stops and razor-sharp steering, with a stability assist that keeps you pointed where you steer (a handbrake turn still swings you round). Nothing rolls over in a corner, and a vehicle left on its side or roof rolls back onto its wheels.",
+      "Pure fun: huge grip everywhere, off the road too, rain and snow taking little of it, rocket acceleration, very short stops and razor-sharp steering, with a stability assist that keeps you pointed where you steer (a handbrake turn still swings you round). Nothing rolls over in a corner, and a vehicle left on its side or roof rolls back onto its wheels.",
     values: {
       grip: 2,
       looseGround: 0,
+      weatherGrip: 0.3,
       power: 2.5,
       brakes: 2.5,
       drag: 0.6,

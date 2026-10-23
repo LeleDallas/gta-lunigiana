@@ -14,6 +14,7 @@ import {
   type ChassisValue,
   Damage,
   Game,
+  GameClock,
   Handling,
   Impact,
   Motion,
@@ -22,7 +23,11 @@ import {
   Skid,
   Time,
   Vehicle,
+  Weather,
 } from "../schema.ts"
+import { airAt } from "../sky/climate.ts"
+import { DRY, groundAt, type GroundWeather } from "../sky/local.ts"
+import { weathered } from "../tyres.ts"
 import type { VehicleModel, VehicleSpec } from "../vehicles.ts"
 
 /** Wall hits: share of the impact speed bounced back, and speed lost per m/s of impact. */
@@ -65,9 +70,14 @@ const contact = (
   return { x: x + fx * end + into.x * r, y: y + fy * end + into.y * r }
 }
 
-/** The steering lock at `speed`: full lock while slow, then just enough to turn at the tyres' grip (× the handling's steering at speed). */
-export const steerLimit = (rig: Rig, speed: number): number => {
-  const grip = STEER_GRIP * rig.spec.tyres.grip,
+/**
+ * The steering lock at `speed`: full lock while slow, then just enough to turn at the tyres' grip (× the handling's steering at speed),
+ * `weather` the share of their dry grip the ground leaves them. Wet or snowy ground turns the lock at speed down with the grip: keys
+ * steer all or nothing, and a held key on snow (0.3 µ) would otherwise ask the tyres for 0.85 g and slide the car straight on. A
+ * design call beyond the weather design, kept on purpose: braking, the handbrake or more speed in a bend still slide the car.
+ */
+export const steerLimit = (rig: Rig, speed: number, weather = 1): number => {
+  const grip = STEER_GRIP * rig.spec.tyres.grip * weather,
     lateral = Math.min(grip, TIP_MARGIN * rig.tipping * 9.81) * rig.steering
   return Math.min(
     rig.lock,
@@ -122,6 +132,7 @@ export const rests = (
   ground: Ground = groundZ,
   surface: (x: number, y: number, level: number) => Surface = surfaceAt,
   handling: HandlingValue = REAL_HANDLING,
+  weather: GroundUnder = () => DRY,
   wear: Wear = NEW_ENGINE,
 ): boolean => {
   let state: VehicleState = {
@@ -142,6 +153,7 @@ export const rests = (
       ground,
       surface,
       handling,
+      weather,
       wear,
     )
     state = {
@@ -180,6 +192,8 @@ interface VehicleState {
   readonly motion: { readonly vx: number; readonly vy: number; readonly spin: number }
   readonly chassis: ChassisValue
 }
+/** How wet and snow-covered the ground is at (x, y), `level` m a.s.l. */
+type GroundUnder = (x: number, y: number, level: number) => GroundWeather
 /** A driver's controls: throttle and steer in [-1, 1], the handbrake. */
 interface Pedals {
   readonly throttle: number
@@ -189,11 +203,11 @@ interface Pedals {
 
 /**
  * One step of a vehicle of `model` driven with `input`, before the walls: the steering turns toward
- * the keys within the lock for its speed, the gearbox picks a gear, the engine worn by `wear` drives
- * through it, the throttle against the motion is the brake pedal, and the body moves on its springs
- * and tyres over `ground` (`surface` under each wheel); a destroyed one never rights itself.
- * Returns the moved body, the new steering angle and gearbox, what the tyres and body did, and the
- * surfaces.
+ * the keys within the lock for its speed and the grip the weather leaves, the gearbox picks a gear,
+ * the engine worn by `wear` drives through it, the throttle against the motion is the brake pedal,
+ * and the body moves on its springs and tyres over `ground` (`surface` under each wheel, as wet and
+ * snowy as `weather` says); a destroyed one never rights itself. Returns the moved body, the new
+ * steering angle and gearbox, what the tyres and body did, and the surfaces and their weather.
  */
 export const advance = (
   model: VehicleModel,
@@ -204,6 +218,7 @@ export const advance = (
   ground: Ground = groundZ,
   surface: (x: number, y: number, level: number) => Surface = surfaceAt,
   handling: HandlingValue = REAL_HANDLING,
+  weather: GroundUnder = () => DRY,
   wear: Wear = NEW_ENGINE,
 ) => {
   // A wreck, burning or a charred shell, does not right itself: it stays where it lies.
@@ -221,17 +236,26 @@ export const advance = (
     (input.throttle < 0 && speed > BRAKING) ||
     (input.throttle > 0 && speed < -BRAKING) ||
     (input.throttle === 0 && Math.abs(speed) < BRAKING)
-  const target = input.steer * steerLimit(rig, Math.abs(speed))
+  const c = Ops.cos(pose.angle),
+    s = Ops.sin(pose.angle)
+  const level = chassis.z - spec.cg
+  const contacts = rig.wheels.map((w) => ({
+    x: pose.x + w.at.f * c - w.at.l * s,
+    y: pose.y + w.at.f * s + w.at.l * c,
+  }))
+  const surfaces = contacts.map((p) => surface(p.x, p.y, level)),
+    grounds = contacts.map((p) => weather(p.x, p.y, level))
+  // The share of their dry grip the wheels have left, on average: the steering's lock at speed follows it.
+  const left =
+    grounds.reduce((sum, g, i) => {
+      const grip = rig.grips[surfaces[i]!]
+      return sum + weathered(grip, g, rig.weatherGrip).mu / grip.dry.mu
+    }, 0) / grounds.length
+  const target = input.steer * steerLimit(rig, Math.abs(speed), left)
   const steer = toward(
     chassis.steer,
     target,
     (Math.abs(target) < Math.abs(chassis.steer) ? CENTRE_RATE : STEER_RATE) * rig.steeringRate * dt,
-  )
-  const c = Ops.cos(pose.angle),
-    s = Ops.sin(pose.angle)
-  const level = chassis.z - spec.cg
-  const surfaces = rig.wheels.map((w) =>
-    surface(pose.x + w.at.f * c - w.at.l * s, pose.y + w.at.f * s + w.at.l * c, level),
   )
   const body: BodyState = { ...pose, ...motion, ...chassis }
   const result = integrate(
@@ -243,11 +267,12 @@ export const advance = (
       brake: braking ? Math.abs(input.throttle) || 1 : 0,
       handbrake: input.handbrake,
       surfaces,
+      weather: grounds,
     },
     dt,
     ground,
   )
-  return { body, steer, gearbox, result, surfaces }
+  return { body, steer, gearbox, result, surfaces, grounds }
 }
 
 /**
@@ -278,13 +303,18 @@ export const VehiclePhysics = Game.System(
     resources: {
       time: Game.System.thisTick(Game.System.readResource(Time)),
       handling: Game.System.readResource(Handling),
+      weather: Game.System.readResource(Weather),
+      clock: Game.System.readResource(GameClock),
     },
     events: { impact: Game.System.writeEvent(Impact), skid: Game.System.writeEvent(Skid) },
   },
   ({ queries, resources, events }) => {
     const { dt, step } = resources.time.get(),
-      handling = resources.handling.get()
+      handling = resources.handling.get(),
+      weather = resources.weather.get()
     if (dt <= 0) return
+    const air = airAt(resources.clock.get().seconds, weather),
+      under = (x: number, y: number, level: number) => groundAt(weather, x, y, level, air)
     for (const { entity, data } of queries.vehicles.each()) {
       const { model } = data.vehicle.get()
       const spec = RIGS[model].spec
@@ -309,7 +339,7 @@ export const VehiclePhysics = Game.System(
       )
         continue
 
-      const { body, steer, gearbox, result, surfaces } = advance(
+      const { body, steer, gearbox, result, surfaces, grounds } = advance(
         model,
         { pose, motion, chassis },
         input,
@@ -318,6 +348,7 @@ export const VehiclePhysics = Game.System(
         groundZ,
         surfaceAt,
         handling,
+        under,
         wear,
       )
 
@@ -397,7 +428,7 @@ export const VehiclePhysics = Game.System(
         })
       }
       result.skids.forEach((skid, wheel) => {
-        if (skid.amount >= SKID_FROM)
+        if (skid.amount >= SKID_FROM) {
           events.skid.emit({
             car: entity.id,
             wheel,
@@ -407,8 +438,10 @@ export const VehiclePhysics = Game.System(
             slip: skid.slip,
             amount: skid.amount,
             surface: surfaces[wheel]!,
+            snow: grounds[wheel]!.snow,
             step,
           })
+        }
       })
 
       data.pose.set({ x: at.x, y: at.y, angle })
@@ -425,6 +458,7 @@ export const VehiclePhysics = Game.System(
           groundZ,
           surfaceAt,
           handling,
+          under,
           wear,
         )
       ) {

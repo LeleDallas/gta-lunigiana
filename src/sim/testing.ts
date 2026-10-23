@@ -28,10 +28,12 @@ import {
   Down,
   Explosion,
   Game,
+  GameClock,
   Handling,
   Honk,
   Impact,
   KeyboardInput,
+  Lightning,
   makeRuntime,
   Motion,
   Pedestrian,
@@ -41,6 +43,7 @@ import {
   Pose,
   type PoseValue,
   PrevPose,
+  Rng,
   Route,
   Score,
   setup,
@@ -48,6 +51,7 @@ import {
   Traffic,
   update,
   Vehicle,
+  Weather,
 } from "./index.ts"
 import { graph } from "./map/index.ts"
 import type { Surface } from "./map/surface.ts"
@@ -62,6 +66,7 @@ import {
   roadOf,
   type Step,
 } from "./route.ts"
+import { DRY, type GroundWeather } from "./sky/local.ts"
 import { type parkedCar, type pedestrian, rollingChassis, trafficCar } from "./spawning.ts"
 import { advance } from "./systems/physics.ts"
 import { PERSON_RADIUS } from "./tuning.ts"
@@ -101,6 +106,9 @@ export const World = Game.Inspector(
     resources: {
       score: Game.System.readResource(Score),
       handling: Game.System.readResource(Handling),
+      clock: Game.System.readResource(GameClock),
+      weather: Game.System.readResource(Weather),
+      rng: Game.System.readResource(Rng),
     },
   },
   ({ queries, resources }) => ({
@@ -126,6 +134,10 @@ export const World = Game.Inspector(
     })),
     score: resources.score.get(),
     handling: resources.handling.get(),
+    clock: resources.clock.get(),
+    weather: resources.weather.get(),
+    /** The world's random stream's state: what traffic, pedestrians and parking have drawn. */
+    rng: resources.rng.get(),
   }),
 )
 
@@ -235,6 +247,7 @@ export const start = (timeline: Timeline = [], staging?: readonly [PoseValue, Ca
   const heard = {
     impacts: new Array<Descriptor.Descriptor.Value<typeof Impact>>(),
     honks: new Array<Descriptor.Descriptor.Value<typeof Honk>>(),
+    lightning: new Array<Descriptor.Descriptor.Value<typeof Lightning>>(),
     explosions: new Array<Descriptor.Descriptor.Value<typeof Explosion>>(),
   }
   const listen = Game.Schedule(
@@ -244,12 +257,14 @@ export const start = (timeline: Timeline = [], staging?: readonly [PoseValue, Ca
         events: {
           impacts: Game.System.readEvent(Impact),
           honks: Game.System.readEvent(Honk),
+          lightning: Game.System.readEvent(Lightning),
           explosions: Game.System.readEvent(Explosion),
         },
       },
       ({ events }) => {
         heard.impacts.push(...events.impacts.all())
         heard.honks.push(...events.honks.all())
+        heard.lightning.push(...events.lightning.all())
         heard.explosions.push(...events.explosions.all())
       },
     ),
@@ -372,13 +387,13 @@ export const burning = (model: VehicleModel, pose: PoseValue, fuse: number) =>
     [Damage, { ...UNDAMAGED, amount: 1, fuse }],
   )
 
-/** A traffic car on Via Cesare Battisti, eastbound, standing. */
-export const battistiTraffic = (color: number) =>
+/** A traffic car on Via Cesare Battisti, eastbound, at `at` (the lane's start by default), standing or rolling at `speed` m/s. */
+export const battistiTraffic = (color: number, at: PoseValue = ON_BATTISTI, speed = 0) =>
   trafficCar(
     "panda",
     color,
-    ON_BATTISTI,
-    0,
+    at,
+    speed,
     { ...BATTISTI, side: laneSide(BATTISTI, "panda") },
     nextTrafficEdge(
       endNode(BATTISTI.edge, BATTISTI.forward),
@@ -408,7 +423,8 @@ export interface Pedals {
 
 /**
  * A vehicle driven by `input` for `frames` steps on `ground` (no walls, `advance` alone), starting at the origin heading east at
- * `speed`, under `handling`, its engine worn by `wear`.
+ * `speed`, under `handling`, on `surface` as wet and snowy as `weather` (dry when omitted), its engine
+ * worn by `wear`.
  */
 export const drive = (
   model: VehicleModel,
@@ -418,6 +434,7 @@ export const drive = (
     readonly speed?: number
     readonly ground?: Ground
     readonly surface?: Surface
+    readonly weather?: GroundWeather
     readonly chassis?: Partial<ChassisValue>
     readonly handling?: HandlingValue
     readonly wear?: Wear
@@ -446,6 +463,7 @@ export const drive = (
       ground,
       () => options.surface ?? "asphalt",
       options.handling,
+      () => options.weather ?? DRY,
       options.wear,
     )
     state = {

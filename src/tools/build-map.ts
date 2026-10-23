@@ -8,6 +8,7 @@ import { join } from "node:path"
 import { gzipSync } from "node:zlib"
 
 import type { MonzoneMap } from "../sim/map/index.ts"
+import { ORIGIN } from "../sim/map/kinds.ts"
 import { fitRoads, readCtr } from "./ctr.ts"
 import { fitDistricts } from "./districts.ts"
 import {
@@ -28,7 +29,6 @@ import {
   crossings,
   flatLine,
   M_PER_DEG,
-  ORIGIN,
   r1,
   segIndex,
   type V,

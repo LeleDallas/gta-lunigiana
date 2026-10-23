@@ -8,16 +8,17 @@ import { VEHICLES, type VehicleModel } from "../../../sim/vehicles.ts"
 import { screenAxes } from "../../../sim/view.ts"
 import { hash01 } from "../../../tools/geometry.ts"
 import { AMBIENT_DB, CABIN, dbToGain, gainToDb, SPEED_OF_SOUND } from "../../acoustics.ts"
+import { skyAt } from "../../index.ts"
 import { bells, streetAt, wallAt } from "../../places.ts"
 import { stepRate } from "../../synth/steps.ts"
 import type { Happening, Zone } from "../../types.ts"
-import type { WallClock } from "../index.ts"
 import { MOST_DB, TOWERS, windDb } from "../levels.ts"
 import {
+  at as clock,
   away,
   BANK,
-  BELFRY,
   BEHIND,
+  BELFRY,
   car,
   EAST_FLANK,
   FRAME,
@@ -593,9 +594,9 @@ test("the reverb follows the surroundings: a honk in the open meadow plays dry, 
 })
 
 test("inside the Panda its own crash plays open, at most MOST_DB.crash over gain 1, but its street tail and its echoes come back through the cabin like a crash 3 m away", () => {
-  const crash = (spot: { readonly x: number; readonly y: number }, own: boolean) => {
+  const crash = (spot: { readonly x: number; readonly y: number }, own: boolean, dir = SOUTH) => {
     const director = rig(),
-      other = away(spot, 3, SOUTH),
+      other = away(spot, 3, dir),
       at = own ? spot : other
     const vehicles = [car(5, "panda", spot, { mine: true }), car(2, "panda", other)]
     director.hear(world(spot, { vehicles, happenings: [wallHit(at, 10, own ? 5 : 2)] }, 5))
@@ -611,9 +612,15 @@ test("inside the Panda its own crash plays open, at most MOST_DB.crash over gain
       own!.at.wet < outside!.at.wet,
     `${JSON.stringify(own!.at)} against ${JSON.stringify(outside!.at)}`,
   )
-  for (const spot of [WEST_FLANK, BELFRY]) {
-    const [direct, ...echoes] = crash(spot, true),
-      [, ...outsides] = crash(spot, false)
+  // A like crash, into the same wall on the same ground, so its echoes are as loud: in Monzone Alto's street 3 m south is a stone
+  // wall, 4.5 dB louder than the own crash's bank, and the cabin's floor lets through a faint echo of it the bank's crash lacks.
+  for (const [spot, dir] of [
+    [WEST_FLANK, SOUTH],
+    [BELFRY, { x: -1, y: 0 }],
+  ] as const) {
+    const [direct, ...echoes] = crash(spot, true, dir),
+      [alike, ...outsides] = crash(spot, false, dir)
+    assert.deepEqual(alike!.sound, direct!.sound)
     assert.ok(echoes.length > 0 && echoes.length === outsides.length, `${echoes.length} echoes`)
     echoes.forEach((echo, i) => {
       const like = outsides[i]!.at
@@ -632,7 +639,7 @@ test("inside the Panda its own crash plays open, at most MOST_DB.crash over gain
 })
 
 test("before the audio context runs nothing is measured or played, but who sits where is still tracked", () => {
-  const director = rig(undefined, 0)
+  const director = rig(0)
   director.hear(world(MEADOW, { people: [person(1, MEADOW, { player: true })] }), 1, 0)
   director.hear(world(MEADOW, { vehicles: [car(5, "panda", MEADOW, { mine: true })] }, 5), 30, 0)
   assert.equal(director.plays.length, 0)
@@ -738,16 +745,17 @@ test("in the Carabinieri car a horn press toggles the siren; in the Panda the ho
   assert.equal(horns[1]!.cutoff, CABIN.panda.cutoff)
 })
 
-test("bells: at 15:00 the nearby tower strikes three times 2.5 s apart, at 15:30 once, never twice in the same minute; only the loudest towers ring", () => {
-  let now: WallClock = { hour: 15, minute: 0, second: 0 }
-  const clock = () => now
-  /** 15 s at `spot` (the clock then moves on within its minute): when each pitch's loudest strokes reach the ears (echoes are fainter). */
+test("bells strike the game clock's hours by day: at 15:00 the nearby tower three times 2.5 s apart, once a day; not on the half hour, nor 22:00–06:00", () => {
+  /** `seconds` at `spot` at `hour`:`minute` on day `days`: when each pitch's loudest strokes reach the ears (echoes are fainter). */
   const ring = (
     director: ReturnType<typeof rig>,
     spot: { readonly x: number; readonly y: number },
+    hour: number,
+    minute = 0,
+    days = 0,
+    seconds = 15,
   ) => {
-    director.hear(world(spot), 15 * 60)
-    now = { ...now, second: 30 }
+    director.hear(world(spot, { sky: skyAt(clock(hour, minute, days)) }), seconds * 60)
     const rung = Map.groupBy(director.take("bell"), (p) =>
       p.sound.kind === "bell" ? p.sound.pitch : 0,
     )
@@ -761,20 +769,26 @@ test("bells: at 15:00 the nearby tower strikes three times 2.5 s apart, at 15:30
       }),
     )
   }
-  const director = rig(clock)
+  const director = rig()
   const tower = bells.reduce((a, b) =>
     Math.hypot(b.x - BELFRY.x, b.y - BELFRY.y) < Math.hypot(a.x - BELFRY.x, a.y - BELFRY.y) ? b : a,
   )
-  const [a, b, c, ...more] = ring(director, BELFRY).get(tower.pitch) ?? []
+  const [a, b, c, ...more] = ring(director, BELFRY, 15).get(tower.pitch) ?? []
   assert.ok(
     more.length === 0 && Math.abs(b! - a! - 2.5) < 1e-6 && Math.abs(c! - b! - 2.5) < 1e-6,
     `${[a, b, c, ...more]}`,
   )
-  assert.equal(ring(director, BELFRY).size, 0, "the same minute again")
-  now = { hour: 15, minute: 30, second: 0 }
-  assert.equal(ring(director, BELFRY).get(tower.pitch)?.length, 1)
+  assert.equal(ring(director, BELFRY, 15).size, 0, "the same hour again")
+  assert.equal(ring(director, BELFRY, 15, 30).size, 0, "the half hour")
+  assert.equal(ring(director, BELFRY, 15, 0, 1).get(tower.pitch)?.length, 3, "the next day's 15:00")
+  assert.equal(ring(director, BELFRY, 23).size, 0, "the night's silence")
+  // Its edges: 22:00 and 06:00 would strike 10 and 6 times, within 30 s.
+  assert.equal(ring(director, BELFRY, 22, 0, 0, 30).size, 0, "22:00 is silent")
+  assert.equal(ring(director, BELFRY, 6, 0, 0, 30).size, 0, "06:00 is silent")
+  assert.equal(ring(director, BELFRY, 7, 0, 0, 30).get(tower.pitch)?.length, 7, "07:00 rings")
+  assert.equal(ring(director, BELFRY, 21, 0, 0, 30).get(tower.pitch)?.length, 9, "21:00 rings")
   // Eleven towers are in earshot of the woods above Isolano.
-  const towers = ring(rig(clock), HILLSIDE).size
+  const towers = ring(rig(), HILLSIDE, 15).size
   assert.ok(towers > 0 && towers <= TOWERS, `${towers} towers rang`)
 })
 

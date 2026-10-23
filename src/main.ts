@@ -6,23 +6,15 @@
  * animation frame the render and audio schedules, the camera, world streaming, the frame and the
  * HUD. While the full map (M) or the settings (Esc) are open, both are skipped and the sound is
  * suspended: the game is paused. The build runs in steps the title card names; the card says
- * "Press any key" once the first frame is drawn. In mobile mode (index.html) the touch controls
- * add to the keys.
+ * "Press any key" once the first frame is drawn, and the game clock stands still until it goes. In
+ * mobile mode (index.html) the touch controls add to the keys.
  *
  * @module main
  */
 import { FixedLoop, Result } from "@typeonce/ritmo"
 import { BrowserHostClock, BrowserTickSource, Keyboard } from "@typeonce/ritmo-browser"
 import { Vec2 } from "@typeonce/ritmo-math"
-import {
-  BasicShadowMap,
-  DirectionalLight,
-  HemisphereLight,
-  Object3D,
-  Scene,
-  Vector3,
-  WebGLRenderer,
-} from "three"
+import { BasicShadowMap, Scene, Vector3, WebGLRenderer } from "three"
 
 import { makeDirector } from "./audio/director/index.ts"
 import { Audio, audio } from "./audio/index.ts"
@@ -33,9 +25,10 @@ import type { Shots, Voices } from "./audio/types.ts"
 import { makeHandlingStore } from "./hud/handling.ts"
 import { makeHud, pausable, routeOverlayKeys } from "./hud/hud.ts"
 import { makeSettings } from "./hud/settings.ts"
-import { element, step, titleReady } from "./hud/title.ts"
+import { makeSkyStore } from "./hud/sky.ts"
+import { element, holdClock, step, titleReady } from "./hud/title.ts"
 import { holdLandscape, makeTouchControls, withTouch } from "./hud/touch.ts"
-import { groundY, terrainY } from "./render/ground.ts"
+import { groundY } from "./render/ground.ts"
 import {
   blend,
   Effects,
@@ -44,17 +37,12 @@ import {
   People,
   render,
   RenderClock,
+  Sky,
   Vehicles,
 } from "./render/index.ts"
-import { PALETTE } from "./render/palette.ts"
-import {
-  followSun,
-  PixelView,
-  QUARTER,
-  turnToward,
-  WIDEST_ZOOM,
-  zoomFor,
-} from "./render/pipeline.ts"
+import { PixelView, QUARTER, turnToward, WIDEST_ZOOM, zoomFor } from "./render/pipeline.ts"
+import { SkyHost } from "./render/sky/host.ts"
+import { standIns } from "./render/stand-ins.ts"
 import { World } from "./render/world.ts"
 import {
   bindings,
@@ -63,13 +51,17 @@ import {
   KeyboardInput,
   makeRuntime,
   PlayerView,
+  SetClock,
   SetHandling,
+  SetWeather,
   setup,
+  SkyView,
   STEP,
   update,
 } from "./sim/index.ts"
 import { mapCover } from "./sim/map/cover.ts"
 import { heightAt } from "./sim/map/index.ts"
+import { DAY, daysFromCivil, utcFromRome } from "./sim/sky/calendar.ts"
 import { LOOK_AHEAD } from "./sim/view.ts"
 
 const canvas = document.querySelector<HTMLCanvasElement>("#game")
@@ -82,21 +74,12 @@ const renderer = new WebGLRenderer({
 })
 renderer.shadowMap.enabled = true
 renderer.shadowMap.type = BasicShadowMap
-renderer.setClearColor(PALETTE.forestDark)
 renderer.info.autoReset = false // two renders per frame (scene + blit): reset once per frame instead
 
 const scene = new Scene()
-// Sky from above, warm bounce from the ground: shaded walls stay readable.
-scene.add(new HemisphereLight(0xdbe8f5, 0x9a8a68, 1.8))
-// At its home seat the camera sits north-west, so the sun comes from its side (west-south-west): west walls lit,
-// north walls in shade. The sun turns with the view, so whichever way it looks the walls it shows keep that look.
-const HOME_SUN = new Vector3(-0.75, 1, 0.35).normalize()
-const toSun = new Vector3()
-const sun = new DirectionalLight(0xfff0d8, 2)
-sun.castShadow = true
-sun.shadow.mapSize.set(2048, 2048)
-sun.shadow.normalBias = 0.05 // depth bias and range: followSun
-scene.add(sun, sun.target)
+// The sun (the moon at night) on its real arc, turned with the view, the sky light, the weather and the night lights: every light
+// and weather mesh is made here, before the first frame compiles the shaders (the clear colour too is the sky's, each frame).
+const skyHost = new SkyHost(scene, { reduced: () => reduceMotion.matches })
 await step(document, "Painting land cover", 0.8)
 mapCover() // built once, shared by the world, the tyres' grip and the sound
 await step(document, "Planting trees", 0.86)
@@ -146,18 +129,24 @@ const speaker = makeSpeaker(
   { ...VEHICLE_SHOTS, ...WORLD_SHOTS } satisfies Shots,
 )
 const director = makeDirector(speaker)
+// A new game starts today (the browser's local date) at 08:00 in Rome.
+const today = new Date()
 const made = makeRuntime({
   // `?seed=123` replays a world; otherwise every load is a new one.
   seed:
     Number(
       new URLSearchParams(location.search).get("seed") ?? Math.floor(Math.random() * 2 ** 32),
     ) >>> 0,
+  start: utcFromRome(
+    daysFromCivil(today.getFullYear(), today.getMonth() + 1, today.getDate()) * DAY + 8 * 3600,
+  ),
   services: Game.Runtime.services(
     Game.Runtime.service(KeyboardInput, controls),
     Game.Runtime.service(People, people),
     Game.Runtime.service(Vehicles, vehicles),
     Game.Runtime.service(RenderClock, renderClock),
     Game.Runtime.service(Effects, effects),
+    Game.Runtime.service(Sky, skyHost),
     Game.Runtime.service(Audio, director),
   ),
   ...(import.meta.env.DEV ? { debug: { hostClock: BrowserHostClock.make(window) } } : {}),
@@ -166,6 +155,9 @@ if (!made.ok) throw new Error(`runtime: ${JSON.stringify(made.error)}`)
 const runtime = made.value
 const ready = runtime.tick(setup)
 if (!ready.ok) throw new Error(`setup: ${JSON.stringify(ready.error)}`)
+// The game clock stands still behind the title card (the traffic and the people move on), so the game starts at 08:00 when the
+// player dismisses it: `titleReady` below runs the clock again.
+const play = holdClock((request) => runtime.send(SetClock, request))
 // The player's handling, set from the settings and the dev debug menu; it sets the stored choice now, which ApplyHandling (in setup)
 // already listens for. UI events and this call run between ticks, never inside one, so `send` is safe there.
 const handling = makeHandlingStore({
@@ -226,22 +218,21 @@ const draw = (frame: FixedLoop.Frame): void => {
     Math.abs(zoom - view.texelsPerMetre) < 0.01
       ? zoom - view.texelsPerMetre
       : (zoom - view.texelsPerMetre) * (1 - Math.exp(-3 * dt))
-  toSun.copy(HOME_SUN).applyAxisAngle(Object3D.DEFAULT_UP, view.yaw)
-  followSun(
-    sun,
-    view.focus,
-    toSun,
-    view.shadowFit(toSun, (gx, gz) => terrainY(gx, -gz)),
-  )
+  skyHost.draw(view, renderer)
   world.update(view.focus, view.yaw, reach(), STREAM_BUDGET_MS)
   view.render(scene)
-  hud.update(player, x, y, angle, view.yaw)
+  hud.update(player, x, y, angle, view.yaw, runtime.inspect(SkyView))
   pad?.draw(player)
 }
 
 // The first frame here, shader compiles included: one that throws lands on the card (boot.ts),
 // where in the loop's animation frame it would stop the loop behind "Press any key". It also
-// starts the render schedule reading Skid events before the first update.
+// starts the render schedule reading Skid events before the first update. Every program the game
+// draws is compiled first, at once, for the view's target: the scene's (the night lights and weather
+// meshes included) and the stand-ins' (rivers, trees, glow, cars), so none compiles mid-game.
+const warm = standIns()
+view.compile(scene, warm.group)
+warm.dispose()
 draw({ elapsedSeconds: 0, fixedSteps: 0, alpha: 0, droppedSeconds: 0 })
 // Keys pressed while loading arrive during the steps: drop their presses (held keys stay held).
 controls.snapshot()
@@ -269,11 +260,23 @@ routeOverlayKeys(window, {
   toggleSettings: settings.toggle,
 })
 if (pad !== undefined) holdLandscape(window)
-titleReady(window)
+titleReady(window, play)
 
-// Dev only: the Ritmo monitor (backslash toggles it), the handling debug menu (P) and a handle for
+// Dev only: the Ritmo monitor (backslash toggles it), the debug menu (P: time, weather, handling) and a handle for
 // measuring from the console. No HMR hooks: nothing accepts updates, so Vite reloads the page on every edit.
 if (import.meta.env.DEV) {
+  // The clock and the weather for the debug menu and `gta.sky`; like the handling store's, its sends run between ticks.
+  const sky = makeSkyStore({
+    read: () => runtime.inspect(SkyView),
+    setClock: (request) => runtime.send(SetClock, request),
+    setWeather: (request) => runtime.send(SetWeather, request),
+  })
+  const here = () => {
+    const player = runtime.inspect(PlayerView)
+    return player === undefined
+      ? undefined
+      : { x: player.pose.x, y: player.pose.y, z: heightAt(player.pose.x, player.pose.y) }
+  }
   Object.assign(window, {
     gta: {
       renderer,
@@ -285,6 +288,9 @@ if (import.meta.env.DEV) {
       player: () => runtime.inspect(PlayerView),
       handling: () => runtime.inspect(HandlingView),
       audio: { speaker, level: speaker.level, context: speaker.context },
+      sky,
+      // What the sky host drew last: the sky frame, the sun and moon, the light, the exposure, the fog and the weather at the focus.
+      skyLook: () => skyHost.look,
     },
   })
   const mountDebug = async () => {
@@ -295,7 +301,7 @@ if (import.meta.env.DEV) {
     }
     // After the monitor: the menu's button is anchored beside the monitor's, which must come first in the page.
     const { mountDebugMenu } = await import("./hud/debug.ts")
-    mountDebugMenu({ window, store: handling })
+    mountDebugMenu({ window, handling, sky, here })
   }
   void mountDebug()
 }

@@ -25,6 +25,8 @@ import type {
 
 /** At most this many one-shots play (or wait to) at once. */
 const MAX_SHOTS = 32
+/** A one-shot cut short (`stop`) fades with this time constant, s: a tail under a louder sound ebbs away (35 dB a second), not stops. */
+const STOP_FADE = 0.25
 
 /**
  * The one-shot cap: below `cap` playing, a new sound of `gain` just plays (undefined); at the cap
@@ -59,6 +61,7 @@ interface Held {
 }
 
 interface Playing {
+  readonly sound: OneShot
   readonly gain: number
   readonly end: number
   readonly emitter: Emitter
@@ -209,11 +212,17 @@ export const makeSpeaker = (
         const shot = shots[sound.kind] as Shot<OneShot>
         const end = shot.play({ ctx, out: emitter.input, kit }, sound, now + Math.max(0, delay))
         emitter.free(end + 0.1)
-        playing.push({ gain: at.gain, end, emitter })
+        playing.push({ sound, gain: at.gain, end, emitter })
       } catch (error) {
         emitter?.free(now)
         fail(sound.kind, error)
       }
+    },
+    stop: (sound) => {
+      if (live === undefined) return
+      const now = live.ctx.currentTime
+      for (const shot of playing) if (shot.sound === sound) shot.emitter.release(now, STOP_FADE)
+      playing = playing.filter((shot) => shot.sound !== sound)
     },
     flush: () => {
       if (live === undefined) return

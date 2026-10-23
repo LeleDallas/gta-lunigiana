@@ -2,8 +2,9 @@
  * Tyre smoke and dust: one InstancedMesh of low-poly puffs for the whole map, spawned from the
  * sim's Skid events in proportion to how far past its grip and how fast each tyre slides. Burnt
  * rubber is white-grey on asphalt and stone, dust tan on gravel and dirt, dark brown on leaves, and
- * grass hardly smokes. A puff grows, rises, drifts and shrinks away over 1–2 s of sim time, so the
+ * grass hardly smokes; on snow it is white spray. A puff grows, rises, drifts and shrinks away over 1–2 s of sim time, so the
  * smoke hangs still while the game is paused. When every puff is in the air, the puffs owed meanwhile are dropped.
+ * Drawn after the tyre marks (render order 1).
  *
  * @module render/smoke
  */
@@ -22,8 +23,10 @@ import type { Surface } from "../sim/map/surface.ts"
 import { paint } from "./geometry.ts"
 import { yOf } from "./ground.ts"
 import type { SkidValue } from "./marks.ts"
+import { DRAW_ORDER } from "./order.ts"
 import { PALETTE } from "./palette.ts"
 import { Pool } from "./pool.ts"
+import { weatherMaterial } from "./sky/surface.ts"
 
 /** What a sliding tyre throws up on each surface: its colour, and puffs per second per m/s of slip at a full slide. */
 export const PUFF = {
@@ -35,6 +38,8 @@ export const PUFF = {
   leaves: { hex: PALETTE.woodBrown, rate: 1 },
 } as const satisfies Record<Surface, { readonly hex: number; readonly rate: number }>
 
+/** What a tyre throws up from snow (Skid.snow 1): white spray. */
+const SPRAY = new Color(PALETTE.snowFlake)
 /** How a kind of puff moves and lasts, each a [min, max] range drawn per puff: drift and rise (m/s), life (sim s) and peak radius (m). */
 export interface PuffLook {
   readonly drift: readonly [number, number]
@@ -49,19 +54,24 @@ const TYRE: PuffLook = { drift: [0.2, 0.6], rise: [0.5, 0.9], life: [1, 2], size
 const STRIDE = 10
 
 const shape = paint(new IcosahedronGeometry(1, 0), 0xffffff) // tinted per puff by its instance colour
-const material = new MeshLambertMaterial({
-  vertexColors: true,
-  flatShading: true,
-  transparent: true,
-  opacity: 0.6,
-  depthWrite: false,
-})
+// Lit like the people and cars: shaded by the clouds, not snowed on.
+const material = weatherMaterial(
+  new MeshLambertMaterial({
+    vertexColors: true,
+    flatShading: true,
+    transparent: true,
+    opacity: 0.6,
+    depthWrite: false,
+  }),
+  "actor",
+)
 const matrix = new Matrix4(),
   at = new Vector3(),
   turn = new Quaternion(),
   size = new Vector3(),
   up = new Vector3(0, 1, 0),
-  tint = new Color()
+  tint = new Color(),
+  sprayed = new Color()
 
 /** Every puff in the air. Host state for the page's life: nothing loads a save in the browser. */
 export class Smoke {
@@ -73,7 +83,7 @@ export class Smoke {
 
   constructor(random: () => number = Math.random, max = 256) {
     this.random = random
-    this.puffs = new Pool(shape, material, max, STRIDE)
+    this.puffs = new Pool(shape, material, max, STRIDE, DRAW_ORDER.smoke)
   }
 
   /** The puffs' mesh, for the scene. */
@@ -84,15 +94,10 @@ export class Smoke {
   /** One step of a sliding tyre. */
   add(skid: SkidValue): void {
     this.debt += PUFF[skid.surface].rate * skid.amount * skid.slip * STEP.dt
+    if (this.debt < 1) return
+    const hex = sprayed.setHex(PUFF[skid.surface].hex).lerp(SPRAY, skid.snow).getHex()
     for (; this.debt >= 1; this.debt--)
-      this.puff(
-        skid.x,
-        yOf(skid.z) + 0.2,
-        -skid.y,
-        skid.step * STEP.dt,
-        PUFF[skid.surface].hex,
-        TYRE,
-      )
+      this.puff(skid.x, yOf(skid.z) + 0.2, -skid.y, skid.step * STEP.dt, hex, TYRE)
   }
 
   /** Moves every puff to sim time `now` (s) and lets the burnt-out ones go. */

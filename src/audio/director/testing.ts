@@ -1,24 +1,19 @@
 /**
- * The director tests' kit: real map spots, a director on a recording speaker with a seeded random
- * source and a clock the test advances, and the plain `Heard` data the tests stage (a vehicle, a
- * person, a frame of the world, a wall hit). Imported only by tests.
- *
- * The spots were found by probing the map: a treeless meadow on Monte dei Bianchi clear for 300 m to
- * the south and screen-right, a lane at Pian del Molino with a 10.7 m building 30 m east and open
- * ground 30 m north-west, a wooded ridge above Aiola (900 m) with no water within 400 m, Monzone
- * station 68 m from the Torrente Lucido, a street 50 m from Monzone Alto's tower, the woods above
- * Isolano, in earshot of eleven bell towers, and the street of Monzone where the game starts, 50 m
- * from the Lucido behind the houses; a bank 15 m from the Lucido with nothing in the way, the two
- * flanks of Monte San Giorgio, 400 m apart (the west one in the open under a rock face), Gragnola's
- * centre, walled in on every side, the rendered house wall on Via Cesare Battisti where
- * src/sim/__tests__/index.test.ts drives a Panda, on its cobbles, and the riverbed's gravel 16 m
- * under a bridge's asphalt deck.
+ * Test kit for the director's tests: real map spots, a director on a recording speaker with a
+ * seeded random source, and `Heard` frames built from a few vehicles, people and happenings, at a
+ * calm mid-morning (10:10 on 22 October, the sun 22° up, dry, the usual wind) under which every
+ * law of the day and the weather is the identity, unless a test sets its own sky or weather.
  *
  * @module audio/director/testing
  */
 import { groundZ } from "../../sim/map/ground.ts"
+import type { WeatherValue } from "../../sim/schema.ts"
+import { DAY, daysFromCivil, utcFromRome } from "../../sim/sky/calendar.ts"
+import { NO_SNOW } from "../../sim/sky/climate.ts"
+import { initialWeather } from "../../sim/sky/weather.ts"
 import { VEHICLES, type VehicleModel } from "../../sim/vehicles.ts"
 import { screenAxes } from "../../sim/view.ts"
+import { skyAt } from "../index.ts"
 import type {
   Continuous,
   Happening,
@@ -30,28 +25,40 @@ import type {
   Speaker,
   Zone,
 } from "../types.ts"
-import { makeDirector, type WallClock } from "./index.ts"
+import { makeDirector } from "./index.ts"
+import { USUAL_WIND } from "./sky.ts"
 
-/** The open meadow, the lane at Pian del Molino, behind its building and in the open beside it. */
-export const MEADOW = { x: -329, y: 1078 },
-  STREET = { x: -916.6, y: 1706.8 },
-  BEHIND = { x: -886.6, y: 1706.8 },
-  OPEN = { x: -937.8, y: 1728 }
-/** The wooded ridge, Monzone station, the street under Monzone Alto's tower. */
-export const RIDGE = { x: 1600, y: -494.5 },
-  STATION = { x: -494, y: 437 },
-  BELFRY = { x: -41.8, y: -306.6 }
-/** The woods above Isolano, Monzone's street where the game starts, the bank of the Lucido. */
-export const HILLSIDE = { x: -950, y: 71 },
-  SPAWN = { x: -412.6, y: 437.8 },
-  BANK = { x: -418.6, y: 395.8 }
-/** Monte San Giorgio's flanks, the house wall on Via Cesare Battisti. */
-export const WEST_FLANK = { x: 785.7, y: -563.4 },
-  EAST_FLANK = { x: 1185.7, y: -563.4 },
-  HOUSE_WALL = { x: -429.85, y: 452.9 }
-/** Gragnola's walled centre, the riverbed under a bridge. */
-export const GRAGNOLA = { x: -1751.2, y: 3360.4 },
-  UNDER_BRIDGE = { x: -1190.3, y: 1273.1 }
+// Real map spots, found by probing the map.
+/** A treeless meadow on Monte dei Bianchi, clear for 300 m to the south and screen-right. */
+export const MEADOW = { x: -329, y: 1078 }
+/** A lane at Pian del Molino with a 10.7 m building 30 m east (`BEHIND`) and open ground 30 m north-west (`OPEN`). */
+export const STREET = { x: -916.6, y: 1706.8 }
+/** Behind the 10.7 m building east of `STREET`. */
+export const BEHIND = { x: -886.6, y: 1706.8 }
+/** The open ground north-west of `STREET`. */
+export const OPEN = { x: -937.8, y: 1728 }
+/** A wooded ridge above Aiola (900 m), with no water within 400 m. */
+export const RIDGE = { x: 1600, y: -494.5 }
+/** Monzone station, 68 m from the Torrente Lucido. */
+export const STATION = { x: -494, y: 437 }
+/** A street 50 m from Monzone Alto's tower. */
+export const BELFRY = { x: -41.8, y: -306.6 }
+/** The woods above Isolano, in earshot of eleven bell towers. */
+export const HILLSIDE = { x: -950, y: 71 }
+/** The street of Monzone where the game starts, 50 m from the Lucido behind the houses. */
+export const SPAWN = { x: -412.6, y: 437.8 }
+/** A bank 15 m from the Lucido, with nothing in the way. */
+export const BANK = { x: -418.6, y: 395.8 }
+/** Monte San Giorgio's west flank, in the open under a rock face, 400 m from `EAST_FLANK`. */
+export const WEST_FLANK = { x: 785.7, y: -563.4 }
+/** Monte San Giorgio's east flank, 400 m from `WEST_FLANK` across the mountain. */
+export const EAST_FLANK = { x: 1185.7, y: -563.4 }
+/** The rendered house wall on Via Cesare Battisti where src/sim/__tests__/index.test.ts drives a Panda, on its cobbles. */
+export const HOUSE_WALL = { x: -429.85, y: 452.9 }
+/** Gragnola's centre, walled in on every side. */
+export const GRAGNOLA = { x: -1751.2, y: 3360.4 }
+/** The riverbed's gravel 16 m under a bridge's asphalt deck. */
+export const UNDER_BRIDGE = { x: -1190.3, y: 1273.1 }
 /** One frame at 60 Hz, s. */
 export const FRAME = 1 / 60
 /** Screen-right on the ground, with the view in its home seat. */
@@ -60,8 +67,19 @@ export const SCREEN_RIGHT = screenAxes(0).right
 export const SOUTH = { x: 0, y: -1 }
 /** A Panda's mass, t. */
 export const PANDA = VEHICLES.panda.mass / 1000
-/** A Panda revving at the redline under full load. */
-export const FULL = { rpm: VEHICLES.panda.engine.redline, load: 1 } as const
+
+/** Game time `hour`:`minute` on 22 October 2026, Rome time, `days` later. */
+export const at = (hour: number, minute = 0, days = 0): number =>
+  utcFromRome((daysFromCivil(2026, 10, 22) + days) * DAY + hour * 3600 + minute * 60)
+/** The tests' sky: 10:10 on 22 October, the sun 22° up, past the dawn chorus. */
+export const MORNING = skyAt(at(10, 10))
+/** The tests' weather: clear and dry, no snow on the map, the wind the law was tuned for with the valley's usual gusts. */
+export const CALM: WeatherValue = {
+  ...initialWeather(MORNING.seconds, 1),
+  wind: USUAL_WIND,
+  gust: 1.5,
+  snowLine: NO_SNOW,
+}
 
 /** A small deterministic random source. */
 const seeded = (seed: number) => () => (seed = (seed * 1664525 + 1013904223) >>> 0) / 2 ** 32
@@ -75,25 +93,28 @@ interface Played {
 }
 
 /** A director on a recording speaker whose clock (from `t`; 0 is no context yet) the test advances by `dt` per `hear`. */
-export const rig = (
-  clock: () => WallClock = () => ({ hour: 10, minute: 10, second: 0 }),
-  t = 1,
-) => {
+export const rig = (t = 1) => {
   let holding = new Map<string, { readonly sound: Continuous; readonly at: Placement }>()
   let held = holding
-  const plays: Array<Played> = []
+  const plays: Array<Played> = [],
+    stops: Array<{ readonly sound: OneShot; readonly t: number }> = []
   const speaker: Speaker = {
     now: () => t,
     hold: (key, sound, at) => void holding.set(key, { sound, at }),
     play: (sound, at, delay) => void plays.push({ sound, at, delay, t }),
+    stop: (sound) => void stops.push({ sound, t }),
     flush: () => {
       held = holding
       holding = new Map()
     },
   }
-  const director = makeDirector(speaker, { random: seeded(7), clock })
+  const director = makeDirector(speaker, { random: seeded(7) })
   return {
     plays,
+    /** The one-shots stopped, and when. */
+    stops,
+    /** The speaker's time now. */
+    now: () => t,
     /** What the last frame held. */
     held: () => held,
     hear: (heard: Heard, frames = 1, dt = FRAME) => {
@@ -137,6 +158,8 @@ export const car = (
   burning: false,
   ...more,
 })
+/** A Panda revving at the redline under full load. */
+export const FULL = { rpm: VEHICLES.panda.engine.redline, load: 1 } as const
 /** Person `id` standing at `at`. */
 export const person = (
   id: number,
@@ -153,7 +176,7 @@ export const person = (
   down: false,
   ...more,
 })
-/** A frame of the world heard at `at`, on foot or sitting in `car`. */
+/** The listener at `at` (in `car` when given), with `more` of the world, at the tests' sky and weather unless it sets them. */
 export const world = (
   at: { readonly x: number; readonly y: number },
   more: Partial<Heard> = {},
@@ -164,9 +187,11 @@ export const world = (
   people: [],
   happenings: [],
   horn: false,
+  sky: MORNING,
+  weather: CALM,
   ...more,
 })
-/** The point `metres` from `from` along `dir` (screen-right by default). */
+/** `metres` from `from` toward `dir` (screen-right by default). */
 export const away = (
   from: { readonly x: number; readonly y: number },
   metres: number,

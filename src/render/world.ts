@@ -1,7 +1,9 @@
 /**
  * The static world, streamed around the camera focus in the chunks of render/chunks. A built
- * chunk is one terrain mesh, one solid mesh (buildings, roofs, bridges, platforms), one decal
- * mesh (roads, water, rail) and an InstancedMesh per tree kind. Pieces and trees are bucketed
+ * chunk is one terrain mesh, one solid mesh (buildings, roofs, bridges, platforms, street-lamp
+ * brackets), one decal mesh (roads, rail), one water mesh (rivers and streams), one glow mesh
+ * (window panes and lantern glass, lit at night) and an InstancedMesh per tree kind; empty layers
+ * make no mesh. Pieces and trees are bucketed
  * per chunk once, so a build reads only its own; the land cover is rasterised once for the whole
  * map (`mapCover`, shared with the audio host; ≈ 105 ms, 4.9 MB, cheaper than clipping areas per
  * chunk). Dynamic actors are not here (see render/index.ts).
@@ -32,25 +34,40 @@ import {
   decalMaterial,
   merge,
   solidMaterial,
+  treeMaterial,
   Triangles,
+  waterMaterial,
   type Piece,
   type Sink,
 } from "./geometry.ts"
 import { linePieces } from "./lines.ts"
 import { viewAxes } from "./pipeline.ts"
+import { glowMaterial } from "./sky/glow.ts"
+import { lampPieces } from "./sky/lamps.ts"
 import { terrainChunk } from "./terrain.ts"
 import { bucketTrees, treeMeshes } from "./trees.ts"
 
-const staticMesh = (geometry: BufferGeometry, material: Material, cast: boolean): Mesh => {
+const staticMesh = (
+  geometry: BufferGeometry,
+  material: Material,
+  cast: boolean,
+  receive = true,
+): Mesh => {
   const mesh = new Mesh(geometry, material)
   mesh.castShadow = cast
-  mesh.receiveShadow = true
+  mesh.receiveShadow = receive
   mesh.matrixAutoUpdate = false
   mesh.updateMatrix()
   return mesh
 }
 
-const emptySink = (): Sink => ({ solid: new Triangles(), decal: new Triangles(), pieces: [] })
+const emptySink = (): Sink => ({
+  solid: new Triangles(),
+  decal: new Triangles(),
+  water: new Triangles(),
+  glow: new Triangles(),
+  pieces: [],
+})
 
 /**
  * Pieces per chunk key: flat (piece, k0, k1) triples, k0..k1 being the piece's segments whose
@@ -90,7 +107,11 @@ export class World {
   /** The meshes of every built chunk, by key. */
   readonly loaded = new Map<number, ReadonlyArray<Mesh>>()
   private readonly parent: Object3D
-  private readonly pieces: ReadonlyArray<Piece> = [...buildingPieces(), ...linePieces()]
+  private readonly pieces: ReadonlyArray<Piece> = [
+    ...buildingPieces(),
+    ...linePieces(),
+    ...lampPieces(),
+  ]
   private readonly byChunk = bucketPieces(this.pieces)
   private readonly trees = bucketTrees()
   private readonly cover = mapCover()
@@ -148,7 +169,10 @@ export class World {
     const solid = [...(sink.solid.empty ? [] : [sink.solid.geometry()]), ...sink.pieces]
     if (solid.length > 0) meshes.push(staticMesh(merge(solid), solidMaterial, true))
     if (!sink.decal.empty) meshes.push(staticMesh(sink.decal.geometry(), decalMaterial, false))
+    if (!sink.water.empty) meshes.push(staticMesh(sink.water.geometry(), waterMaterial, false))
+    // Unlit: it neither casts nor receives (an unlit program has no use for the shadow map).
+    if (!sink.glow.empty) meshes.push(staticMesh(sink.glow.geometry(), glowMaterial, false, false))
     const trees = this.trees.get(key)
-    return trees === undefined ? meshes : [...meshes, ...treeMeshes(trees, solidMaterial)]
+    return trees === undefined ? meshes : [...meshes, ...treeMeshes(trees, treeMaterial)]
   }
 }

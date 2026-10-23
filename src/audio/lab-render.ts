@@ -7,6 +7,7 @@
  */
 import { VEHICLES } from "../sim/vehicles.ts"
 import { measure } from "./measure.ts"
+import { LONGEST } from "./synth/thunder.ts"
 import { VEHICLE_SHOTS, VEHICLE_VOICES } from "./synth/vehicles.ts"
 import { WORLD_SHOTS, WORLD_VOICES } from "./synth/world.ts"
 import type { Continuous, Kit, OneShot, Shot, Shots, VoiceFactory, Voices } from "./types.ts"
@@ -23,8 +24,8 @@ export type Sound = Continuous | OneShot
 export const RATE = 48000
 /** Voices settle (fade in) for `settle` s, are measured for `seconds`, then stopped: they must be silent `fade` s later, when the speaker frees their emitter. */
 const VOICE_RENDER = { settle: 0.5, seconds: 2, fade: 0.5 } as const
-/** Room for the longest shot: a bell rings 10 s. */
-const SHOT_SECONDS = 12
+/** Room for the longest shot: a thunder rolls up to `LONGEST` (20 s). */
+const SHOT_SECONDS = LONGEST + 2
 /** Below this peak a render counts as silent (−80 dBFS); above `CLIP`, as clipping. */
 const SILENT = 1e-4,
   CLIP = 0.95

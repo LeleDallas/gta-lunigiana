@@ -15,7 +15,8 @@ import { righting, steadying } from "./assists.ts"
 import { fitPlane, GRAVITY, type Offset, type Rig, tiltOf, turn, WHEELS_DOWN } from "./chassis.ts"
 import { groundZ } from "./map/ground.ts"
 import type { Surface } from "./map/surface.ts"
-import { loaded, tyreForce } from "./tyres.ts"
+import { DRY, type GroundWeather } from "./sky/local.ts"
+import { loaded, tyreForce, weathered } from "./tyres.ts"
 
 /** Substeps per simulation step: 240 Hz keeps the stiff tyre and contact forces stable. */
 const SUBSTEPS = 4
@@ -68,8 +69,9 @@ export interface Controls {
   readonly brake: number
   /** The handbrake locks the wheels that do not steer. */
   readonly handbrake: boolean
-  /** The surface under each wheel. */
+  /** The surface under each wheel, and how wet and snow-covered it is there. */
   readonly surfaces: ReadonlyArray<Surface>
+  readonly weather: ReadonlyArray<GroundWeather>
 }
 
 /** The hardest a wheel slid this step, where. */
@@ -131,6 +133,13 @@ export const integrate = (
   const hullK = (m * (2 * Math.PI * HULL_HZ) ** 2) / 4,
     hullD = 2 * HULL_DAMPING * Math.sqrt((hullK * m) / 4)
   const steer = { c: Ops.cos(controls.steer), s: Ops.sin(controls.steer) }
+  const grips = rig.wheels.map((_, i) =>
+    weathered(
+      rig.grips[controls.surfaces[i] ?? "asphalt"],
+      controls.weather[i] ?? DRY,
+      rig.weatherGrip,
+    ),
+  )
   let hit: GroundHit | undefined,
     grounded = 0
   for (let k = 0; k < SUBSTEPS; k++) {
@@ -230,7 +239,7 @@ export const integrate = (
       const share = w.load / GRAVITY,
         alongMass = share / (1 + (m * lever.u * lever.u) / rig.iy),
         sideMass = share / (1 + (m * lever.u * lever.u) / rig.ix)
-      const grip = rig.grips[controls.surfaces[i] ?? "asphalt"]
+      const grip = grips[i]!
       const out = tyreForce({
         load,
         mu: loaded(grip.mu * spec.tyres.grip, load, w.load),

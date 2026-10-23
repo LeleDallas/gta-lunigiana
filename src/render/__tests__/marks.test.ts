@@ -15,6 +15,7 @@ const skid = (step: number, wheel = 0, car = 1, amount = 1): SkidValue => ({
   slip: 8,
   amount,
   surface: "asphalt",
+  snow: 0,
   step,
 })
 
@@ -120,4 +121,19 @@ test("a skid in the tunnel near Monzone lies on its floor, not on the hill above
     marks.add({ ...skid(step), x: -116.3 + step * 0.1, y: 324.2, z: 211.42 }, 0.2)
   for (const [, y] of corners(marks, 0))
     assert.ok(Math.abs(y! - yOf(211.42)) < 0.1, `${y! - yOf(211.42)} m off the tunnel floor`)
+})
+
+test("on snow a sliding tyre leaves dark slush ruts, whatever the ground under the snow; marks draw before the smoke", () => {
+  const marks = new Marks()
+  for (const step of [1, 2]) marks.add({ ...skid(step), surface: "grass", snow: 1 }, 0.2)
+  for (const step of [1, 2]) marks.add({ ...skid(step, 1), surface: "grass" }, 0.2)
+  const c = marks.mesh.geometry.getAttribute("color").array
+  const [rut, bare] = [0, 1].map((q) => ({
+    rgb: [c[q * 16]!, c[q * 16 + 1]!, c[q * 16 + 2]!],
+    alpha: c[q * 16 + 3]!,
+  }))
+  const value = (rgb: Array<number>) => Math.max(...rgb)
+  assert.ok(value(rut!.rgb) < 0.12, `a dark rut: ${rut!.rgb}`)
+  assert.ok(rut!.alpha > bare!.alpha, "plainer on white snow than on grass")
+  assert.equal(marks.mesh.renderOrder, 0, "the first transparent effect drawn")
 })

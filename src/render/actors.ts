@@ -4,18 +4,20 @@
  * `rotation.y = heading` (radians CCW from east). Each node carries an x-ray proxy: a flat
  * silhouette drawn only where the world hides the actor. A vehicle's mesh stands on y = 0 at rest,
  * centred on its centre of mass, with its wheels where `VEHICLES` puts them; its node sits at the
- * centre of mass, so body and proxy hang `cg` below it.
+ * centre of mass, so body and proxy hang `cg` below it. Its head and tail lamps are a child of the
+ * body, one unlit mesh per model that shines at night when on.
  *
  * @module render/actors
  */
 import {
   Box3,
   BoxGeometry,
+  Color,
   CylinderGeometry,
   GreaterDepth,
   Group,
   Mesh,
-  MeshBasicMaterial,
+  ShaderMaterial,
   Vector3,
   type BufferGeometry,
   type Material,
@@ -24,7 +26,10 @@ import {
 import type { Look } from "../sim/index.ts"
 import { VEHICLES, type VehicleModel } from "../sim/vehicles.ts"
 import { linear, merge, paint } from "./geometry.ts"
+import { DRAW_ORDER } from "./order.ts"
 import { PALETTE } from "./palette.ts"
+import { vehicleLampMaterials } from "./sky/glow.ts"
+import { SKY_UNIFORMS } from "./sky/uniforms.ts"
 
 const box = (
   w: number,
@@ -88,8 +93,6 @@ const VEHICLE_BODIES = {
       box(l, 0.75, w, 0, 0.3, 0, body),
       box(l * 0.6, 0.55, w * 0.92, -l * 0.08, 1.05, 0, glass),
       box(l * 0.62, 0.08, w * 0.94, -l * 0.08, 1.6, 0, body),
-      box(0.06, 0.16, 0.3, l / 2, 0.75, w * 0.32, PALETTE.marbleWhite),
-      box(0.06, 0.16, 0.3, l / 2, 0.75, -w * 0.32, PALETTE.marbleWhite),
     ]
   },
   ape: (body) => {
@@ -120,11 +123,62 @@ const VEHICLE_BODIES = {
       box(l * 0.52, 0.08, w * 0.92, -l * 0.06, 1.45, 0, PALETTE.marbleWhite),
       box(0.3, 0.12, w * 0.7, -l * 0.02, 1.53, 0, PALETTE.limestone),
       box(0.3, 0.1, w * 0.3, -l * 0.02, 1.55, w * 0.2, PALETTE.carabinieriBlue),
-      box(0.06, 0.16, 0.34, l / 2, 0.7, w * 0.32, PALETTE.marbleWhite),
-      box(0.06, 0.16, 0.34, l / 2, 0.7, -w * 0.32, PALETTE.marbleWhite),
     ]
   },
 } as const satisfies Record<VehicleModel, (paint: number) => Array<BufferGeometry>>
+
+/** A pair of lamps (or one, at `z` 0) on a front or back face: centre x, bottom y, half the spacing z, box size. */
+const lampPair = (
+  x: number,
+  y: number,
+  z: number,
+  w: number,
+  h: number,
+  hex: number,
+): Array<BufferGeometry> =>
+  z === 0
+    ? [box(0.06, h, w, x, y, 0, hex)]
+    : [box(0.06, h, w, x, y, z, hex), box(0.06, h, w, x, y, -z, hex)]
+
+/** Head lamps (white, on the front face) and tail lamps (red, on the back face) per model, standing 3 cm proud of the body. */
+const VEHICLE_LAMPS = {
+  panda: () => {
+    const { length: l, width: w } = VEHICLES.panda
+    return [
+      ...lampPair(l / 2, 0.75, w * 0.32, 0.3, 0.16, PALETTE.marbleWhite),
+      ...lampPair(-l / 2, 0.8, w * 0.36, 0.24, 0.14, PALETTE.signalRed),
+    ]
+  },
+  ape: () => {
+    const { length: l, width: w } = VEHICLES.ape
+    return [
+      ...lampPair(l * 0.49, 0.62, 0, 0.22, 0.16, PALETTE.marbleWhite),
+      ...lampPair(-l * 0.48, 0.72, w / 2 - 0.06, 0.12, 0.12, PALETTE.signalRed),
+    ]
+  },
+  truck: () => {
+    const { length: l, width: w } = VEHICLES.truck
+    return [
+      ...lampPair(l / 2, 0.8, w * 0.36, 0.3, 0.16, PALETTE.marbleWhite),
+      ...lampPair(-l / 2, 0.92, w * 0.4, 0.26, 0.14, PALETTE.signalRed),
+    ]
+  },
+  carabinieri: () => {
+    const { length: l, width: w } = VEHICLES.carabinieri
+    return [
+      ...lampPair(l / 2, 0.7, w * 0.32, 0.34, 0.16, PALETTE.marbleWhite),
+      ...lampPair(-l / 2, 0.78, w * 0.35, 0.3, 0.14, PALETTE.signalRed),
+    ]
+  },
+} as const satisfies Record<VehicleModel, () => Array<BufferGeometry>>
+
+const lampGeometry = new Map<VehicleModel, BufferGeometry>()
+/** A model's lamps, built once and shared by every vehicle of the model (never disposed). */
+const lampsOf = (model: VehicleModel): BufferGeometry => {
+  let geometry = lampGeometry.get(model)
+  if (geometry === undefined) lampGeometry.set(model, (geometry = merge(VEHICLE_LAMPS[model]())))
+  return geometry
+}
 
 /**
  * Where smoke and fire leave each model's engine, in its mesh's frame (forward, up from the ground, right; m), just outside the
@@ -141,8 +195,16 @@ const ENGINE = {
   { readonly x: number; readonly y: number; readonly z: number }
 >
 
-const xrayMaterial = new MeshBasicMaterial({
-  color: PALETTE.signYellow,
+/**
+ * The x-ray's flat yellow, unlit. It is divided by the post pass's exposure, as the lamps are
+ * (`sky/glow`), so it shows the same yellow on screen at any hour, not one brightened 4× at night.
+ */
+const xrayMaterial = new ShaderMaterial({
+  uniforms: { uColor: { value: new Color(PALETTE.signYellow) }, uExposure: SKY_UNIFORMS.uExposure },
+  vertexShader:
+    "void main() { gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }",
+  fragmentShader:
+    "uniform vec3 uColor; uniform float uExposure; void main() { gl_FragColor = vec4(uColor / uExposure, 1.0); }",
   depthFunc: GreaterDepth,
   depthWrite: false,
 })
@@ -165,7 +227,7 @@ const xray = (shapes: ReadonlyArray<BufferGeometry>): Mesh => {
     new BoxGeometry(size.x, size.y, size.z).translate(centre.x, centre.y, centre.z),
     xrayMaterial,
   )
-  proxy.renderOrder = 1 // after the opaque world, so the depth buffer is complete
+  proxy.renderOrder = DRAW_ORDER.xray // after the opaque world, so the depth buffer is complete
   proxy.visible = false
   return proxy
 }
@@ -221,6 +283,8 @@ export class VehicleNode extends ActorNode {
   /** Where its engine was when it last gave off smoke, and when (sim s): the next frame's smoke trails out from there. */
   readonly smoked = new Vector3()
   smokedAt = -1
+  /** Head and tail lamps, a child of the body: the model's shared geometry, unlit, dark (off) until `setLamps(true)`. */
+  readonly lamps: Mesh
   constructor(model: VehicleModel, paint: number, geometry: BufferGeometry, material: Material) {
     super(geometry, material, xray([geometry]))
     this.model = model
@@ -231,6 +295,12 @@ export class VehicleNode extends ActorNode {
       ENGINE[model].y - VEHICLES[model].cg,
       ENGINE[model].z,
     )
+    this.lamps = new Mesh(lampsOf(model), vehicleLampMaterials.off)
+    this.body.add(this.lamps)
+  }
+  /** Lamps on (they shine at night: moving traffic, the player's car) or off (parked cars keep the day look). */
+  setLamps(on: boolean): void {
+    this.lamps.material = on ? vehicleLampMaterials.on : vehicleLampMaterials.off
   }
 }
 

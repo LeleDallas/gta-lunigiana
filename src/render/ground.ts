@@ -26,3 +26,6 @@ export const surfaceY = (z: number, x: number, y: number, lift: number, lifted: 
 /** Where an actor at (x, y) stands in render y, keeping to the level nearest `near` (its previous render height); see `groundZ`. */
 export const groundY = (x: number, y: number, near?: number): number =>
   yOf(groundZ(x, y, near === undefined ? undefined : near + ELEVATION_BASE))
+
+/** Faces steeper than this (normal y below it, ≈ 50°) show bare rock, and hold no snow (render/terrain, render/sky/surface). */
+export const ROCK_NORMAL_Y = 0.64

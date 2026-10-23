@@ -12,7 +12,7 @@ import { MAP } from "../sim/map/index.ts"
 import { hash01 } from "../tools/geometry.ts"
 import { CELLS, chunkCells } from "./chunks.ts"
 import { linear } from "./geometry.ts"
-import { terrainNodeY } from "./ground.ts"
+import { ROCK_NORMAL_Y, terrainNodeY } from "./ground.ts"
 import { PALETTE } from "./palette.ts"
 
 const hm = MAP.heightmap
@@ -50,9 +50,6 @@ const COVER_LOOK = {
   ruins: { base: PALETTE.stoneMid, alt: PALETTE.forest, share: 0.4 },
   pebble: { base: PALETTE.limestone, alt: PALETTE.marbleWhite, share: 0.4 },
 } as const satisfies Record<Cover, CoverLook>
-
-/** Faces steeper than this (normal y below it, ≈ 50°) show bare rock. */
-const ROCK_NORMAL_Y = 0.64
 
 const PATCH = 4 // cells between noise lattice points: variant patches are blobs of ~16 m, not single cells
 /** Smooth value noise in [0, 1): hashed lattice values blended bilinearly. */

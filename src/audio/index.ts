@@ -2,10 +2,11 @@
  * The audio schedule: once per animation frame it projects what can be heard into plain `Heard`
  * data (the player's ears; vehicles someone drives, that move or that burn, with the drivetrain's
  * revs and load from their worn engines, their damage, whether they burn, whether their wheels or
- * their body are down and how their tyres skid; people on foot; the Impact, Honk and Explosion events
- * since the last frame, each impact with the bodies it struck; the horn key) and hands it to the
- * `Audio` service. No acoustics here: the director behind the service decides what is loud enough
- * and where it sits.
+ * their body are down and how their tyres skid; people on foot; the Impact, Honk, Explosion and
+ * Lightning events since the last frame, each impact with the bodies it struck; the horn key; the
+ * game clock's day, time and sun, and a copy of the weather) and hands it to the `Audio` service.
+ * No acoustics here: the director behind the service decides what is loud enough and where it sits,
+ * and works out the weather at the ears.
  * Read-only towards the world, like render (render/__tests__/index.test.ts checks every described schedule).
  *
  * @module audio
@@ -24,9 +25,11 @@ import {
   Driving,
   Explosion,
   Game,
+  GameClock,
   Honk,
   Impact,
   Input,
+  Lightning,
   Motion,
   Pedestrian,
   Person,
@@ -37,10 +40,22 @@ import {
   Traffic,
   Vehicle,
   View,
+  Weather,
 } from "../sim/index.ts"
 import { groundZ } from "../sim/map/ground.ts"
+import { daysFromCivil, romeTime } from "../sim/sky/calendar.ts"
+import { sunOver } from "../sim/sky/day.ts"
 import { VEHICLES, type VehicleModel } from "../sim/vehicles.ts"
-import type { Body, Happening, Heard, HeardPerson, HeardVehicle, Skidding, Zone } from "./types.ts"
+import type {
+  Body,
+  Happening,
+  Heard,
+  HeardPerson,
+  HeardSky,
+  HeardVehicle,
+  Skidding,
+  Zone,
+} from "./types.ts"
 
 /** The host's ears: gets one `Heard` per frame while there is a player. */
 export const Audio = Descriptor.Service<{ readonly hear: (heard: Heard) => void }>()(
@@ -78,6 +93,18 @@ const zoneOf = (
   const along = (dx * fx + dy * fy) / length,
     across = Math.abs(dy * fx - dx * fy) / width
   return along > across ? "front" : -along > across ? "rear" : "side"
+}
+
+/** The sky at game time `seconds` (Unix UTC): the Rome day and time of day, and the sun's elevation over the map. */
+export const skyAt = (seconds: number): HeardSky => {
+  const { year, month, day, hour, minute } = romeTime(seconds)
+  return {
+    seconds,
+    day: daysFromCivil(year, month, day),
+    hour,
+    minute,
+    sun: sunOver(seconds).elevation,
+  }
 }
 
 const Hear = Game.System(
@@ -119,11 +146,14 @@ const Hear = Game.System(
       input: Game.System.readResource(Input),
       view: Game.System.readResource(View),
       time: Game.System.readResource(Time),
+      clock: Game.System.readResource(GameClock),
+      weather: Game.System.readResource(Weather),
     },
     events: {
       impacts: Game.System.readEvent(Impact),
       honks: Game.System.readEvent(Honk),
       skids: Game.System.readEvent(Skid),
+      lightning: Game.System.readEvent(Lightning),
       explosions: Game.System.readEvent(Explosion),
     },
     services: { audio: Game.System.service(Audio) },
@@ -244,6 +274,14 @@ const Hear = Game.System(
         return [{ kind: "impact", ...hit, body, ...(otherBody === undefined ? {} : { otherBody }) }]
       }),
       ...events.honks.all().map((honk) => ({ kind: "honk" as const, ...honk })),
+      ...events.lightning.all().map(({ x, y, bolt, power, seed }) => ({
+        kind: "lightning" as const,
+        x,
+        y,
+        bolt,
+        power,
+        seed,
+      })),
       ...events.explosions
         .all()
         .map(({ car, x, y, z }) => ({ kind: "explosion" as const, car, x, y, z })),
@@ -261,6 +299,8 @@ const Hear = Game.System(
       people,
       happenings,
       horn: resources.input.get().horn.held,
+      sky: skyAt(resources.clock.get().seconds),
+      weather: { ...resources.weather.get() },
     })
   },
 )

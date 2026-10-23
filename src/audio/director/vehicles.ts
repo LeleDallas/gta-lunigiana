@@ -264,7 +264,7 @@ export const makeVehicles = () => {
             { kind: "explosion", surface },
             frame.path(`car:${h.car}`, h, LEVELS.explosion),
           )
-        } else if (h.hit === "person") {
+        } else if (h.kind === "impact" && h.hit === "person") {
           const who = h.other ?? h.car,
             key = `person:${who}`,
             at = { x: h.x, y: h.y, z: groundAt(h.x, h.y) + HEIGHT.person }

@@ -30,6 +30,7 @@ import {
   Dead,
   Driving,
   Game,
+  GameClock,
   Handling,
   Honk,
   Motion,
@@ -41,18 +42,30 @@ import {
   Time,
   Traffic,
   Vehicle,
+  Weather,
 } from "../schema.ts"
+import { airAt } from "../sky/climate.ts"
+import { groundAt } from "../sky/local.ts"
 import { PERSON_RADIUS } from "../tuning.ts"
+import { weatherFactor } from "../tyres.ts"
 import { VEHICLES, type VehicleModel } from "../vehicles.ts"
 import { steerLimit } from "./physics.ts"
 
 /** Look-ahead along the route: base metres plus seconds of speed. */
 const LOOK_BASE = 6
 const LOOK_TIME = 0.6
-/** Braking cone: base metres plus seconds of speed ahead, half-width. */
+/**
+ * Braking cone: base metres plus seconds of speed ahead, bent along the arc the front wheels steer, as wide as the car plus this
+ * clearance to either side. Anything whose footprint reaches into it (a car's sideways body as well as its centre) holds the
+ * driver back.
+ */
 const CONE_BASE = 8
 const CONE_TIME = 1.2
-const CONE_HALF_WIDTH = 1.8
+const CONE_CLEARANCE = 0.15
+/** Backing up with something this close alongside (m, body to body), a driver keeps the wheel straight. */
+const ALONGSIDE = 0.6
+/** Backing up, a driver stops this far short of anything behind (m, body to body). */
+export const BACK_GAP = 0.5
 /** Gap kept to whatever is ahead, m. */
 const GAP = 2
 /** Corner approach: slowest corner speed and the speed allowed per metre before the corner. */
@@ -104,20 +117,23 @@ const usableByModel = {
 
 /**
  * The fastest an AI driver takes the curve it steers with `steer` at `speed` (m/s): its sideways acceleration within comfort. The
- * wheels turn as far as the physics turns them under `handling`; the comfort is the vehicle's real one.
+ * wheels turn as far as the physics turns them under `handling` on ground leaving `weather` of the dry grip; the comfort is the
+ * vehicle's real one, scaled by that share too.
  */
 export const comfortSpeed = (
   model: VehicleModel,
   steer: number,
   speed: number,
   handling: HandlingValue = REAL_HANDLING,
+  weather = 1,
 ): number => {
   const rig = RIGS[model],
-    wheel = Math.abs(steer) * steerLimit(rigFor(model, handling), Math.abs(speed))
+    wheel = Math.abs(steer) * steerLimit(rigFor(model, handling), Math.abs(speed), weather)
   return wheel < 1e-3
     ? Number.MAX_VALUE
     : Math.sqrt(
-        (Math.min(COMFORT, COMFORT_TIP * rig.tipping * GRAVITY) * rig.wheelbase) / Ops.tan(wheel),
+        (Math.min(COMFORT, COMFORT_TIP * rig.tipping * GRAVITY) * weather * rig.wheelbase) /
+          Ops.tan(wheel),
       )
 }
 
@@ -164,7 +180,12 @@ const arrived = (
  * along the lane after standing still for 3 s (sometimes turning round, and
  * always from its second time on, dead end or not); waiting for a person
  * ahead on the carriageway counts four times slower. Half-way to backing up
- * it honks, once (a Honk event).
+ * it honks, once (a Honk event). The cone follows the arc its wheels steer
+ * and sees the whole footprint of what stands in it (a car across the road
+ * as well as one ahead); backing up, it stops short of what is behind and
+ * keeps the wheel straight past what is alongside. On wet or snowy roads it
+ * drives slower by the square root of the grip left (as a curve's speed goes),
+ * and looks and keeps further ahead by the grip lost.
  */
 export const TrafficAI = Game.System(
   "Lunigiana/TrafficAI",
@@ -196,27 +217,46 @@ export const TrafficAI = Game.System(
       rng: Game.System.writeResource(Rng),
       time: Game.System.thisTick(Game.System.readResource(Time)),
       handling: Game.System.readResource(Handling),
+      weather: Game.System.readResource(Weather),
+      clock: Game.System.readResource(GameClock),
     },
     events: { honk: Game.System.writeEvent(Honk) },
   },
   ({ queries, resources, events }) => {
     const { step } = resources.time.get(),
-      handling = resources.handling.get()
+      handling = resources.handling.get(),
+      weather = resources.weather.get(),
+      air = airAt(resources.clock.get().seconds, weather)
     const random = Random.draw(resources.rng)
+    // Each obstacle's footprint: half its length and half its width (a person a circle).
     const obstacles = [
-      ...queries.vehicles.each().map(({ entity, data }) => ({
-        id: entity.id,
-        ...data.pose.get(),
-        half: VEHICLES[data.vehicle.get().model].length / 2,
-        person: false,
-      })),
+      ...queries.vehicles.each().map(({ entity, data }) => {
+        const { length, width } = VEHICLES[data.vehicle.get().model]
+        return {
+          id: entity.id,
+          ...data.pose.get(),
+          long: length / 2,
+          wide: width / 2,
+          person: false,
+        }
+      }),
       ...queries.people.each().map(({ entity, data }) => ({
         id: entity.id,
         ...data.pose.get(),
-        half: PERSON_RADIUS,
+        long: PERSON_RADIUS,
+        wide: PERSON_RADIUS,
         person: true,
       })),
     ]
+    /** How far `other`'s footprint reaches along a heading of (fx, fy) and across it, m. */
+    const reach = (other: (typeof obstacles)[number], fx: number, fy: number) => {
+      const along = Math.abs(Ops.cos(other.angle) * fx + Ops.sin(other.angle) * fy),
+        across = Math.sqrt(Math.max(0, 1 - along * along))
+      return {
+        along: along * other.long + across * other.wide,
+        across: across * other.long + along * other.wide,
+      }
+    }
     for (const { entity, data } of queries.cars.each()) {
       const pose = data.pose.get()
       const { model } = data.vehicle.get()
@@ -261,18 +301,49 @@ export const TrafficAI = Game.System(
             )
       const error = wrapAngle(Ops.atan2(target.y - pose.y, target.x - pose.x) - pose.angle)
       const steer = Math.max(-1, Math.min(1, error * 2.5))
+      const fx = Ops.cos(pose.angle),
+        fy = Ops.sin(pose.angle)
+      // The share of its dry grip the road leaves (wet or snowy): it drives, follows and backs up that much more carefully.
+      const grip = weatherFactor(
+        groundAt(weather, pose.x, pose.y, data.chassis.get().z - spec.cg, air),
+        handling.weatherGrip,
+      )
 
       if (step < pilot.reverseUntil) {
-        // Backing up, the tail aims at a point behind on the lane (steering works mirrored in reverse).
+        // Backing up, the tail aims at a point behind on the lane (steering works mirrored in reverse). With anything close behind the
+        // tail (the car queued there, a person) it stops instead of backing into it; with anything alongside it backs straight, so the
+        // swinging nose does not sweep into it.
         const behind = lanePoint(lane, along - LOOK_BASE, route.side)
         const tail = wrapAngle(
           Ops.atan2(behind.y - pose.y, behind.x - pose.x) - pose.angle - Math.PI,
         )
-        data.input.set({
-          throttle: throttleFor(REVERSE_SPEED, speed),
-          steer: Math.max(-1, Math.min(1, -tail * 2.5)),
-          handbrake: false,
-        })
+        let back = REVERSE_SPEED,
+          beside = false
+        for (const other of obstacles) {
+          if (other.id === entity.id) continue
+          const rx = other.x - pose.x,
+            ry = other.y - pose.y,
+            front = rx * fx + ry * fy,
+            extent = reach(other, fx, fy)
+          const clear = Math.abs(ry * fx - rx * fy) - extent.across - spec.width / 2
+          // Behind the tail: slower the nearer it is, as when following forward, stopping `BACK_GAP` short of it.
+          if (front < 0 && clear < CONE_CLEARANCE)
+            back = Math.max(
+              back,
+              -Math.max(0, (-front - extent.along - spec.length / 2 - BACK_GAP) * 0.8 * grip),
+            )
+          if (Math.abs(front) < spec.length / 2 + extent.along && clear < ALONGSIDE) beside = true
+        }
+        const held = back > -0.5 && Math.abs(speed) < 0.5
+        data.input.set(
+          held
+            ? { throttle: 0, steer: 0, handbrake: true }
+            : {
+                throttle: throttleFor(back, speed),
+                steer: beside ? 0 : Math.max(-1, Math.min(1, -tail * 2.5)),
+                handbrake: false,
+              },
+        )
         data.route.set(route)
         data.pilot.set(pilot)
         continue
@@ -287,10 +358,12 @@ export const TrafficAI = Game.System(
       )
       // Pointing away from the target (turning round, a corner gone wide): corner speed, for the tightest circle.
       want = Math.min(want, CORNER_MIN + (cruise - CORNER_MIN) * Math.max(0, Ops.cos(error)))
-      want = Math.min(want, comfortSpeed(model, steer, speed, handling))
-      const fx = Ops.cos(pose.angle),
-        fy = Ops.sin(pose.angle)
-      const range = CONE_BASE + Math.max(0, speed) * CONE_TIME
+      // Wet or snowy road: slower by the square root of the grip left, as the speed a curve allows goes.
+      want = Math.min(want * Math.sqrt(grip), comfortSpeed(model, steer, speed, handling, grip))
+      const range = (CONE_BASE + Math.max(0, speed) * CONE_TIME) / grip
+      // The path the front wheels steer: a circle of radius `radius` m, its centre to the left (+) or right; nearly straight, a line (0).
+      const bend = Ops.tan(data.chassis.get().steer) / RIGS[model].wheelbase,
+        radius = Math.abs(bend) < 1e-3 ? 0 : 1 / bend
       // The carriageway or its verge, where walkers keep (`walkSide`).
       const inWay = (edge: number, p: { readonly x: number; readonly y: number }) =>
         distanceToEdge(edge, p.x, p.y) <
@@ -303,14 +376,16 @@ export const TrafficAI = Game.System(
         if (other.id === entity.id) continue
         const rx = other.x - pose.x,
           ry = other.y - pose.y
-        const front = rx * fx + ry * fy
-        if (
-          front <= 0 ||
-          front > range + other.half ||
-          Math.abs(ry * fx - rx * fy) >= CONE_HALF_WIDTH
-        )
-          continue
-        const limit = Math.max(0, (front - spec.length / 2 - other.half - GAP) * 0.8)
+        const front = rx * fx + ry * fy,
+          extent = reach(other, fx, fy)
+        if (front <= 0 || front > range + extent.along) continue
+        const across = ry * fx - rx * fy,
+          off =
+            radius === 0
+              ? Math.abs(across)
+              : Math.abs(Ops.hypot(front, across - radius) - Math.abs(radius))
+        if (off - extent.across >= spec.width / 2 + CONE_CLEARANCE) continue
+        const limit = Math.max(0, (front - spec.length / 2 - extent.along - GAP) * 0.8 * grip)
         if (limit < want)
           [want, forPerson] = [limit, other.person && front > spec.length / 2 && onRoad(other)]
       }
