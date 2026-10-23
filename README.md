@@ -161,10 +161,12 @@ Every script runs with `pnpm`:
 | `pnpm dev` | Vite dev server on port 5173, open to the local network (`--host`) |
 | `pnpm build` | production build into `dist/` (the Pages workflow adds `--base=./`) |
 | `pnpm preview` | serves `dist/` on port 4173 |
-| `pnpm check` | `typecheck`, then `lint`, then `test` |
+| `pnpm check` | `format:check`, then `typecheck`, then `lint`, then `test` |
+| `pnpm format` | `oxfmt`: formats the code, JSON, YAML, HTML and CSS in place |
+| `pnpm format:check` | `oxfmt --check`: fails on any unformatted file |
 | `pnpm typecheck` | `tsc` (no emit) |
-| `pnpm lint` | `oxlint` with the Ritmo plugin, then `ritmo-devtools lint src/sim/index.ts` |
-| `pnpm test` | `node --test` over `src/**/*.test.ts` |
+| `pnpm lint` | type-aware `oxlint` with the Ritmo plugin and the project's own (`lint/`), warnings failing, then `ritmo-devtools lint src/sim/index.ts` |
+| `pnpm test` | `node --test` over `src/**/*.test.ts` and `lint/**/*.test.ts`, each in a `__tests__` folder beside the module it tests |
 | `pnpm map` | rebuilds `src/sim/map/monzone.bin` from `data/raw` |
 | `pnpm fetch-osm` | downloads the OpenStreetMap extract again into `data/raw/lunigiana.osm.gz` |
 | `pnpm fetch-rt` | downloads the Regione Toscana sources again into `data/raw/rt` |
@@ -188,6 +190,8 @@ The simulation, the browser hosts and the map tools live in separate folders:
 | `lab.html` | the audio audition page (dev server only) |
 | `data/raw/` | pinned map inputs: OSM extract, Regione Toscana CTR and LiDAR |
 | `docs/` | architecture, map pipeline, gameplay and audio notes; `docs/standards/` holds the checks for each part of the game |
+| `.oxlintrc.json`, `.oxfmtrc.json`, `lefthook.yml` | lint rules, formatter settings, and the git hooks that format and lint each commit and check each push |
+| `lint/` | the project's own oxlint plugins, one file each named after the plugin (`test-files.ts`: each test in a `__tests__` folder) |
 
 ## Rebuilding the map
 
