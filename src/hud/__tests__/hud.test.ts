@@ -46,6 +46,12 @@ test("the prompt names the action the key would take", () => {
     ),
     "",
   )
+  assert.equal(
+    promptText(
+      view({ mode: "dead", nearby: { label: "Fiat Panda", occupied: false, stolen: false } }),
+    ),
+    "",
+  )
 })
 
 test("speed reads in whole km/h, reversing included", () => {

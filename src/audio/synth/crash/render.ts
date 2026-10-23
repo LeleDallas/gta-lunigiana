@@ -16,6 +16,7 @@ import {
   BANDS,
   between,
   excite,
+  finish,
   halfSine,
   type Mix,
   noiseFor,
@@ -44,8 +45,6 @@ const SIDE = [0, 0, -1, -1, 0, 1, 2, 2, 1, 0]
 
 /** TUNED: the output scale at which the reference crash (a Panda into masonry at 15 m/s) peaks near the nominal 0.5. */
 const SCALE = 0.112
-/** No render peaks over this (a +6 dB crash with an unlucky draw is scaled down to it): the audition page's clipping mark. */
-const LIMIT = 0.95
 /** TUNED: each shell's clank in a car–car hit, how many modes and their amplitude at full drive (8 m/s). */
 const SHELL_MODES = 6,
   SHELL = 3
@@ -224,26 +223,6 @@ const shells = (mix: Mix, hit: Hit): void => {
       )
     }
   }
-}
-
-/** `out` × `scale`, trimmed after its last sample within 60 dB of its peak, faded over its last 0.15 s, never over `LIMIT`. */
-const finish = (
-  out: Float32Array,
-  scale: number,
-  sampleRate: number,
-): Float32Array<ArrayBuffer> => {
-  let peak = 0
-  for (let i = 0; i < out.length; i++) peak = Math.max(peak, Math.abs(out[i]!))
-  let end = out.length
-  while (end > 1 && Math.abs(out[end - 1]!) < peak * 1e-3) end--
-  end = Math.min(out.length, end + Math.round(0.02 * sampleRate))
-  const fade = Math.min(Math.round(0.15 * sampleRate), end >> 2),
-    k = peak * scale > LIMIT ? LIMIT / peak : scale,
-    result = new Float32Array(end)
-  for (let i = 0; i < end; i++)
-    result[i] =
-      out[i]! * k * (i < end - fade ? 1 : 0.5 + 0.5 * Math.cos((Math.PI * (i - end + fade)) / fade))
-  return result
 }
 
 /** `sound` rendered at `sampleRate`, every choice drawn from `random` (deterministic for a seeded one). */

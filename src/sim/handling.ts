@@ -104,7 +104,7 @@ export const HANDLING = {
     max: 1,
     step: 1,
     description:
-      "On: a vehicle lying on its side or roof that has nearly stopped rolls back onto its wheels by itself, from a side within half a second and from its roof within about a second, ready to drive again. Off (real): it stays there.",
+      "On: a vehicle lying on its side or roof that has nearly stopped rolls back onto its wheels by itself, from a side within half a second and from its roof within about a second, ready to drive again (a wreck, burning or burnt out, stays where it lies). Off (real): it stays there.",
   },
   traction: {
     group: "Driving aids",

@@ -7,6 +7,7 @@ import {
   Autopilot,
   CarInput,
   Chassis,
+  Damage,
   Down,
   Driving,
   Game,
@@ -53,14 +54,38 @@ const clearSpot = (at: Vec2.Vec2) =>
   clearOf(wallsAlong("walk", at.x, at.y, 0, 0, PERSON_RADIUS + 0.5), at.x, at.y, PERSON_RADIUS)
 
 /** The first door someone can get out at: clear of walk walls, with no wall between it and the vehicle's centre. */
-const freeDoor = (pose: PoseValue, model: VehicleModel) =>
+export const freeDoor = (pose: PoseValue, model: VehicleModel) =>
   doors(pose, model).find(
     (door) => clearSpot(door) && !walkBy(pose, Vec2.subtract(door, pose)).blocked,
   )
 
 /**
+ * The driver of a vehicle of `model` at `pose` getting out at its first free door, as a pedestrian with a look drawn from `random`
+ * who flees along the verge on that side (so they do not run back through the car) until step `until`; none when no door is free.
+ */
+export const fleeingDriver = (
+  pose: PoseValue,
+  model: VehicleModel,
+  random: Random.Random,
+  until: number,
+) => {
+  const door = freeDoor(pose, model)
+  if (door === undefined) return undefined
+  const edge = walkIndex.nearest(door.x, door.y)
+  const forward = facesForward(edge, pose.angle)
+  const lane = laneOf(edge, forward)
+  const right = (door.x - pose.x) * lane.rx + (door.y - pose.y) * lane.ry > 0
+  return pedestrian(
+    randomLook(random),
+    { x: door.x, y: door.y, angle: Ops.atan2(door.y - pose.y, door.x - pose.x) },
+    { edge, forward, side: (right ? 1 : -1) * walkSide(roadOf(edge)) },
+    { mood: "flee", until },
+  )
+}
+
+/**
  * The action key (once per press): on foot, enter the vehicle in reach
- * (vehicleInReach: within ENTER_GAP of its body, no wall in between), carjacking
+ * (vehicleInReach: within ENTER_GAP of its body, no wall in between, not overturned or destroyed), carjacking
  * a traffic driver, who flees out of the first free door; the first entry of a
  * vehicle scores a theft. Driving, get out at the first free door (none: stay
  * in) and leave the vehicle on its handbrake.
@@ -82,6 +107,7 @@ export const EnterExit = Game.System(
         selection: {
           pose: Game.Query.read(Pose),
           chassis: Game.Query.read(Chassis),
+          damage: Game.Query.read(Damage),
           vehicle: Game.Query.read(Vehicle),
           input: Game.Query.write(CarInput),
           traffic: Game.Query.optional(Traffic),
@@ -123,6 +149,7 @@ export const EnterExit = Game.System(
         model: v.data.vehicle.get().model,
         pose: v.data.pose.get(),
         chassis: v.data.chassis.get(),
+        damage: v.data.damage.get().amount,
       }))
       if (near === undefined) continue
       commands.insert(entity, [Driving, { vehicle: Game.Entity.handle(near.entity, Vehicle) }])
@@ -133,23 +160,13 @@ export const EnterExit = Game.System(
       }
       if (!near.data.traffic.present) continue
       commands.remove(near.entity, Traffic, Route, Autopilot)
-      const pose = near.data.pose.get()
-      const door = freeDoor(pose, near.data.vehicle.get().model)
-      if (door === undefined) continue
-      const edge = walkIndex.nearest(door.x, door.y)
-      const forward = facesForward(edge, pose.angle)
-      const lane = laneOf(edge, forward)
-      // The verge on the door's side of the car, so the driver does not run back through it.
-      const right = (door.x - pose.x) * lane.rx + (door.y - pose.y) * lane.ry > 0
-      const random = Random.draw(resources.rng)
-      commands.spawn(
-        pedestrian(
-          randomLook(random),
-          { x: door.x, y: door.y, angle: Ops.atan2(door.y - pose.y, door.x - pose.x) },
-          { edge, forward, side: (right ? 1 : -1) * walkSide(roadOf(edge)) },
-          { mood: "flee", until: resources.time.get().step + Clock.steps(FLEE_TIME) },
-        ),
+      const driver = fleeingDriver(
+        near.data.pose.get(),
+        near.data.vehicle.get().model,
+        Random.draw(resources.rng),
+        resources.time.get().step + Clock.steps(FLEE_TIME),
       )
+      if (driver !== undefined) commands.spawn(driver)
     }
   },
 )

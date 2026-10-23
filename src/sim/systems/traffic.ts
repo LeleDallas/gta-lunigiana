@@ -27,6 +27,7 @@ import {
   CarInput,
   Chassis,
   type ChassisValue,
+  Dead,
   Driving,
   Game,
   Handling,
@@ -184,10 +185,11 @@ export const TrafficAI = Game.System(
       vehicles: Game.Query({
         selection: { pose: Game.Query.read(Pose), vehicle: Game.Query.read(Vehicle) },
       }),
+      // The dead are no one to wait for: a car nudges a body aside (Contacts) rather than queue behind it until it is gone.
       people: Game.Query({
         selection: { pose: Game.Query.read(Pose) },
         with: [Person],
-        without: [Driving],
+        without: [Driving, Dead],
       }),
     },
     resources: {

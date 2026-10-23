@@ -8,6 +8,7 @@
 import { Ops, type Random } from "@typeonce/ritmo-math"
 
 import { settle } from "./chassis.ts"
+import { UNDAMAGED } from "./damage.ts"
 import { gearFor } from "./drivetrain.ts"
 import { groundZ, roadLevel } from "./map/ground.ts"
 import { roadOf, type Step } from "./route.ts"
@@ -15,6 +16,7 @@ import {
   Autopilot,
   CarInput,
   Chassis,
+  Damage,
   Game,
   type Look,
   Motion,
@@ -62,6 +64,7 @@ export const parkedCar = (model: VehicleModel, color: number, pose: PoseValue) =
     [Motion, { vx: 0, vy: 0, spin: 0 }],
     [CarInput, { throttle: 0, steer: 0, handbrake: true }],
     [Chassis, settle(model, pose)],
+    [Damage, UNDAMAGED],
   )
 
 /**
@@ -94,6 +97,7 @@ export const trafficCar = (
     [Motion, { vx: Ops.cos(pose.angle) * speed, vy: Ops.sin(pose.angle) * speed, spin: 0 }],
     [CarInput, { throttle: 0, steer: 0, handbrake: false }],
     [Chassis, rollingChassis(model, pose, speed, roadLevel(roadOf(route.edge), pose.x, pose.y))],
+    [Damage, UNDAMAGED],
     [Traffic, {}],
     [Route, route],
     [

@@ -1,12 +1,13 @@
 /**
  * Every vehicle sound: engines (the listener's own from the driver's seat) at the sim's revs and load,
- * tyres rolling and skidding, horns and the Carabinieri siren, the truck's reversing beeper, crashes
- * into walls, vehicles and the ground, the suspension bottoming out, scrapes along walls and the
- * ground, people hit, AI honks, and the doors and starter of the listener getting in and out. A crash
- * knows both bodies and how worn each is where it was hit, the wall's or the ground's material and the
- * ground under the car; a scrape, the material. Sounds of the listener's own car are heard from inside
- * it: its crash, clunk, scrape and doors through no cabin, its horn and siren (out by the grille, up on
- * the roof) through all of it.
+ * worn by its damage and cut by its misfires, a destroyed vehicle's fire until it blows up and the
+ * blast, tyres rolling and skidding, horns and the Carabinieri siren (both dead with the engine), the
+ * truck's reversing beeper, crashes into walls, vehicles and the ground, the suspension bottoming out,
+ * scrapes along walls and the ground, people hit, AI honks, and the doors and starter of the listener
+ * getting in and out. A crash knows both bodies and how worn each is where it was hit, the wall's or the
+ * ground's material and the ground under the car; a scrape, the material; a blast, the ground its debris
+ * rains on. Sounds of the listener's own car are heard from inside it: its crash, clunk, scrape and
+ * doors through no cabin, its horn and siren (out by the grille, up on the roof) through all of it.
  *
  * @module audio/director/vehicles
  */
@@ -149,7 +150,7 @@ export const makeVehicles = () => {
       // Own sounds come from the car the ears sit in: no occlusion key.
       const keyOf = (id: number) => (id === mine ? undefined : `car:${id}`)
 
-      // Getting in: the door, and the starter if the engine was off; getting out: the door where the listener now stands.
+      // Getting in: the door, and the starter if the engine was off; getting out (not thrown out by its blast): the door where the listener now stands.
       if (car === undefined && mine !== undefined) {
         const v = byId.get(mine)
         if (v !== undefined) {
@@ -165,7 +166,12 @@ export const makeVehicles = () => {
             cranking.set(mine, now + CRANK[v.model].seconds)
           }
         }
-      } else if (car !== undefined && mine === undefined && model !== undefined) {
+      } else if (
+        car !== undefined &&
+        mine === undefined &&
+        model !== undefined &&
+        !heard.happenings.some((h) => h.kind === "explosion" && h.car === car)
+      ) {
         const { x, y } = heard.listener,
           door = frame.path(undefined, { x, y, z: groundAt(x, y) + HEIGHT.person }, LEVELS.door)
         frame.play({ kind: "door", model, open: true }, door)
@@ -250,6 +256,14 @@ export const makeVehicles = () => {
               LEVELS.honk,
             ),
           )
+        } else if (h.kind === "explosion") {
+          // From the wreck's centre of mass; its debris rains on the ground under it (a bridge's deck, not the river under it).
+          // The sim throws a driver out of the wreck in the step it blows up, so a blast is never the listener's own car's.
+          const surface = surfaceAt(h.x, h.y, groundAt(h.x, h.y, h.z))
+          frame.play(
+            { kind: "explosion", surface },
+            frame.path(`car:${h.car}`, h, LEVELS.explosion),
+          )
         } else if (h.hit === "person") {
           const who = h.other ?? h.car,
             key = `person:${who}`,
@@ -266,7 +280,7 @@ export const makeVehicles = () => {
         }
       }
 
-      // The Carabinieri's horn key toggles the siren; it falls silent once nobody drives the car.
+      // The Carabinieri's horn key toggles the siren; it falls silent once its engine no longer runs (nobody drives, or it is destroyed).
       const pressed = heard.horn && !horn
       for (const v of heard.vehicles) {
         if (!v.mine || v.model !== "carabinieri" || !pressed) continue
@@ -291,8 +305,10 @@ export const makeVehicles = () => {
             load: v.load,
             inside: v.id === mine,
             variant: hash01(v.id),
+            damage: v.damage,
+            misfire: v.misfire,
           } as const
-          const way = { doppler: true, quiet: engineQuiet(v.model, v.rpm, v.load) }
+          const way = { doppler: true, quiet: engineQuiet(v.model, v.rpm, v.load, v.damage) }
           frame.hold(
             `engine:${v.id}`,
             engine,
@@ -313,7 +329,14 @@ export const makeVehicles = () => {
           } as const
           frame.hold(`tyres:${v.id}`, tyres, frame.path(key, at, LEVELS.tyres, { doppler: true }))
         }
-        if (v.mine && heard.horn && v.model !== "carabinieri") {
+        // A wreck burns, however still it lies, until it blows up; its engine is dead, and with it the horn and the siren.
+        if (v.burning)
+          frame.hold(
+            `fire:${v.id}`,
+            { kind: "fire" },
+            frame.path(key, at, LEVELS.fire, { doppler: true }),
+          )
+        if (v.mine && v.running && heard.horn && v.model !== "carabinieri") {
           frame.hold(
             `horn:${v.id}`,
             { kind: "horn", model: v.model },

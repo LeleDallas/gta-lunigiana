@@ -3,6 +3,7 @@ import { Ops, Random, Vec2 } from "@typeonce/ritmo-math"
 
 import { carClear, clearOf, wallsAlong } from "../body.ts"
 import { pointInRing } from "../collide.ts"
+import { destroyed } from "../damage.ts"
 import { buildingBoxes, buildingsIn, graph, MAP } from "../map/index.ts"
 import {
   allowsModel,
@@ -22,6 +23,8 @@ import {
 import {
   Autopilot,
   CarInput,
+  Damage,
+  Dead,
   Driving,
   Game,
   Motion,
@@ -109,7 +112,8 @@ const pickModel = (random: Random.Random, edge: number): VehicleModel | undefine
  * Every half second, keeps the world around the player alive: traffic on
  * random traffic edges and pedestrians on walk edges near buildings spawn
  * out of view and despawn once far behind, or out of sight when stuck for
- * good (never the player's own car).
+ * good (never the player's own car); destroyed vehicles and the dead go once
+ * out of sight too.
  */
 export const Populate = Game.System(
   "Lunigiana/Populate",
@@ -128,8 +132,17 @@ export const Populate = Game.System(
         with: [Traffic],
       }),
       vehicles: Game.Query({ selection: { pose: Game.Query.read(Pose) }, with: [Vehicle] }),
+      wrecks: Game.Query({
+        selection: { pose: Game.Query.read(Pose), damage: Game.Query.read(Damage) },
+        with: [Vehicle],
+        without: [Traffic],
+      }),
       peds: Game.Query({
-        selection: { pose: Game.Query.read(Pose), ped: Game.Query.read(Pedestrian) },
+        selection: {
+          pose: Game.Query.read(Pose),
+          ped: Game.Query.read(Pedestrian),
+          dead: Game.Query.optional(Dead),
+        },
       }),
     },
     resources: {
@@ -149,7 +162,7 @@ export const Populate = Game.System(
         Pedestrian,
         Person,
       ),
-      Game.System.despawns(Traffic, Pedestrian),
+      Game.System.despawns(Traffic, Vehicle, Pedestrian),
     ),
   },
   ({ queries, resources, commands }) => {
@@ -172,6 +185,11 @@ export const Populate = Game.System(
       const wrecked = lost && far(pose, TRAFFIC.unseen)
       if ((far(pose, TRAFFIC.despawn) || wrecked) && entity.id !== mine) commands.despawn(entity)
       else cars++
+    }
+    // A wreck, burning or a charred shell, stays where it stopped until nobody can see it go.
+    for (const { entity, data } of queries.wrecks.each()) {
+      if (destroyed(data.damage.get().amount) && far(data.pose.get(), TRAFFIC.unseen))
+        commands.despawn(entity)
     }
     const taken = queries.vehicles.each().map(({ data }) => data.pose.get())
     const roads = trafficIndex.around(at.x, at.y, TRAFFIC.spawn)
@@ -216,8 +234,14 @@ export const Populate = Game.System(
     for (const { entity, data } of queries.peds.each()) {
       const pose = data.pose.get()
       const stranded = far(pose, PEDESTRIANS.unseen) && data.ped.get().blocked > GIVE_UP_STEPS
-      if (far(pose, PEDESTRIANS.despawn) || stranded) commands.despawn(entity)
-      else people++
+      // A body lies where it fell until nobody can see it go, and walks no one's share of the pavements.
+      if (
+        far(pose, PEDESTRIANS.despawn) ||
+        stranded ||
+        (data.dead.present && far(pose, PEDESTRIANS.unseen))
+      )
+        commands.despawn(entity)
+      else if (!data.dead.present) people++
     }
     const paths = peopled.around(at.x, at.y, PEDESTRIANS.spawn)
     for (let slot = 0; slot < PEDESTRIANS.perTick && people < PEDESTRIANS.max; slot++)

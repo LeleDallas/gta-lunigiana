@@ -7,19 +7,21 @@
 import type { Shots, Voices } from "../types.ts"
 import { crash } from "./crash/index.ts"
 import { engine } from "./engine.ts"
+import { explosion } from "./explosion.ts"
+import { fire } from "./fire.ts"
 import { beeper, honk, horn, siren } from "./horns.ts"
 import { clunk, door, ignition, thud } from "./impacts.ts"
 import { scrape } from "./scrape.ts"
 import { tyres } from "./tyres.ts"
 
 /** Continuous vehicle sounds. */
-export const VEHICLE_VOICES = { engine, tyres, scrape, horn, siren, beeper } satisfies Pick<
+export const VEHICLE_VOICES = { engine, tyres, scrape, horn, siren, beeper, fire } satisfies Pick<
   Voices,
-  "engine" | "tyres" | "scrape" | "horn" | "siren" | "beeper"
+  "engine" | "tyres" | "scrape" | "horn" | "siren" | "beeper" | "fire"
 >
 
 /** One-shot vehicle sounds. */
-export const VEHICLE_SHOTS = { crash, thud, clunk, door, ignition, honk } satisfies Pick<
+export const VEHICLE_SHOTS = { crash, explosion, thud, clunk, door, ignition, honk } satisfies Pick<
   Shots,
-  "crash" | "thud" | "clunk" | "door" | "ignition" | "honk"
+  "crash" | "explosion" | "thud" | "clunk" | "door" | "ignition" | "honk"
 >

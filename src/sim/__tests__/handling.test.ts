@@ -4,6 +4,7 @@ import { test } from "node:test"
 import { Ops } from "@typeonce/ritmo-math"
 
 import { overturned, settle, uprightness } from "../chassis.ts"
+import { UNDAMAGED } from "../damage.ts"
 import type { Ground } from "../dynamics.ts"
 import {
   clampKnob,
@@ -18,7 +19,17 @@ import {
   REAL_HANDLING,
 } from "../handling.ts"
 import type { Surface } from "../map/surface.ts"
-import { CarInput, Chassis, Game, Motion, Pose, PrevPose, SetHandling, Vehicle } from "../schema.ts"
+import {
+  CarInput,
+  Chassis,
+  Damage,
+  Game,
+  Motion,
+  Pose,
+  PrevPose,
+  SetHandling,
+  Vehicle,
+} from "../schema.ts"
 import { drive, forward, ON_BATTISTI, rolling, start } from "../testing.ts"
 import { VEHICLES, type VehicleModel } from "../vehicles.ts"
 
@@ -605,6 +616,7 @@ test("self-righting: a car asleep on its roof wakes and rolls back onto its whee
     [Motion, { vx: 0, vy: 0, spin: 0.01 }],
     [CarInput, { throttle: 0, steer: 0, handbrake: false }],
     [Chassis, roof],
+    [Damage, UNDAMAGED],
   )
   const { runtime, run, world } = start([], [{ x: -2800, y: -6000, angle: 0 }, { cars: [wreck] }])
   run(240)

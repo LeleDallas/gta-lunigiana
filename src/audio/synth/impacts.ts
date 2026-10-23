@@ -314,6 +314,8 @@ const renderIgnition = (rate: number, kit: Kit, model: VehicleModel) =>
           load: blip,
           inside: false,
           variant: 0.5,
+          damage: 0,
+          misfire: false,
         },
         t,
       )

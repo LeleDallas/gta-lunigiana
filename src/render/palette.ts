@@ -35,6 +35,7 @@ export const PALETTE = {
   carabinieriBlue: 0x1d2b4f,
   signalRed: 0xb8312b,
   signYellow: 0xf0c93c,
+  flameOrange: 0xe8762c,
 } as const satisfies Record<string, number>
 
 /** `#rrggbb` CSS string of a palette (or any sRGB hex) colour. */

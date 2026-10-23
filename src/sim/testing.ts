@@ -9,10 +9,11 @@ import assert from "node:assert/strict"
 
 import type { Descriptor } from "@typeonce/ritmo"
 import { Keyboard } from "@typeonce/ritmo-browser"
-import { Ops, Random } from "@typeonce/ritmo-math"
+import { Ops, Random, Vec2 } from "@typeonce/ritmo-math"
 
 import { clearOf, wallsAlong } from "./body.ts"
 import { settle } from "./chassis.ts"
+import { UNDAMAGED, type Wear } from "./damage.ts"
 import { gearFor } from "./drivetrain.ts"
 import type { Ground, StepResult } from "./dynamics.ts"
 import type { HandlingValue } from "./handling.ts"
@@ -22,7 +23,10 @@ import {
   CarInput,
   Chassis,
   type ChassisValue,
+  Damage,
+  Dead,
   Down,
+  Explosion,
   Game,
   Handling,
   Honk,
@@ -78,6 +82,7 @@ export const World = Game.Inspector(
           vehicle: Game.Query.read(Vehicle),
           input: Game.Query.read(CarInput),
           chassis: Game.Query.read(Chassis),
+          damage: Game.Query.read(Damage),
           traffic: Game.Query.optional(Traffic),
           stolen: Game.Query.optional(Stolen),
           route: Game.Query.optional(Route),
@@ -89,6 +94,7 @@ export const World = Game.Inspector(
           pose: Game.Query.read(Pose),
           ped: Game.Query.read(Pedestrian),
           down: Game.Query.optional(Down),
+          dead: Game.Query.optional(Dead),
         },
       }),
     },
@@ -105,6 +111,7 @@ export const World = Game.Inspector(
       ...data.vehicle.get(),
       input: data.input.get(),
       chassis: data.chassis.get(),
+      damage: data.damage.get(),
       traffic: data.traffic.present,
       stolen: data.stolen.present,
       route: data.route.value(),
@@ -115,6 +122,7 @@ export const World = Game.Inspector(
       ...data.pose.get(),
       ...data.ped.get(),
       down: data.down.present,
+      dead: data.dead.present,
     })),
     score: resources.score.get(),
     handling: resources.handling.get(),
@@ -146,6 +154,21 @@ export const teleport = (at: PoseValue) =>
         data.prev.set(at)
       }
     },
+  )
+
+/** Sets every vehicle's damage to `amount`, as if its crashes had used up that share of its durability (`runtime.tick` it). */
+export const wear = (amount: number) =>
+  Game.Schedule(
+    Game.System(
+      "Test/Wear",
+      {
+        queries: { vehicles: Game.Query({ selection: { damage: Game.Query.write(Damage) } }) },
+      },
+      ({ queries }) => {
+        for (const { data } of queries.vehicles.each())
+          data.damage.update((damage) => ({ ...damage, amount }))
+      },
+    ),
   )
 
 /** Test setup: no other vehicles or pedestrians, the player at `at`, plus the `cast`. */
@@ -212,16 +235,22 @@ export const start = (timeline: Timeline = [], staging?: readonly [PoseValue, Ca
   const heard = {
     impacts: new Array<Descriptor.Descriptor.Value<typeof Impact>>(),
     honks: new Array<Descriptor.Descriptor.Value<typeof Honk>>(),
+    explosions: new Array<Descriptor.Descriptor.Value<typeof Explosion>>(),
   }
   const listen = Game.Schedule(
     Game.System(
       "Test/Listen",
       {
-        events: { impacts: Game.System.readEvent(Impact), honks: Game.System.readEvent(Honk) },
+        events: {
+          impacts: Game.System.readEvent(Impact),
+          honks: Game.System.readEvent(Honk),
+          explosions: Game.System.readEvent(Explosion),
+        },
       },
       ({ events }) => {
         heard.impacts.push(...events.impacts.all())
         heard.honks.push(...events.honks.all())
+        heard.explosions.push(...events.explosions.all())
       },
     ),
   )
@@ -270,6 +299,29 @@ export const straightOn = (step: Step): Step => {
   return options.reduce((best, next) => (along(next) > along(best) ? next : best))
 }
 
+/** A house wall on Via Cesare Battisti, (-435.2, 453.9) -> (-424.5, 451.9), the house to its north. */
+const WALL_A = { x: -435.2, y: 453.9 },
+  WALL_B = { x: -424.5, y: 451.9 }
+const ALONG = {
+  x: (WALL_B.x - WALL_A.x) / Vec2.distance(WALL_A, WALL_B),
+  y: (WALL_B.y - WALL_A.y) / Vec2.distance(WALL_A, WALL_B),
+}
+/** The house wall's unit normal, pointing into the house. */
+export const INTO = { x: -ALONG.y, y: ALONG.x }
+/** The house wall's middle. */
+export const MID = { x: (WALL_A.x + WALL_B.x) / 2, y: (WALL_A.y + WALL_B.y) / 2 }
+/** Signed distance from the house wall's line, m (positive inside the house). */
+export const depth = (p: { readonly x: number; readonly y: number }) =>
+  (p.x - MID.x) * INTO.x + (p.y - MID.y) * INTO.y
+/** The point `out` metres in front of the house wall's middle. */
+export const facing = (out: number) => ({ x: MID.x - INTO.x * out, y: MID.y - INTO.y * out })
+/** Heading square on into the house wall. */
+export const TOWARD = Ops.atan2(INTO.y, INTO.x)
+/** Heading along the house wall, its left side to the wall. */
+export const BESIDE = Ops.atan2(ALONG.y, ALONG.x)
+/** 30 m out from the house wall: where the player watches a scene there from. */
+export const FAR = { ...facing(30), angle: 0 }
+
 /** The point beside a panda's left (driver's) or right door. */
 export const door = (car: PoseValue, side: 1 | -1 = 1): PoseValue => {
   const off = side * (VEHICLES.panda.width / 2 + 0.6)
@@ -305,6 +357,19 @@ export const rolling = (
     [Motion, { vx: Ops.cos(pose.angle) * speed, vy: Ops.sin(pose.angle) * speed, spin: 0 }],
     [CarInput, { throttle, steer, handbrake: false }],
     [Chassis, rollingChassis(model, pose, speed)],
+    [Damage, UNDAMAGED],
+  )
+
+/** A destroyed `model` parked at `pose`, burning, that blows up at step `fuse`. */
+export const burning = (model: VehicleModel, pose: PoseValue, fuse: number) =>
+  Game.Command.spawn(
+    [Vehicle, { model, color: 0x8b8170 }],
+    [Pose, pose],
+    [PrevPose, pose],
+    [Motion, { vx: 0, vy: 0, spin: 0 }],
+    [CarInput, { throttle: 0, steer: 0, handbrake: true }],
+    [Chassis, rollingChassis(model, pose, 0)],
+    [Damage, { ...UNDAMAGED, amount: 1, fuse }],
   )
 
 /** A traffic car on Via Cesare Battisti, eastbound, standing. */
@@ -343,7 +408,7 @@ export interface Pedals {
 
 /**
  * A vehicle driven by `input` for `frames` steps on `ground` (no walls, `advance` alone), starting at the origin heading east at
- * `speed`, under `handling`.
+ * `speed`, under `handling`, its engine worn by `wear`.
  */
 export const drive = (
   model: VehicleModel,
@@ -355,6 +420,7 @@ export const drive = (
     readonly surface?: Surface
     readonly chassis?: Partial<ChassisValue>
     readonly handling?: HandlingValue
+    readonly wear?: Wear
     readonly each?: (frame: number, state: DriveState, result: StepResult) => void
   } = {},
 ): DriveState => {
@@ -380,6 +446,7 @@ export const drive = (
       ground,
       () => options.surface ?? "asphalt",
       options.handling,
+      options.wear,
     )
     state = {
       pose: { x: body.x, y: body.y, angle: body.angle },

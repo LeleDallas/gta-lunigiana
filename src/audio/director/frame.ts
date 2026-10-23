@@ -2,8 +2,9 @@
  * One frame of the director, shared by its vehicle, people and world parts: the listener's ears
  * and surroundings, where things stand (`groundAt`), the way from any source to them (`path`, with
  * the ground under it and its obstacles, cached per key), and the frame's requests. One-shots play
- * at once (a crash no louder than `CRASH_MOST_DB`), loud ones with their echoes off rock faces;
- * continuous voices are offered (`hold`) and `commit` keeps the loudest of each kind up to its cap.
+ * at once (a crash or an explosion no louder than `MOST_DB`), loud ones with their echoes off rock
+ * faces; continuous voices are offered (`hold`) and `commit` keeps the loudest of each kind up to
+ * its cap.
  *
  * @module audio/director/frame
  */
@@ -23,7 +24,7 @@ import {
 import type { Echo } from "../places.ts"
 import type { Continuous, Heard, OneShot, Placement, Speaker } from "../types.ts"
 import { type Ears, hear, type Hearing, SILENT, type Source } from "./hearing.ts"
-import { CAPS, CRASH_MOST_DB, ECHO_MIN_DB, echoes, KEEP_DB, LEVELS, type Level } from "./levels.ts"
+import { CAPS, ECHO_MIN_DB, echoes, KEEP_DB, LEVELS, type Level, MOST_DB } from "./levels.ts"
 import type { Between, Occluder } from "./occluder.ts"
 
 /** How a path is heard: Doppler-shifted (vehicles), through the listener's `cabin` (unless false: their own car's crash, scrape, doors), `quiet` dB under the nominal peak. */
@@ -85,6 +86,9 @@ export const groundAt = (x: number, y: number, near?: number): number => groundZ
 /** Nothing in the way (sounds of the listener's own car or body). */
 const CLEAR: Between = { delta: 0, forest: 0 }
 
+/** Each capped one-shot's most over gain 1, dB, by kind. */
+const MOST: Partial<Record<OneShot["kind"], number>> = MOST_DB
+
 /** A placement Web Audio accepts: a non-finite one would mute its kind for the session. */
 const finite = (p: Placement): boolean =>
   Number.isFinite(p.gain + p.pan + p.cutoff + p.cents + p.wet)
@@ -96,12 +100,13 @@ export const makeFrame = (setup: Setup): Frame => {
   const play = (sound: OneShot, at: Hearing, after = 0) => {
     const delay = at.delay + after
     if (!at.audible || !finite(at.placement) || !Number.isFinite(delay)) return
-    // A crash's direct sound only: its echoes, far under it, keep the way's own level.
+    // A crash's or an explosion's direct sound only: its echoes, far under it, keep the way's own level.
+    const most = MOST[sound.kind]
     speaker.play(
       sound,
-      sound.kind === "crash"
-        ? { ...at.placement, gain: Math.min(at.placement.gain, dbToGain(CRASH_MOST_DB)) }
-        : at.placement,
+      most === undefined
+        ? at.placement
+        : { ...at.placement, gain: Math.min(at.placement.gain, dbToGain(most)) },
       delay,
     )
     if (!echoes(sound)) return

@@ -7,8 +7,9 @@ import { VEHICLE_MODELS, VEHICLES, type VehicleModel } from "../sim/vehicles.ts"
  * acoustic chain (director/hearing.ts), over open, flat ground with nothing in the way. "Render
  * all" renders every voice and shot offline at a few representative params (the crashes over a
  * matrix of bodies, targets and speeds, the scrape along every material, each engine at its redline
- * under full load, where its trim is calibrated) and tabulates peak, RMS, spectral centroid and
- * NaNs; `window.lab.renderAll()` returns the same rows, for CDP checks.
+ * under full load, where its trim is calibrated, and worn by damage, one misfiring) and tabulates
+ * peak, RMS, spectral centroid and NaNs; `window.lab.renderAll()` returns the same rows, for CDP
+ * checks.
  *
  * @module audio/lab
  */
@@ -26,31 +27,32 @@ import {
   windDb,
 } from "./director/levels.ts"
 import { type Emitter, makeEmitter } from "./emitter.ts"
-import { measure } from "./measure.ts"
+import {
+  paramsOf,
+  RATE,
+  renderShot,
+  renderVoice,
+  type Row,
+  SHOTS,
+  type Sound,
+  VOICES,
+} from "./lab-render.ts"
 import { makeMixer, type Mixer } from "./mixer.ts"
 import { crashQuiet } from "./synth/crash/index.ts"
 import { engineQuiet } from "./synth/engine.ts"
 import { clunkQuiet } from "./synth/impacts.ts"
-import { VEHICLE_SHOTS, VEHICLE_VOICES } from "./synth/vehicles.ts"
-import { WORLD_SHOTS, WORLD_VOICES } from "./synth/world.ts"
 import type {
   Continuous,
   Kit,
   Material,
   OneShot,
   Shot,
-  Shots,
   Surface,
   Voice,
   VoiceFactory,
-  Voices,
   Zone,
 } from "./types.ts"
 
-const VOICES = { ...VEHICLE_VOICES, ...WORLD_VOICES } satisfies Voices
-const SHOTS = { ...VEHICLE_SHOTS, ...WORLD_SHOTS } satisfies Shots
-
-type Sound = Continuous | OneShot
 type Crash = Extract<OneShot, { readonly kind: "crash" }>
 type WaterBody = Extract<Continuous, { readonly kind: "water" }>["body"]
 
@@ -80,7 +82,10 @@ const sourceOf = (sound: Sound): Calibration =>
   sound.kind === "engine"
     ? sound.inside
       ? { db: OWN_ENGINE_DB, rMin: 1, wet: 0 }
-      : { ...ENGINE[sound.model], quiet: engineQuiet(sound.model, sound.rpm, sound.load) }
+      : {
+          ...ENGINE[sound.model],
+          quiet: engineQuiet(sound.model, sound.rpm, sound.load, sound.damage),
+        }
     : sound.kind === "crash"
       ? { ...LEVELS.crash, quiet: crashQuiet(sound) }
       : sound.kind === "clunk"
@@ -200,12 +205,22 @@ const paired = (a: VehicleModel, b: VehicleModel): number => 1 / (1 / tonnes(a) 
 
 /** Each kind's params as first shown; the controls are made from these (numbers: sliders, strings: menus, flags: checkboxes). */
 const HELD = {
-  engine: { kind: "engine", model: "panda", rpm: 3000, load: 0.5, inside: false, variant: 0.5 },
+  engine: {
+    kind: "engine",
+    model: "panda",
+    rpm: 3000,
+    load: 0.5,
+    inside: false,
+    variant: 0.5,
+    damage: 0,
+    misfire: false,
+  },
   tyres: { kind: "tyres", speed: 12, skid: 0, slip: 0, surface: "asphalt", heavy: false },
   scrape: { kind: "scrape", speed: 8, material: "masonry" },
   horn: { kind: "horn", model: "panda" },
   siren: { kind: "siren" },
   beeper: { kind: "beeper" },
+  fire: { kind: "fire" },
   water: { kind: "water", body: "stream", flow: 0.6 },
   wind: { kind: "wind", strength: 0.6, forest: 0.3 },
   crickets: { kind: "crickets", density: 0.7 },
@@ -252,6 +267,7 @@ const soundOf = (form: Form): OneShot => (form.kind === "crash" ? crashOf(form) 
 
 const PLAYED = {
   crash: CRASH,
+  explosion: { kind: "explosion", surface: "asphalt" },
   thud: { kind: "thud", speed: 8 },
   clunk: { kind: "clunk", speed: 3, heavy: false },
   door: { kind: "door", model: "panda", open: false },
@@ -271,18 +287,42 @@ type Each<S extends Sound> = {
   readonly [K in S["kind"]]: ReadonlyArray<Extract<S, { readonly kind: K }>>
 }
 
+type Engine = Extract<Continuous, { readonly kind: "engine" }>
+/** `model`'s engine as new, outside, the nominal variant, at its redline under full load unless `more` says otherwise. */
+const engineAt = (model: VehicleModel, more: Partial<Engine> = {}): Engine => ({
+  kind: "engine",
+  model,
+  rpm: VEHICLES[model].engine.redline,
+  load: 1,
+  inside: false,
+  variant: 0.5,
+  damage: 0,
+  misfire: false,
+  ...more,
+})
+/** A worn Panda misfiring in every other 0.25 s window (the sim's), as the director would hold it frame by frame. */
+const SPUTTERING = engineAt("panda", { rpm: 3000, load: 0.5, damage: 0.9 })
+const sputtering = (t: number): Engine => ({
+  ...SPUTTERING,
+  misfire: Math.floor(t / 0.25) % 2 === 1,
+})
+
 /** "Render all": representative params per voice (rendered 2 s) and per shot. */
 const VOICE_RENDERS = {
-  // Each model at the redline under full load (its trim's calibration: flagged off nominal outside 0.42–0.6) and idling; the Giulia from its seat.
+  // Each model at the redline under full load (its trim's calibration: flagged off nominal outside 0.42–0.6), idling, and worn at the redline
+  // (flagged over nominal past 0.6, as every engine row is); the Giulia from its seat; a Panda and the truck idling worn; the truck's
+  // loudest knock.
   engine: [
-    ...VEHICLE_MODELS.flatMap((model) => {
-      const { idle, redline } = VEHICLES[model].engine
-      return [
-        { kind: "engine", model, rpm: redline, load: 1, inside: false, variant: 0.5 },
-        { kind: "engine", model, rpm: idle, load: 0, inside: false, variant: 0.5 },
-      ] as const
-    }),
-    { kind: "engine", model: "carabinieri", rpm: 3500, load: 0.5, inside: true, variant: 0.5 },
+    ...VEHICLE_MODELS.flatMap((model) => [
+      engineAt(model),
+      engineAt(model, { rpm: VEHICLES[model].engine.idle, load: 0 }),
+      engineAt(model, { damage: 0.9 }),
+    ]),
+    engineAt("carabinieri", { rpm: 3500, load: 0.5, inside: true }),
+    engineAt("panda", { rpm: VEHICLES.panda.engine.idle, load: 0, damage: 0.5 }),
+    engineAt("truck", { rpm: VEHICLES.truck.engine.idle, load: 0, damage: 0.8 }),
+    // The loudest knock: the truck's, at the redline off the throttle, at full damage short of destroyed.
+    engineAt("truck", { load: 0, damage: 0.99 }),
   ],
   tyres: [
     // The loudest intended case, a full slide at the Giulia's top speed: peaks near 0.5.
@@ -305,6 +345,7 @@ const VOICE_RENDERS = {
   horn: VEHICLE_MODELS.map((model) => ({ kind: "horn", model }) as const),
   siren: [{ kind: "siren" }],
   beeper: [{ kind: "beeper" }],
+  fire: [{ kind: "fire" }],
   water: [
     { kind: "water", body: "fountain", flow: 0.5 },
     { kind: "water", body: "stream", flow: 0.6 },
@@ -348,6 +389,10 @@ const SHOT_RENDERS = {
       mass: isModel(form.against) ? paired(form.model, form.against) : tonnes(form.model),
     })
   }),
+  // Its debris on the road, on setts (bouncier) and on grass (muffled); each run draws a new blast.
+  explosion: (["asphalt", "stone", "grass"] as const).map(
+    (surface) => ({ kind: "explosion", surface }) as const,
+  ),
   thud: [
     { kind: "thud", speed: 5 },
     { kind: "thud", speed: 12 },
@@ -397,115 +442,6 @@ const SHOT_RENDERS = {
   ],
 } satisfies Each<OneShot>
 
-const RATE = 48000
-/** Voices settle (fade in) for `settle` s, are measured for `seconds`, then stopped: they must be silent `fade` s later, when the speaker frees their emitter. */
-const VOICE_RENDER = { settle: 0.5, seconds: 2, fade: 0.5 } as const
-/** Room for the longest shot: a bell rings 10 s. */
-const SHOT_SECONDS = 12
-/** Below this peak a render counts as silent (−80 dBFS); above `CLIP`, as clipping. */
-const SILENT = 1e-4,
-  CLIP = 0.95
-/** An engine at the redline under full load, heard outside, peaks at the nominal 0.5 within this (its `TRIM` is off otherwise). */
-const NOMINAL = [0.42, 0.6] as const
-
-/** Whether `sound` is a calibration render that peaks off nominal. */
-const offNominal = (sound: Sound, peak: number): boolean =>
-  sound.kind === "engine" &&
-  !sound.inside &&
-  sound.load === 1 &&
-  sound.rpm === VEHICLES[sound.model].engine.redline &&
-  (peak < NOMINAL[0] || peak > NOMINAL[1])
-
-/** One line of the render table. */
-interface Row {
-  readonly name: string
-  readonly params: string
-  readonly peak: number
-  /** dBFS. */
-  readonly rms: number
-  /** Spectral centroid, Hz. */
-  readonly centroid: number
-  readonly nan: boolean
-  /** How long it sounds: the voice's measured span, the shot's own end time. */
-  readonly seconds: number
-  /** Anything to look at: silent, clipping, an engine off its nominal peak, NaN, sound after its stop or end. */
-  readonly flags: string
-}
-
-/** A param's value; a nested one's values joined by "/" (body=panda/front). */
-const shown = (value: unknown): string =>
-  typeof value === "object" && value !== null
-    ? Object.values(value).map(shown).join("/")
-    : String(value)
-const paramsOf = (sound: Sound): string =>
-  Object.entries(sound)
-    .filter(([name]) => name !== "kind")
-    .map(([name, value]) => `${name}=${shown(value)}`)
-    .join(" ")
-
-/** The row for `sound` measured over [from, to] s of `audio`, which must be silent from `quiet` s on. */
-const rowOf = (sound: Sound, audio: AudioBuffer, from: number, to: number, quiet: number): Row => {
-  const span = (a: number, b: number) =>
-    Array.from({ length: audio.numberOfChannels }, (_, c) =>
-      audio.getChannelData(c).subarray(Math.floor(a * RATE), Math.floor(b * RATE)),
-    )
-  const m = measure(span(from, to), RATE),
-    after = measure(span(quiet, audio.duration), RATE)
-  const flags = [
-    m.peak < SILENT && "silent",
-    m.peak > CLIP && "clips",
-    offNominal(sound, m.peak) && "off nominal",
-    (m.nan || after.nan) && "NaN",
-    after.peak > SILENT && `${after.peak.toFixed(4)} after its end`,
-  ]
-  return {
-    name: sound.kind,
-    params: paramsOf(sound),
-    peak: Number(m.peak.toFixed(3)),
-    rms: Number(m.rms.toFixed(1)),
-    centroid: Math.round(m.centroid),
-    nan: m.nan || after.nan,
-    seconds: Number((to - from).toFixed(2)),
-    flags: flags.filter((flag) => flag !== false).join(", "),
-  }
-}
-
-const renderVoice = async (kit: Kit, sound: Continuous): Promise<Row> => {
-  const { settle, seconds, fade } = VOICE_RENDER,
-    end = settle + seconds
-  const ctx = new OfflineAudioContext({
-    numberOfChannels: 2,
-    length: Math.ceil((end + fade + 0.05) * RATE),
-    sampleRate: RATE,
-  })
-  const cents = new ConstantSourceNode(ctx, { offset: 0 })
-  cents.start()
-  const voice = (VOICES[sound.kind] as VoiceFactory<Continuous>)({
-    ctx,
-    out: ctx.destination,
-    cents,
-    kit,
-  })
-  // Frames at 60 Hz, as the director would hold it.
-  for (let t = 0; t < end; t += 1 / 60) voice.update(sound, t)
-  voice.stop(end)
-  return rowOf(sound, await ctx.startRendering(), settle, end, end + fade)
-}
-
-const renderShot = async (kit: Kit, sound: OneShot): Promise<Row> => {
-  const ctx = new OfflineAudioContext({
-    numberOfChannels: 2,
-    length: SHOT_SECONDS * RATE,
-    sampleRate: RATE,
-  })
-  const shot = SHOTS[sound.kind] as Shot<OneShot>
-  await shot.prepare?.(ctx, kit)
-  // A fresh params object: the crash keeps one render per object, and every run should draw anew.
-  const end = Math.min(SHOT_SECONDS, shot.play({ ctx, out: ctx.destination, kit }, { ...sound }, 0))
-  // The speaker frees a shot's emitter 0.1 s after its end.
-  return rowOf(sound, await ctx.startRendering(), 0, end, Math.min(SHOT_SECONDS, end + 0.1))
-}
-
 const element = <K extends keyof HTMLElementTagNameMap>(
   tag: K,
   parent: HTMLElement,
@@ -526,6 +462,14 @@ const renderAll = async (): Promise<ReadonlyArray<Row>> => {
   const rows: Array<Row> = []
   // One at a time: a dozen 12 s stereo renders at once would hold hundreds of MB.
   for (const sound of Object.values(VOICE_RENDERS).flat()) rows.push(await renderVoice(kit, sound))
+  rows.push(
+    await renderVoice(
+      kit,
+      SPUTTERING,
+      sputtering,
+      paramsOf(SPUTTERING).replace("misfire=false", "misfire=every other 0.25 s"),
+    ),
+  )
   for (const sound of Object.values(SHOT_RENDERS).flat()) rows.push(await renderShot(kit, sound))
   const table = byId("renders")
   table.replaceChildren()
