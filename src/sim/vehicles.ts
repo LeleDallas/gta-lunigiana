@@ -67,6 +67,8 @@ export interface VehicleSpec {
   readonly cg: number
   readonly wheels: ReadonlyArray<WheelSpec>
   readonly wheelRadius: number
+  /** A tyre's tread width, m (each model's stock tyre size): how much water it ploughs. */
+  readonly tyreWidth: number
   /** Tyre grip as a share of the surface's (truck and Ape tyres grip less than a car's), and the slip angle of peak cornering force, rad. */
   readonly tyres: { readonly grip: number; readonly slip: number }
   /** Turning radius of the centre of mass at full lock and walking pace, m (sets the steering lock). */
@@ -81,6 +83,11 @@ export interface VehicleSpec {
   readonly drag: number
   /** Road-speed limiter, m/s (trucks are held to 90 km/h). */
   readonly limiter?: number
+  /**
+   * Height of the engine's air intake above the ground at rest, m (estimates from each model's layout): water over it stalls the
+   * engine. The Panda and the Giulia breathe behind the grille, the Ape under its seat, the truck through a stack behind the cab.
+   */
+  readonly intake: number
   /**
    * Suspension: natural frequency of the body on its springs (Hz), damping ratio, and the front and
    * rear anti-roll bars' stiffness as a share of the springs' (a stiffer front bar makes the car
@@ -118,6 +125,7 @@ export const VEHICLES = {
       wheel(-1.3, -0.725, false, false),
     ],
     wheelRadius: 0.3,
+    tyreWidth: 0.175, // 175/65 R14
     tyres: { grip: 1, slip: 0.13 },
     turnRadius: 2.5,
     brakes: { decel: 10, front: 0.7, abs: true },
@@ -143,6 +151,7 @@ export const VEHICLES = {
       launch: 1800,
     },
     drag: 0.69,
+    intake: 0.6,
     ride: { hz: 1.5, damping: 0.35, antiRoll: [0.6, 0.2] },
   },
   ape: {
@@ -160,6 +169,7 @@ export const VEHICLES = {
       wheel(-0.7, -0.6, false, true),
     ],
     wheelRadius: 0.25,
+    tyreWidth: 0.1, // 4.00-10
     tyres: { grip: 0.85, slip: 0.15 },
     turnRadius: 2.15,
     brakes: { decel: 6.5, front: 0.5, abs: false },
@@ -179,6 +189,7 @@ export const VEHICLES = {
     },
     gearbox: { ratios: [5.8, 3.3, 2, 1.25], reverse: 5.8, final: 10.8, shift: 0.4, launch: 4500 },
     drag: 1.15,
+    intake: 0.45,
     ride: { hz: 2, damping: 0.25, antiRoll: [0, 0.8] },
   },
   truck: {
@@ -197,6 +208,7 @@ export const VEHICLES = {
       wheel(-1.85, -1.075, false, true),
     ],
     wheelRadius: 0.5,
+    tyreWidth: 0.315, // 315/80 R22.5
     tyres: { grip: 0.8, slip: 0.12 },
     turnRadius: 4.6,
     brakes: { decel: 6.5, front: 0.35, abs: true },
@@ -223,6 +235,7 @@ export const VEHICLES = {
     },
     drag: 6,
     limiter: 25,
+    intake: 2.4,
     ride: { hz: 1.8, damping: 0.3, antiRoll: [0.6, 0.6] },
   },
   carabinieri: {
@@ -241,6 +254,7 @@ export const VEHICLES = {
       wheel(-1.41, -0.825, false, true),
     ],
     wheelRadius: 0.33,
+    tyreWidth: 0.225, // 225/55 R17
     tyres: { grip: 1.05, slip: 0.12 },
     turnRadius: 2.75,
     brakes: { decel: 11, front: 0.65, abs: true },
@@ -266,6 +280,7 @@ export const VEHICLES = {
       launch: 1800,
     },
     drag: 0.68,
+    intake: 0.55,
     ride: { hz: 1.6, damping: 0.35, antiRoll: [0.8, 0.3] },
   },
 } as const satisfies Record<VehicleModel, VehicleSpec>
