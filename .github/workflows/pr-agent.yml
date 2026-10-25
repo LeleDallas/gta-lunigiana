@@ -6,17 +6,27 @@ on:
   issue_comment:
     types: [created]
 
+concurrency:
+  group: pr-agent-${{ github.event.pull_request.number || github.event.issue.number }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
+  issues: write
+  pull-requests: write
 
 jobs:
   pr-agent:
-    # Reviews every PR when it opens, and answers `/review`, `/improve`, `/ask …` comments. The repo
-    # is public, so only people with write access can spend the API key through a comment. Drafts
-    # wait for `ready_for_review`, and fork PRs, which get no secrets, wait for a `/review` comment.
-    # Other comments never start the job.
+    # Reviews every PR when it opens, and answers `/review`, `/improve`, `/ask …` comments.
+    # Drafts wait for `ready_for_review`. Bot PRs (dependabot, renovate) are skipped. Fork
+    # PRs, which get no secrets, wait for a `/review` comment from a repo collaborator.
+    # Other comments never start the job. PR-Agent reads the diff through the API and never
+    # checks out the PR's code. Model, tool, and ignore settings live in `.pr_agent.toml`
+    # (single source of truth; not duplicated here).
     if: >-
       github.event.sender.type != 'Bot' &&
+      github.actor != 'dependabot[bot]' &&
+      github.actor != 'renovate[bot]' &&
       ((github.event_name == 'pull_request' &&
       !github.event.pull_request.draft &&
       github.event.pull_request.head.repo.full_name == github.repository) ||
@@ -24,6 +34,7 @@ jobs:
       startsWith(github.event.comment.body, '/') &&
       contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)))
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: read
       issues: write
@@ -34,15 +45,3 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ANTHROPIC.KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          config.model: anthropic/claude-opus-5-5
-          config.fallback_models: '["anthropic/claude-sonnet-5"]'
-          # The model reads up to 200k tokens of a PR (32k by default left most of a big PR out), and a review or
-          # /improve that still overflows splits the diff into at most 3 calls.
-          config.max_model_tokens: "200000"
-          pr_reviewer.enable_large_pr_chunking: "true"
-          pr_reviewer.max_number_of_calls: "3"
-          pr_code_suggestions.max_number_of_calls: "3"
-          github_action_config.auto_review: "true"
-          github_action_config.auto_improve: "true"
-          # PR bodies follow docs/standards/commits-and-prs.md, so the agent must not rewrite them.
-          github_action_config.auto_describe: "false"
