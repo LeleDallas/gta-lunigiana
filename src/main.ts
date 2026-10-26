@@ -122,7 +122,7 @@ const keyboard = Keyboard.actions(window, bindings)
 const pad = document.documentElement.classList.contains("touch")
   ? makeTouchControls(document, canvas)
   : undefined
-const controls = pad === undefined ? keyboard : withTouch(keyboard, pad.touch, pad.shown)
+const controls = pad === undefined ? keyboard : withTouch(keyboard, pad.touch)
 const renderClock = { alpha: 0 }
 const { people, animals, vehicles } = makeRegistries(scene)
 const effects = makeEffects(scene)
@@ -166,8 +166,8 @@ if (!ready.ok) throw new Error(`setup: ${JSON.stringify(ready.error)}`)
 // The game clock stands still behind the title card (the traffic and the people move on), so the game starts at 08:00 when the
 // player dismisses it: `titleReady` below runs the clock again.
 const play = holdClock((request) => runtime.send(SetClock, request))
-// The player's handling, set from the settings and the dev debug menu; it sets the stored choice now, which ApplyHandling (in setup)
-// already listens for. UI events and this call run between ticks, never inside one, so `send` is safe there.
+// The player's handling, set from the settings and the dev debug menu; it sets the stored choice now, which waits for
+// ApplyHandling's first run in the first update. UI events and this call run between ticks, never inside one, so `send` is safe there.
 const handling = makeHandlingStore({
   read: () => runtime.inspect(HandlingView),
   set: (key, value) => runtime.send(SetHandling, { key, value }),

@@ -1,6 +1,5 @@
-import { Clock, HostClock } from "@typeonce/ritmo"
+import { Clock, type HostClock } from "@typeonce/ritmo"
 import { InputCapture, Keyboard } from "@typeonce/ritmo-browser"
-import type * as Lint from "@typeonce/ritmo-devtools/Lint"
 import { InputAxis, Random } from "@typeonce/ritmo-math"
 import type { RuntimeServices } from "@typeonce/ritmo/Runtime"
 
@@ -16,7 +15,6 @@ import {
   Player,
   Pose,
   PrevPose,
-  type Root,
   SetClock,
   SetHandling,
   SetWeather,
@@ -104,7 +102,7 @@ const TurnView = Game.System(
       return
     }
     const keys = resources.input.get()
-    const turn = InputAxis.axis(keys.turnRight.pressed, keys.turnLeft.pressed)
+    const turn = InputAxis.axis(keys.actions.turnRight.pressed, keys.actions.turnLeft.pressed)
     if (turn !== 0) resources.view.set({ turns: turns + turn })
   },
 )
@@ -159,15 +157,12 @@ const ApplyWeather = Game.System(
 )
 
 /**
- * Ticked once after the runtime is made. The apply systems run here too so they are listening before the host can send: a request
- * sent before the first update would otherwise be dropped by whichever schedule ticks first. The first fill of people and animals
- * runs once the player stands at the start, so the world is peopled from the first frame.
+ * Ticked once after the runtime is made. The first fill of people and animals runs once the player stands at the start, so the
+ * world is peopled from the first frame. The host's requests wait for the apply systems' first run in `update`, however many render
+ * frames come first.
  */
 export const setup = Game.Schedule(
   SpawnWorld,
-  ApplyHandling,
-  ApplyClock,
-  ApplyWeather,
   Game.Schedule.applyDeferred(),
   FillPeople,
   FillAnimals,
@@ -224,8 +219,7 @@ const WEATHER_SEED = 0x9e3779b9
  * A new game from `seed`, starting at `start` (Unix UTC seconds, a whole number: the host's today at 08:00 in Rome;
  * `DEFAULT_START` when omitted). The host passes every service: KeyboardInput plus its own (render registries, clocks).
  */
-// oxlint-disable-next-line typescript/no-explicit-any -- any service set satisfies the bound; `Services` keeps the exact one
-export const makeRuntime = <const Services extends RuntimeServices<any>>(options: {
+export const makeRuntime = <const Services extends RuntimeServices>(options: {
   readonly seed: number
   readonly start?: number
   readonly services: Services
@@ -249,30 +243,4 @@ export const makeRuntime = <const Services extends RuntimeServices<any>>(options
     },
     debug: options.debug,
   })
-}
-
-/** The runtime and schedules `ritmo-devtools lint` checks; the render and audio schedules are described, not run. */
-export const lintTarget = async (): Promise<Lint.Target<typeof Game.schema, typeof Root>> => {
-  const made = makeRuntime({
-    seed: 1,
-    services: Game.Runtime.services(
-      Game.Runtime.service(KeyboardInput, Keyboard.scripted(bindings, [])),
-    ),
-    debug: { hostClock: HostClock.test() },
-  })
-  if (!made.ok) throw new Error(`invalid runtime: ${JSON.stringify(made.error)}`)
-  // Loaded here, not at the top: the render and audio schedules are host code, outside the simulation.
-  // oxlint-disable-next-line no-restricted-imports -- the lint target describes the render schedule
-  const { render } = await import("../render/index.ts")
-  // oxlint-disable-next-line no-restricted-imports -- and the audio schedule, the only reader of Cry
-  const { audio } = await import("../audio/index.ts")
-  // The host's handling store (src/hud/handling.ts, behind the settings and the dev debug menu) sends SetHandling with runtime.send;
-  // the host sends SetClock to hold the clock behind the title card (holdClock, src/hud/title.ts), and the dev debug menu sends
-  // SetClock and SetWeather.
-  return {
-    runtime: made.value,
-    schedules: { setup, update },
-    describe: { render, audio },
-    hostEvents: [SetHandling, SetClock, SetWeather],
-  }
 }

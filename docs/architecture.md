@@ -46,21 +46,18 @@ calm, dry ground, the season's snow line, and a calm plan the first step draws t
 
 1. `SpawnWorld` (`systems/spawn.ts`): the player and the parked cars on 200 of the map's parked
    spots (`PARKED`), the two Carabinieri cars included.
-2. `ApplyHandling` (`index.ts`)
-3. `ApplyClock` (`index.ts`)
-4. `ApplyWeather` (`index.ts`)
-5. `applyDeferred`
-6. `FillPeople` (`systems/populate.ts`): the first fill, as many people out around the player's
+2. `applyDeferred`
+3. `FillPeople` (`systems/populate.ts`): the first fill, as many people out around the player's
    start as `Populate` keeps, from 4 m to 120 m ([gameplay.md](gameplay.md#the-first-fill)).
-7. `FillAnimals` (`systems/populate-animals.ts`): the animals `PopulateAnimals` keeps there. It
+4. `FillAnimals` (`systems/populate-animals.ts`): the animals `PopulateAnimals` keeps there. It
    asks for the farms first, so the farm list is built here, behind the title card, not in a step
    of play.
-8. `applyDeferred`
+5. `applyDeferred`
 
-The three apply systems run here once, before any request exists, so they are listening when the
-host first sends: a request sent before the first `update` (the host re-sending the player's
-stored handling at load, or holding the clock behind the title card) would otherwise be dropped by
-whichever schedule ticked first.
+The apply systems run in `update` only. A request the host sends before the first `update` (the
+player's stored handling at load, or the clock held behind the title card) waits for their first
+run, however many render frames tick first: Ritmo keeps a sent event for a reader that has not run
+yet (since 0.14).
 
 In Node, setup takes about 12 ms once the land cover is built, as `main.ts` builds it first (the
 farm list about 9 ms of it); a test that has not built the cover pays for it here too, about
@@ -270,8 +267,8 @@ see [audio.md](audio.md#where-state-lives)).
    keyboard's snapshot with the touch controls' added. The stick holds the direction keys it leans
    more than 22.5° toward, so it has the keys' eight directions, and each button holds its key;
    every key has a button. A key is held while any of them holds it, so the sim cannot tell a tap
-   from a key. Only the controls shown in the player's mode count: one the mode hides under a
-   thumb that stays down (the stick on getting in, ◀ on getting out) lets go of its keys.
+   from a key. A control the player's mode hides is `null` in `Touch`'s layout, so one hidden
+   under a thumb that stays down (the stick on getting in, ◀ on getting out) lets go of its keys.
 2. `CaptureInput` (Ritmo's `InputCapture.system`) copies its snapshot into the `Input` resource
    at the start of each step.
 3. Systems read `Input`: `held` for movement, steering and handbrake, `pressed` (once per press)
@@ -1071,8 +1068,9 @@ sky store `SkyView`:
   keyboard: ◀ and ▶ on the left steer, Gas and Brake take the bottom right, and Hand brake, the
   action button and Horn a row above them. The action button shows only when it would act; ↺ and
   ↻ only out of a car (driving, the view follows it). The zones are read from the drawn buttons on
-  every new touch, so they follow hud.css and the mode, and a control the mode hides lets go of
-  its key. `withTouch` turns them into keys ([Input](#input)).
+  every snapshot and every new touch, so they follow hud.css and the mode: a control the mode
+  hides is `null`, and `Touch` lets go of it under a thumb that stays down, so its key releases
+  once. `withTouch` turns them into keys ([Input](#input)).
 - Landscape only: a phone held upright lays the page out sideways (`width: 100dvh`, the height
   Safari's toolbars leave) and turns it a quarter clockwise, to be held sideways (hud.css). The
   renderer and the full map size to the page's box, not the window, and each touch is turned back
@@ -1120,7 +1118,7 @@ step, and git hooks run the first three before a commit or push.
     reverse).
 
   A rule broken on purpose takes an `oxlint-disable-next-line <rule> -- <reason>` comment.
-- `ritmo-devtools lint src/sim/index.ts`: loads `lintTarget` and lints the `setup`, `update` and
+- `ritmo-devtools lint src/lint.ts`: loads `lintTarget` and lints the `setup`, `update` and
   (described, not run) `render` and `audio` schedules. Any warning fails: without the audio schedule
   described, `Cry`, which no sim system reads, would be `event-never-read` (`CrashDamage`,
   `Perceive` and `Startle` read `Impact` in `update`, `Perceive` and `Animals` read `Honk`;
