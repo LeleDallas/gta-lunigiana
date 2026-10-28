@@ -1,17 +1,41 @@
 /**
- * Geometry plumbing shared by the world and actor builders. Everything is non-indexed with exactly
- * `position`, `normal` and `color` (linear), so any two pieces merge into one draw call and get
- * faceted normals.
+ * Geometry plumbing and the lit materials shared by the world and actor builders. Everything is
+ * non-indexed with exactly `position`, `normal` and `color` (linear), so any two pieces merge into
+ * one draw call and get faceted normals; only the tree shapes add `canopy` (`trees.ts`: the crown
+ * that sways). Each material is a surface-weather variant with its own program (`render/sky/surface`).
  *
  * @module render/geometry
  */
 import { BufferGeometry, Color, Float32BufferAttribute, MeshLambertMaterial } from "three"
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js"
 
-/** The material every opaque static or actor mesh shares: vertex colours, flat Lambert. */
-export const solidMaterial = new MeshLambertMaterial({ vertexColors: true, flatShading: true })
-/** Ground decals: pulled towards the camera in depth so they never fight what they lie on. */
-export const decalMaterial = new MeshLambertMaterial({ vertexColors: true, flatShading: true, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -2 })
+import { weatherMaterial } from "./sky/surface.ts"
+
+/** Vertex colours, flat Lambert: the look of every lit mesh. */
+const flat = (): MeshLambertMaterial =>
+  new MeshLambertMaterial({ vertexColors: true, flatShading: true })
+/** Flat Lambert pulled towards the camera in depth, so a decal never fights what it lies on. */
+const decal = (): MeshLambertMaterial =>
+  new MeshLambertMaterial({
+    vertexColors: true,
+    flatShading: true,
+    polygonOffset: true,
+    polygonOffsetFactor: -1,
+    polygonOffsetUnits: -2,
+  })
+
+/** Buildings, bridges, platforms and the lamps' iron: snow, wet ground and cloud shadows (`render/sky/surface`); the see-through cut leaves their stubs. */
+export const solidMaterial = weatherMaterial(flat(), "solid")
+/** The terrain: the solid's weather, but the see-through cut takes only the ground that hides the player. */
+export const terrainMaterial = weatherMaterial(flat(), "terrain")
+/** Ground decals (roads, rail): half-cleared snow, wet ground and puddles that mirror the sky, cloud shadows. */
+export const decalMaterial = weatherMaterial(decal(), "road")
+/** Rivers and streams, a decal of their own: never snowed on or darkened by rain, ringed by raindrops, cloud shadows. */
+export const waterMaterial = weatherMaterial(decal(), "water")
+/** The trees (instanced): snow on the canopies' tops, wet, cloud shadows, canopies swaying by whole texels in the wind. */
+export const treeMaterial = weatherMaterial(flat(), "tree")
+/** People, animals and vehicles: cloud shadows only (no snow on a passer-by's head or a car's roof). */
+export const actorMaterial = weatherMaterial(flat(), "actor")
 
 const linearCache = new Map<number, readonly [number, number, number]>()
 /** Linear RGB of an sRGB hex colour (vertex colours are linear). */
@@ -32,9 +56,27 @@ export class Triangles {
   readonly color: Array<number> = []
 
   /** One triangle (three-world coordinates), counter-clockwise seen from its front. */
-  tri(ax: number, ay: number, az: number, bx: number, by: number, bz: number, cx: number, cy: number, cz: number, hex: number): void {
-    const ux = bx - ax, uy = by - ay, uz = bz - az, vx = cx - ax, vy = cy - ay, vz = cz - az
-    let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx
+  tri(
+    ax: number,
+    ay: number,
+    az: number,
+    bx: number,
+    by: number,
+    bz: number,
+    cx: number,
+    cy: number,
+    cz: number,
+    hex: number,
+  ): void {
+    const ux = bx - ax,
+      uy = by - ay,
+      uz = bz - az,
+      vx = cx - ax,
+      vy = cy - ay,
+      vz = cz - az
+    let nx = uy * vz - uz * vy,
+      ny = uz * vx - ux * vz,
+      nz = ux * vy - uy * vx
     const l = Math.sqrt(nx * nx + ny * ny + nz * nz) || 1
     nx /= l
     ny /= l
@@ -53,8 +95,16 @@ export class Triangles {
 
   /** A quad wound so its front faces `outward` (any vector on the wanted side). */
   face(a: Point3, b: Point3, c: Point3, d: Point3, outward: Point3, hex: number): void {
-    const ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2], vx = c[0] - a[0], vy = c[1] - a[1], vz = c[2] - a[2]
-    const dot = (uy * vz - uz * vy) * outward[0] + (uz * vx - ux * vz) * outward[1] + (ux * vy - uy * vx) * outward[2]
+    const ux = b[0] - a[0],
+      uy = b[1] - a[1],
+      uz = b[2] - a[2],
+      vx = c[0] - a[0],
+      vy = c[1] - a[1],
+      vz = c[2] - a[2]
+    const dot =
+      (uy * vz - uz * vy) * outward[0] +
+      (uz * vx - ux * vz) * outward[1] +
+      (ux * vy - uy * vx) * outward[2]
     if (dot >= 0) this.quad(a, b, c, d, hex)
     else this.quad(d, c, b, a, hex)
   }
@@ -77,12 +127,54 @@ export class Triangles {
 /** A three-world point. */
 type Point3 = readonly [number, number, number]
 
+/** A river vertex's own: its rise per unit stage (m: the depth at q^STAGE = 1), and its flow, map x east and y north (a unit vector) and its mean speed per unit (m/s). */
+export type Flowing = readonly [stage: number, x: number, y: number, speed: number]
+
+/**
+ * Water's triangles: each vertex lies on the river's bed and carries how far its surface rises
+ * (`stage`) and the way and speed it flows (`flow`), which the water shader turns into the level
+ * and current the rivers run at (`render/sky/surface`).
+ */
+export class WaterTriangles extends Triangles {
+  readonly stage: Array<number> = []
+  readonly flow: Array<number> = []
+
+  /** A quad a-b-c-d of water (counter-clockwise seen from above), each corner with its own `Flowing`. */
+  waterQuad(
+    a: Point3,
+    b: Point3,
+    c: Point3,
+    d: Point3,
+    hex: number,
+    flowing: readonly [Flowing, Flowing, Flowing, Flowing],
+  ): void {
+    this.quad(a, b, c, d, hex)
+    for (const k of [0, 1, 2, 0, 2, 3] as const) {
+      const [stage, x, y, speed] = flowing[k]
+      this.stage.push(stage)
+      this.flow.push(x, y, speed)
+    }
+  }
+
+  /** The triangles as a non-indexed BufferGeometry, with `stage` and `flow`. */
+  override geometry(): BufferGeometry {
+    const g = super.geometry()
+    g.setAttribute("stage", new Float32BufferAttribute(this.stage, 1))
+    g.setAttribute("flow", new Float32BufferAttribute(this.flow, 3))
+    return g
+  }
+}
+
 /** The per-chunk buckets static builders write into: merged into one mesh per material per chunk. */
 export interface Sink {
   /** Opaque world geometry (terrain-like depth). */
   readonly solid: Triangles
-  /** Ground decals (roads, water, rail) drawn with a polygon offset over what they cover. */
+  /** Ground decals (roads, rail) drawn with a polygon offset over what they cover. */
   readonly decal: Triangles
+  /** Rivers and streams: decals with their own material (`waterMaterial`), so no snow lies on them; their level and current are the shader's. */
+  readonly water: WaterTriangles
+  /** Things that shine at night (window panes, lantern glass): dark glass by day, their vertex colour lit at night (`glowMaterial`). */
+  readonly glow: Triangles
   /** Ready-made solid pieces (extrusions) merged with `solid`. */
   readonly pieces: Array<BufferGeometry>
 }
@@ -102,7 +194,8 @@ export interface Piece {
 /** A three primitive (Box, Cylinder, Extrude...) as non-indexed position/normal/color in one colour. */
 export const paint = (source: BufferGeometry, hex: number): BufferGeometry => {
   const g = source.index === null ? source : source.toNonIndexed()
-  for (const name of Object.keys(g.attributes)) if (name !== "position" && name !== "normal") g.deleteAttribute(name)
+  for (const name of Object.keys(g.attributes))
+    if (name !== "position" && name !== "normal") g.deleteAttribute(name)
   if (g.getAttribute("normal") === undefined) g.computeVertexNormals()
   const [r, gg, b] = linear(hex)
   const n = g.getAttribute("position").count

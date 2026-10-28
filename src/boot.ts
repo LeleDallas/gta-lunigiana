@@ -20,18 +20,29 @@ const mb = (bytes: number) => (bytes / 1e6).toFixed(1)
  */
 const download = async (url: URL): Promise<Uint8Array> => {
   const response = await fetch(url)
-  if (!response.ok || response.body === null) throw new Error(`${url.pathname}: HTTP ${response.status}`)
+  if (!response.ok || response.body === null)
+    throw new Error(`${url.pathname}: HTTP ${response.status}`)
   const total = Number(response.headers.get("content-length") ?? 0)
   let received = 0
   const count = new TransformStream<Uint8Array<ArrayBuffer>, BufferSource>({
     transform(chunk, out) {
       received += chunk.byteLength
-      const detail = total > 0 ? `${mb(Math.min(received, total))} / ${mb(total)} MB` : `${mb(received)} MB`
-      loading(document, "Downloading map", total > 0 ? DOWNLOAD * Math.min(1, received / total) : 0, detail)
+      const detail =
+        total > 0 ? `${mb(Math.min(received, total))} / ${mb(total)} MB` : `${mb(received)} MB`
+      loading(
+        document,
+        "Downloading map",
+        total > 0 ? DOWNLOAD * Math.min(1, received / total) : 0,
+        detail,
+      )
       out.enqueue(chunk)
-    }
+    },
   })
-  return new Uint8Array(await new Response(response.body.pipeThrough(count).pipeThrough(new DecompressionStream("gzip"))).arrayBuffer())
+  return new Uint8Array(
+    await new Response(
+      response.body.pipeThrough(count).pipeThrough(new DecompressionStream("gzip")),
+    ).arrayBuffer(),
+  )
 }
 
 try {
@@ -39,7 +50,10 @@ try {
   document.title = `Grand Theft Auto: ${map.name}`
   document.getElementById("title-place")!.textContent = map.name
   document.getElementById("title-subtitle")!.textContent = map.subtitle
-  if (map.id === "cesena") for (const credit of document.querySelectorAll(".credits, .fine")) credit.textContent = "Map data © OpenStreetMap contributors (ODbL) · Terrain: Regione Emilia-Romagna, DTM 5x5 - ultima edizione (CC BY 4.0)"
+  if (map.id === "cesena")
+    for (const credit of document.querySelectorAll(".credits, .fine"))
+      credit.textContent =
+        "Map data © OpenStreetMap contributors (ODbL) · Terrain: Regione Emilia-Romagna, DTM 5x5 - ultima edizione (CC BY 4.0) · Dati climatici: ISPRA SCIA (CC BY 4.0) · Informazioni elaborate utilizzando, tra l'altro, dati e prodotti del Servizio Meteorologico dell'Aeronautica Militare pubblicati sul sito www.meteoam.it"
   for (const link of document.querySelectorAll<HTMLAnchorElement>("#map-choice a")) {
     const url = new URL(link.href)
     const seed = new URLSearchParams(location.search).get("seed")
