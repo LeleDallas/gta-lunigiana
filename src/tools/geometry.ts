@@ -1,7 +1,9 @@
-import { segDist2 } from "../sim/collide.ts"
 // Plane geometry for the map build: local projection, clipping to the play area,
 // ring winding, point/segment distances and a bucketed segment index.
-import { REGION } from "./region.ts"
+
+import { segDist2 } from "../sim/collide.ts"
+import { latLonToGaussBoaga } from "./crs.ts"
+import { REGION, type Rect } from "./region.ts"
 
 export type P = readonly [number, number]
 /** A polyline vertex; `id` is the OSM node id, absent for points made by clipping. */
@@ -78,9 +80,16 @@ export const clipLine = (pts: ReadonlyArray<V>): Array<Array<V>> => {
   return out
 }
 
-/** Sutherland-Hodgman clip of an open ring to the play area. */
-export const clipRing = (ring: ReadonlyArray<P>): Array<P> => {
-  const { minX: X0, minY: Y0, maxX: X1, maxY: Y1 } = BOUNDS
+/** Sutherland-Hodgman clip of an open ring to a box [minX, minY, maxX, maxY], by default the play area. */
+export const clipRing = (
+  ring: ReadonlyArray<P>,
+  [X0, Y0, X1, Y1]: readonly [number, number, number, number] = [
+    BOUNDS.minX,
+    BOUNDS.minY,
+    BOUNDS.maxX,
+    BOUNDS.maxY,
+  ],
+): Array<P> => {
   let poly: ReadonlyArray<P> = ring
   const edges: ReadonlyArray<readonly [(p: P) => boolean, (a: P, b: P) => P]> = [
     [(p) => p[0] >= X0, (a, b) => [X0, a[1] + ((b[1] - a[1]) * (X0 - a[0])) / (b[0] - a[0])]],
@@ -102,6 +111,31 @@ export const clipRing = (ring: ReadonlyArray<P>): Array<P> => {
     if (poly.length === 0) break
   }
   return [...poly]
+}
+
+/**
+ * The EPSG:3003 box [e0, n0, e1, n1] round every corner of local rectangles, widened by `pad`
+ * metres. The local frame turns against Gauss-Boaga's grid, so the box holds more than the
+ * rectangles.
+ */
+export const gaussBoagaBox = (
+  rects: ReadonlyArray<Rect>,
+  pad = 0,
+): [number, number, number, number] => {
+  const corners = rects.flatMap(([x0, y0, x1, y1]) =>
+    [
+      [x0, y0],
+      [x1, y0],
+      [x0, y1],
+      [x1, y1],
+    ].map(([x, y]) => latLonToGaussBoaga(...fromLocal(x!, y!))),
+  )
+  return [
+    Math.min(...corners.map((c) => c[0])) - pad,
+    Math.min(...corners.map((c) => c[1])) - pad,
+    Math.max(...corners.map((c) => c[0])) + pad,
+    Math.max(...corners.map((c) => c[1])) + pad,
+  ]
 }
 
 export const signedArea = (r: ReadonlyArray<P>): number => {
