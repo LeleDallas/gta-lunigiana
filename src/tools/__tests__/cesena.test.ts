@@ -70,15 +70,38 @@ test("the Savio uses its mapped riverbanks rather than the mountain-stream defau
 
 test("Cesena boots the existing simulation, populates it and replays walking deterministically", async () => {
   provideMap(gunzipSync(readFileSync(new URL("../../sim/map/cesena.bin", import.meta.url))))
-  const { start } = await import("../../sim/testing.ts")
+  const { Keyboard } = await import("@typeonce/ritmo-browser")
+  const { bindings, Game, KeyboardInput, makeRuntime, PlayerView, setup, update, Vehicle } =
+    await import("../../sim/index.ts")
+  const vehicles = Game.Inspector(
+    "Test/CesenaVehicles",
+    { queries: { vehicles: Game.Query({ selection: { vehicle: Game.Query.read(Vehicle) } }) } },
+    ({ queries }) => queries.vehicles.each().length,
+  )
   const run = () => {
-    const simulation = start([
-      { frame: 0, press: ["up"] },
-      { frame: 120, release: ["up"] },
-    ])
-    simulation.run(180)
-    const player = simulation.view()
-    return { player, world: simulation.world() }
+    const made = makeRuntime({
+      seed: 1,
+      services: Game.Runtime.services(
+        Game.Runtime.service(
+          KeyboardInput,
+          Keyboard.scripted(bindings, [
+            { frame: 0, press: ["up"] },
+            { frame: 120, release: ["up"] },
+          ]),
+        ),
+      ),
+    })
+    assert.ok(made.ok)
+    const runtime = made.value
+    assert.ok(runtime.tick(setup).ok)
+    for (let frame = 0; frame < 180; frame++) assert.ok(runtime.tick(update).ok)
+    const saved = runtime.snapshot()
+    assert.ok(saved.ok)
+    return {
+      player: runtime.inspect(PlayerView),
+      vehicles: runtime.inspect(vehicles),
+      world: saved.value,
+    }
   }
   const first = run()
   assert.ok(first.player !== undefined)
@@ -88,6 +111,6 @@ test("Cesena boots the existing simulation, populates it and replays walking det
       first.player.pose.y - map.spawns.player.y,
     ) > 1,
   )
-  assert.ok(first.world.vehicles.length > 0)
+  assert.ok(first.vehicles > 0)
   assert.deepEqual(run(), first)
 })
